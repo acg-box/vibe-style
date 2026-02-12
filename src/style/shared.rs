@@ -51,12 +51,6 @@ pub(crate) const STYLE_RULE_IDS: [&str; 29] = [
 pub(crate) static USE_RE: Lazy<Regex> = Lazy::new(|| {
 	Regex::new(r"^\s*(pub\s+)?use\s+(.+);\s*$").expect("Expected operation to succeed.")
 });
-pub(crate) static INLINE_BOUNDS_RE: Lazy<Regex> = Lazy::new(|| {
-	Regex::new(
-		r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:fn|impl|struct|enum|trait)\b[^\n{;]*<[^>{}]*\b(?:[A-Za-z_][A-Za-z0-9_]*|'[A-Za-z_][A-Za-z0-9_]*)\s*:[^>{}]*>",
-	)
-	.expect("Expected operation to succeed.")
-});
 pub(crate) static SNAKE_CASE_RE: Lazy<Regex> =
 	Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").expect("Expected operation to succeed."));
 pub(crate) static WORKSPACE_IMPORT_ROOTS: Lazy<HashSet<String>> = Lazy::new(|| {

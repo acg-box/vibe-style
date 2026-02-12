@@ -7,6 +7,8 @@ use super::{
 	shared::{self, Edit, FileContext, Violation},
 };
 
+type StatementSpan = (usize, usize, String);
+
 #[derive(Clone, Copy, Debug, Default)]
 struct CodeMaskState {
 	in_block_comment_depth: usize,
@@ -17,6 +19,43 @@ struct CodeMaskState {
 	raw_hashes: Option<usize>,
 }
 
+struct StatementPair {
+	blank_count: usize,
+	can_autofix_blank_only: bool,
+	curr_is_item: bool,
+	next_is_item: bool,
+	curr_is_pipe_continuation: bool,
+	next_is_pipe_continuation: bool,
+	curr_is_const_group: bool,
+	next_is_const_group: bool,
+}
+impl StatementPair {
+	fn from_statements(
+		ctx: &FileContext,
+		curr_start: usize,
+		curr_end: usize,
+		next_start: usize,
+		next_end: usize,
+	) -> Self {
+		let between = &ctx.lines[curr_end + 1..next_start];
+
+		Self {
+			blank_count: between.iter().filter(|line| line.trim().is_empty()).count(),
+			can_autofix_blank_only: between_is_blank_only(&ctx.lines, curr_end + 1, next_start),
+			curr_is_item: is_item_like_statement(&ctx.lines[curr_start..=curr_end]),
+			next_is_item: is_item_like_statement(&ctx.lines[next_start..=next_end]),
+			curr_is_pipe_continuation: is_pipe_pattern_continuation_statement(
+				&ctx.lines[curr_start..=curr_end],
+			),
+			next_is_pipe_continuation: is_pipe_pattern_continuation_statement(
+				&ctx.lines[next_start..=next_end],
+			),
+			curr_is_const_group: is_const_group_statement(&ctx.lines[curr_start..=curr_end]),
+			next_is_const_group: is_const_group_statement(&ctx.lines[next_start..=next_end]),
+		}
+	}
+}
+
 pub(crate) fn check_vertical_spacing(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -25,262 +64,342 @@ pub(crate) fn check_vertical_spacing(
 ) {
 	let mut visited_blocks: HashSet<(usize, usize)> = HashSet::new();
 
-	fn check_block(
-		ctx: &FileContext,
-		violations: &mut Vec<Violation>,
-		edits: &mut Vec<Edit>,
-		emit_edits: bool,
-		visited_blocks: &mut HashSet<(usize, usize)>,
-		start: usize,
-		end: usize,
-	) {
-		if end <= start {
-			return;
-		}
-		if !visited_blocks.insert((start, end)) {
-			return;
-		}
+	for (start, end) in quality::function_ranges(ctx) {
+		check_vertical_spacing_block(
+			ctx,
+			violations,
+			edits,
+			emit_edits,
+			&mut visited_blocks,
+			start,
+			end,
+		);
+	}
+}
 
-		let statements = extract_top_level_statements(&ctx.lines, start, end);
+fn check_vertical_spacing_block(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	visited_blocks: &mut HashSet<(usize, usize)>,
+	start: usize,
+	end: usize,
+) {
+	if end <= start || !visited_blocks.insert((start, end)) {
+		return;
+	}
 
-		if statements.is_empty() {
-			return;
-		}
+	let statements = extract_top_level_statements(&ctx.lines, start, end);
 
-		let (last_start, last_end, _) = statements[statements.len() - 1].clone();
-		let final_is_return_or_tail =
-			is_return_or_tail_statement(&ctx.lines[last_start..=last_end]);
-		let mut return_like_indices: BTreeSet<usize> = BTreeSet::new();
+	if statements.is_empty() {
+		return;
+	}
 
-		for (idx, (stmt_start, stmt_end, _)) in statements.iter().enumerate() {
-			if is_explicit_return_statement(&ctx.lines[*stmt_start..=*stmt_end]) {
-				return_like_indices.insert(idx);
-			}
-		}
+	let return_like_indices = collect_return_like_indices(ctx, &statements);
 
-		if final_is_return_or_tail {
-			return_like_indices.insert(statements.len() - 1);
-		}
+	check_statement_pair_spacing(
+		ctx,
+		violations,
+		edits,
+		emit_edits,
+		&statements,
+		&return_like_indices,
+	);
+	check_return_like_spacing(
+		ctx,
+		violations,
+		edits,
+		emit_edits,
+		&statements,
+		&return_like_indices,
+	);
+	recurse_spacing_child_blocks(
+		ctx,
+		violations,
+		edits,
+		emit_edits,
+		visited_blocks,
+		start,
+		end,
+		&statements,
+	);
+}
 
-		for idx in 0..statements.len().saturating_sub(1) {
-			let (curr_start, curr_end, curr_type) = &statements[idx];
-			let (next_start, next_end, next_type) = &statements[idx + 1];
+fn collect_return_like_indices(ctx: &FileContext, statements: &[StatementSpan]) -> BTreeSet<usize> {
+	let mut out = BTreeSet::new();
 
-			if return_like_indices.contains(&(idx + 1)) {
-				continue;
-			}
-
-			let between = &ctx.lines[curr_end + 1..*next_start];
-			let blank_count = between.iter().filter(|line| line.trim().is_empty()).count();
-			let can_autofix_blank_only =
-				between_is_blank_only(&ctx.lines, curr_end + 1, *next_start);
-			let curr_is_item = is_item_like_statement(&ctx.lines[*curr_start..=*curr_end]);
-			let next_is_item = is_item_like_statement(&ctx.lines[*next_start..=*next_end]);
-			let curr_is_pipe_continuation =
-				is_pipe_pattern_continuation_statement(&ctx.lines[*curr_start..=*curr_end]);
-			let next_is_pipe_continuation =
-				is_pipe_pattern_continuation_statement(&ctx.lines[*next_start..=*next_end]);
-			let curr_is_const_group = is_const_group_statement(&ctx.lines[*curr_start..=*curr_end]);
-			let next_is_const_group = is_const_group_statement(&ctx.lines[*next_start..=*next_end]);
-
-			if curr_is_pipe_continuation || next_is_pipe_continuation {
-				if blank_count != 0 {
-					shared::push_violation(
-						violations,
-						ctx,
-						next_start + 1,
-						"RUST-STYLE-SPACE-003",
-						"Do not insert blank lines inside a match pattern alternation.",
-						can_autofix_blank_only,
-					);
-
-					if emit_edits && can_autofix_blank_only {
-						if let Some(edit) =
-							replace_between_lines_edit(ctx, curr_end + 1, *next_start, "")
-						{
-							edits.push(edit);
-						}
-					}
-				}
-
-				continue;
-			}
-			if curr_is_const_group && next_is_const_group {
-				let can_autofix =
-					between_same_type_can_autofix(&ctx.lines, curr_end + 1, *next_start);
-
-				if blank_count != 0 {
-					shared::push_violation(
-						violations,
-						ctx,
-						next_start + 1,
-						"RUST-STYLE-SPACE-003",
-						"Do not insert blank lines within constant declaration groups.",
-						can_autofix,
-					);
-
-					if emit_edits && can_autofix {
-						let replacement = same_type_replacement_without_blank_lines(
-							&ctx.lines,
-							curr_end + 1,
-							*next_start,
-						);
-
-						if let Some(edit) =
-							replace_between_lines_edit(ctx, curr_end + 1, *next_start, &replacement)
-						{
-							edits.push(edit);
-						}
-					}
-				}
-
-				continue;
-			}
-			if curr_is_item && next_is_item {
-				let can_autofix =
-					between_same_type_can_autofix(&ctx.lines, curr_end + 1, *next_start);
-
-				if blank_count != 1 {
-					shared::push_violation(
-						violations,
-						ctx,
-						next_start + 1,
-						"RUST-STYLE-SPACE-003",
-						"Insert exactly one blank line between local item declarations.",
-						can_autofix,
-					);
-
-					if emit_edits && can_autofix {
-						let replacement = item_between_replacement_with_single_blank(
-							&ctx.lines,
-							curr_end + 1,
-							*next_start,
-						);
-
-						if let Some(edit) =
-							replace_between_lines_edit(ctx, curr_end + 1, *next_start, &replacement)
-						{
-							edits.push(edit);
-						}
-					}
-				}
-
-				continue;
-			}
-			if curr_type == next_type {
-				let can_autofix =
-					between_same_type_can_autofix(&ctx.lines, curr_end + 1, *next_start);
-
-				if blank_count != 0 {
-					shared::push_violation(
-						violations,
-						ctx,
-						next_start + 1,
-						"RUST-STYLE-SPACE-003",
-						"Do not insert blank lines within the same statement type.",
-						can_autofix,
-					);
-
-					if emit_edits && can_autofix {
-						let replacement = same_type_replacement_without_blank_lines(
-							&ctx.lines,
-							curr_end + 1,
-							*next_start,
-						);
-
-						if let Some(edit) =
-							replace_between_lines_edit(ctx, curr_end + 1, *next_start, &replacement)
-						{
-							edits.push(edit);
-						}
-					}
-				}
-			} else if blank_count != 1 {
-				shared::push_violation(
-					violations,
-					ctx,
-					next_start + 1,
-					"RUST-STYLE-SPACE-003",
-					"Insert exactly one blank line between different statement types.",
-					can_autofix_blank_only,
-				);
-
-				if emit_edits && can_autofix_blank_only {
-					if let Some(edit) =
-						replace_between_lines_edit(ctx, curr_end + 1, *next_start, "\n")
-					{
-						edits.push(edit);
-					}
-				}
-			}
-		}
-		for idx in return_like_indices {
-			if idx == 0 {
-				continue;
-			}
-
-			let (_prev_start, prev_end, _) = &statements[idx - 1];
-			let (ret_start, ret_end, _) = &statements[idx];
-			let between = &ctx.lines[prev_end + 1..*ret_start];
-			let blank_count = between.iter().filter(|line| line.trim().is_empty()).count();
-			let can_autofix = between_is_blank_only(&ctx.lines, prev_end + 1, *ret_start);
-
-			if blank_count != 1 {
-				let stmt_lines = &ctx.lines[*ret_start..=*ret_end];
-				let message = if is_explicit_return_statement(stmt_lines) {
-					"Insert exactly one blank line before each return statement."
-				} else {
-					"Insert exactly one blank line before the final tail expression."
-				};
-
-				shared::push_violation(
-					violations,
-					ctx,
-					ret_start + 1,
-					"RUST-STYLE-SPACE-004",
-					message,
-					can_autofix,
-				);
-
-				if emit_edits && can_autofix {
-					if let Some(edit) = replace_between_lines_edit_with_rule(
-						ctx,
-						prev_end + 1,
-						*ret_start,
-						"\n",
-						"RUST-STYLE-SPACE-004",
-					) {
-						edits.push(edit);
-					}
-				}
-			}
-		}
-		for (stmt_start, stmt_end, _) in statements {
-			for (child_start, child_end) in
-				extract_top_level_brace_blocks_in_span(&ctx.lines, stmt_start, stmt_end)
-			{
-				if child_start == start && child_end == end {
-					continue;
-				}
-				if is_data_like_brace_block(&ctx.lines, child_start, child_end) {
-					continue;
-				}
-
-				check_block(
-					ctx,
-					violations,
-					edits,
-					emit_edits,
-					visited_blocks,
-					child_start,
-					child_end,
-				);
-			}
+	for (idx, (stmt_start, stmt_end, _)) in statements.iter().enumerate() {
+		if is_explicit_return_statement(&ctx.lines[*stmt_start..=*stmt_end]) {
+			out.insert(idx);
 		}
 	}
 
-	for (start, end) in quality::function_ranges(ctx) {
-		check_block(ctx, violations, edits, emit_edits, &mut visited_blocks, start, end);
+	let (last_start, last_end, _) = statements[statements.len() - 1].clone();
+	let final_is_return_or_tail = is_return_or_tail_statement(&ctx.lines[last_start..=last_end]);
+
+	if final_is_return_or_tail {
+		out.insert(statements.len() - 1);
+	}
+
+	out
+}
+
+fn check_statement_pair_spacing(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	statements: &[StatementSpan],
+	return_like_indices: &BTreeSet<usize>,
+) {
+	for idx in 0..statements.len().saturating_sub(1) {
+		if return_like_indices.contains(&(idx + 1)) {
+			continue;
+		}
+
+		let (curr_start, curr_end, curr_type) = &statements[idx];
+		let (next_start, next_end, next_type) = &statements[idx + 1];
+		let pair =
+			StatementPair::from_statements(ctx, *curr_start, *curr_end, *next_start, *next_end);
+
+		apply_statement_pair_spacing_rule(
+			ctx,
+			violations,
+			edits,
+			emit_edits,
+			curr_end + 1,
+			*next_start,
+			curr_type,
+			next_type,
+			&pair,
+		);
+	}
+}
+
+fn apply_statement_pair_spacing_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	between_start: usize,
+	next_start: usize,
+	curr_type: &str,
+	next_type: &str,
+	pair: &StatementPair,
+) {
+	if pair.curr_is_pipe_continuation || pair.next_is_pipe_continuation {
+		push_spacing_violation_and_edit(
+			ctx,
+			violations,
+			edits,
+			emit_edits,
+			next_start + 1,
+			"RUST-STYLE-SPACE-003",
+			"Do not insert blank lines inside a match pattern alternation.",
+			pair.blank_count != 0,
+			pair.can_autofix_blank_only,
+			between_start,
+			next_start,
+			"",
+		);
+
+		return;
+	}
+	if pair.curr_is_const_group && pair.next_is_const_group {
+		let can_autofix = between_same_type_can_autofix(&ctx.lines, between_start, next_start);
+		let replacement =
+			same_type_replacement_without_blank_lines(&ctx.lines, between_start, next_start);
+
+		push_spacing_violation_and_edit(
+			ctx,
+			violations,
+			edits,
+			emit_edits,
+			next_start + 1,
+			"RUST-STYLE-SPACE-003",
+			"Do not insert blank lines within constant declaration groups.",
+			pair.blank_count != 0,
+			can_autofix,
+			between_start,
+			next_start,
+			&replacement,
+		);
+
+		return;
+	}
+	if pair.curr_is_item && pair.next_is_item {
+		let can_autofix = between_same_type_can_autofix(&ctx.lines, between_start, next_start);
+		let replacement =
+			item_between_replacement_with_single_blank(&ctx.lines, between_start, next_start);
+
+		push_spacing_violation_and_edit(
+			ctx,
+			violations,
+			edits,
+			emit_edits,
+			next_start + 1,
+			"RUST-STYLE-SPACE-003",
+			"Insert exactly one blank line between local item declarations.",
+			pair.blank_count != 1,
+			can_autofix,
+			between_start,
+			next_start,
+			&replacement,
+		);
+
+		return;
+	}
+	if curr_type == next_type {
+		let can_autofix = between_same_type_can_autofix(&ctx.lines, between_start, next_start);
+		let replacement =
+			same_type_replacement_without_blank_lines(&ctx.lines, between_start, next_start);
+
+		push_spacing_violation_and_edit(
+			ctx,
+			violations,
+			edits,
+			emit_edits,
+			next_start + 1,
+			"RUST-STYLE-SPACE-003",
+			"Do not insert blank lines within the same statement type.",
+			pair.blank_count != 0,
+			can_autofix,
+			between_start,
+			next_start,
+			&replacement,
+		);
+
+		return;
+	}
+
+	push_spacing_violation_and_edit(
+		ctx,
+		violations,
+		edits,
+		emit_edits,
+		next_start + 1,
+		"RUST-STYLE-SPACE-003",
+		"Insert exactly one blank line between different statement types.",
+		pair.blank_count != 1,
+		pair.can_autofix_blank_only,
+		between_start,
+		next_start,
+		"\n",
+	);
+}
+
+fn push_spacing_violation_and_edit(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	line: usize,
+	rule: &'static str,
+	message: &'static str,
+	should_report: bool,
+	can_autofix: bool,
+	start_line: usize,
+	end_line: usize,
+	replacement: &str,
+) {
+	if !should_report {
+		return;
+	}
+
+	shared::push_violation(violations, ctx, line, rule, message, can_autofix);
+
+	if emit_edits && can_autofix {
+		if let Some(edit) = replace_between_lines_edit(ctx, start_line, end_line, replacement) {
+			edits.push(edit);
+		}
+	}
+}
+
+fn check_return_like_spacing(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	statements: &[StatementSpan],
+	return_like_indices: &BTreeSet<usize>,
+) {
+	for idx in return_like_indices {
+		if *idx == 0 {
+			continue;
+		}
+
+		let (_prev_start, prev_end, _) = &statements[idx - 1];
+		let (ret_start, ret_end, _) = &statements[*idx];
+		let between = &ctx.lines[prev_end + 1..*ret_start];
+		let blank_count = between.iter().filter(|line| line.trim().is_empty()).count();
+		let can_autofix = between_is_blank_only(&ctx.lines, prev_end + 1, *ret_start);
+
+		if blank_count == 1 {
+			continue;
+		}
+
+		let stmt_lines = &ctx.lines[*ret_start..=*ret_end];
+		let message = if is_explicit_return_statement(stmt_lines) {
+			"Insert exactly one blank line before each return statement."
+		} else {
+			"Insert exactly one blank line before the final tail expression."
+		};
+
+		shared::push_violation(
+			violations,
+			ctx,
+			ret_start + 1,
+			"RUST-STYLE-SPACE-004",
+			message,
+			can_autofix,
+		);
+
+		if emit_edits && can_autofix {
+			if let Some(edit) = replace_between_lines_edit_with_rule(
+				ctx,
+				prev_end + 1,
+				*ret_start,
+				"\n",
+				"RUST-STYLE-SPACE-004",
+			) {
+				edits.push(edit);
+			}
+		}
+	}
+}
+
+fn recurse_spacing_child_blocks(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	visited_blocks: &mut HashSet<(usize, usize)>,
+	start: usize,
+	end: usize,
+	statements: &[StatementSpan],
+) {
+	for (stmt_start, stmt_end, _) in statements {
+		for (child_start, child_end) in
+			extract_top_level_brace_blocks_in_span(&ctx.lines, *stmt_start, *stmt_end)
+		{
+			if child_start == start && child_end == end {
+				continue;
+			}
+			if is_data_like_brace_block(&ctx.lines, child_start, child_end) {
+				continue;
+			}
+
+			check_vertical_spacing_block(
+				ctx,
+				violations,
+				edits,
+				emit_edits,
+				visited_blocks,
+				child_start,
+				child_end,
+			);
+		}
 	}
 }
 
@@ -367,155 +486,243 @@ fn mask_code_line(line: &str, state: &mut CodeMaskState) -> String {
 	let mut idx = 0_usize;
 
 	while idx < chars.len() {
-		let ch = chars[idx];
-		let next = chars.get(idx + 1).copied();
-
-		if state.in_block_comment_depth > 0 {
-			if ch == '/' && next == Some('*') {
-				state.in_block_comment_depth += 1;
-
-				out.push(' ');
-				out.push(' ');
-
-				idx += 2;
-
-				continue;
-			}
-			if ch == '*' && next == Some('/') {
-				state.in_block_comment_depth = state.in_block_comment_depth.saturating_sub(1);
-
-				out.push(' ');
-				out.push(' ');
-
-				idx += 2;
-
-				continue;
-			}
-
-			out.push(' ');
-
-			idx += 1;
-
+		if consume_masked_block_comment(&chars, &mut idx, &mut out, state) {
 			continue;
 		}
-
-		if let Some(hash_count) = state.raw_hashes {
-			if ch == '"' {
-				let mut closed = true;
-
-				for offset in 0..hash_count {
-					let pos = idx + 1 + offset;
-
-					if pos >= chars.len() || chars[pos] != '#' {
-						closed = false;
-
-						break;
-					}
-				}
-
-				if closed {
-					out.push(' ');
-
-					for _ in 0..hash_count {
-						out.push(' ');
-					}
-
-					idx += 1 + hash_count;
-					state.raw_hashes = None;
-
-					continue;
-				}
-			}
-
-			out.push(' ');
-
-			idx += 1;
-
+		if consume_masked_raw_string(&chars, &mut idx, &mut out, state) {
 			continue;
 		}
-
-		if state.in_str {
-			out.push(' ');
-
-			if state.str_escape {
-				state.str_escape = false;
-			} else if ch == '\\' {
-				state.str_escape = true;
-			} else if ch == '"' {
-				state.in_str = false;
-			}
-
-			idx += 1;
-
+		if consume_masked_normal_string(&chars, &mut idx, &mut out, state) {
 			continue;
 		}
-		if state.in_char {
-			out.push(' ');
-
-			if state.char_escape {
-				state.char_escape = false;
-			} else if ch == '\\' {
-				state.char_escape = true;
-			} else if ch == '\'' {
-				state.in_char = false;
-			}
-
-			idx += 1;
-
+		if consume_masked_char_literal(&chars, &mut idx, &mut out, state) {
 			continue;
 		}
-		if ch == '/' && next == Some('/') {
+		if starts_line_comment(&chars, idx) {
 			break;
 		}
-		if ch == '/' && next == Some('*') {
-			state.in_block_comment_depth += 1;
-
-			out.push(' ');
-			out.push(' ');
-
-			idx += 2;
-
+		if consume_block_comment_start(&chars, &mut idx, &mut out, state) {
+			continue;
+		}
+		if consume_raw_string_start(&chars, &mut idx, &mut out, state) {
+			continue;
+		}
+		if consume_string_or_char_start(&chars, &mut idx, &mut out, state) {
 			continue;
 		}
 
-		if let Some((prefix_len, hash_count)) = raw_string_start(&chars, idx) {
-			for _ in 0..prefix_len {
-				out.push(' ');
-			}
-
-			idx += prefix_len;
-			state.raw_hashes = Some(hash_count);
-
-			continue;
-		}
-
-		if ch == '"' {
-			state.in_str = true;
-			state.str_escape = false;
-
-			out.push(' ');
-
-			idx += 1;
-
-			continue;
-		}
-		if ch == '\'' && !is_lifetime_start(&chars, idx) {
-			state.in_char = true;
-			state.char_escape = false;
-
-			out.push(' ');
-
-			idx += 1;
-
-			continue;
-		}
-
-		out.push(ch);
+		out.push(chars[idx]);
 
 		idx += 1;
 	}
 
 	out
+}
+
+fn consume_masked_block_comment(
+	chars: &[char],
+	idx: &mut usize,
+	out: &mut String,
+	state: &mut CodeMaskState,
+) -> bool {
+	if state.in_block_comment_depth == 0 {
+		return false;
+	}
+
+	let ch = chars[*idx];
+	let next = chars.get(*idx + 1).copied();
+
+	if ch == '/' && next == Some('*') {
+		state.in_block_comment_depth += 1;
+
+		out.push_str("  ");
+
+		*idx += 2;
+
+		return true;
+	}
+	if ch == '*' && next == Some('/') {
+		state.in_block_comment_depth = state.in_block_comment_depth.saturating_sub(1);
+
+		out.push_str("  ");
+
+		*idx += 2;
+
+		return true;
+	}
+
+	out.push(' ');
+
+	*idx += 1;
+
+	true
+}
+
+fn consume_masked_raw_string(
+	chars: &[char],
+	idx: &mut usize,
+	out: &mut String,
+	state: &mut CodeMaskState,
+) -> bool {
+	let Some(hash_count) = state.raw_hashes else {
+		return false;
+	};
+
+	if chars[*idx] == '"' && raw_hash_suffix_matches(chars, *idx, hash_count) {
+		out.push(' ');
+
+		for _ in 0..hash_count {
+			out.push(' ');
+		}
+
+		*idx += 1 + hash_count;
+		state.raw_hashes = None;
+
+		return true;
+	}
+
+	out.push(' ');
+
+	*idx += 1;
+
+	true
+}
+
+fn raw_hash_suffix_matches(chars: &[char], idx: usize, hash_count: usize) -> bool {
+	(0..hash_count).all(|offset| {
+		let pos = idx + 1 + offset;
+
+		pos < chars.len() && chars[pos] == '#'
+	})
+}
+
+fn consume_masked_normal_string(
+	chars: &[char],
+	idx: &mut usize,
+	out: &mut String,
+	state: &mut CodeMaskState,
+) -> bool {
+	if !state.in_str {
+		return false;
+	}
+
+	let ch = chars[*idx];
+
+	out.push(' ');
+
+	if state.str_escape {
+		state.str_escape = false;
+	} else if ch == '\\' {
+		state.str_escape = true;
+	} else if ch == '"' {
+		state.in_str = false;
+	}
+
+	*idx += 1;
+
+	true
+}
+
+fn consume_masked_char_literal(
+	chars: &[char],
+	idx: &mut usize,
+	out: &mut String,
+	state: &mut CodeMaskState,
+) -> bool {
+	if !state.in_char {
+		return false;
+	}
+
+	let ch = chars[*idx];
+
+	out.push(' ');
+
+	if state.char_escape {
+		state.char_escape = false;
+	} else if ch == '\\' {
+		state.char_escape = true;
+	} else if ch == '\'' {
+		state.in_char = false;
+	}
+
+	*idx += 1;
+
+	true
+}
+
+fn starts_line_comment(chars: &[char], idx: usize) -> bool {
+	chars[idx] == '/' && chars.get(idx + 1).copied() == Some('/')
+}
+
+fn consume_block_comment_start(
+	chars: &[char],
+	idx: &mut usize,
+	out: &mut String,
+	state: &mut CodeMaskState,
+) -> bool {
+	if chars[*idx] != '/' || chars.get(*idx + 1).copied() != Some('*') {
+		return false;
+	}
+
+	state.in_block_comment_depth += 1;
+
+	out.push_str("  ");
+
+	*idx += 2;
+
+	true
+}
+
+fn consume_raw_string_start(
+	chars: &[char],
+	idx: &mut usize,
+	out: &mut String,
+	state: &mut CodeMaskState,
+) -> bool {
+	let Some((prefix_len, hash_count)) = raw_string_start(chars, *idx) else {
+		return false;
+	};
+
+	for _ in 0..prefix_len {
+		out.push(' ');
+	}
+
+	*idx += prefix_len;
+	state.raw_hashes = Some(hash_count);
+
+	true
+}
+
+fn consume_string_or_char_start(
+	chars: &[char],
+	idx: &mut usize,
+	out: &mut String,
+	state: &mut CodeMaskState,
+) -> bool {
+	let ch = chars[*idx];
+
+	if ch == '"' {
+		state.in_str = true;
+		state.str_escape = false;
+
+		out.push(' ');
+
+		*idx += 1;
+
+		return true;
+	}
+	if ch == '\'' && !is_lifetime_start(chars, *idx) {
+		state.in_char = true;
+		state.char_escape = false;
+
+		out.push(' ');
+
+		*idx += 1;
+
+		return true;
+	}
+
+	false
 }
 
 fn strip_turbofish(text: &str) -> String {

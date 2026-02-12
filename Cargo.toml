@@ -2,8 +2,8 @@
 authors     = ["Xavier Lau <x@acg.box>"]
 build       = "build.rs"
 categories  = []
-description = "AST-based style checker and formatter for deterministic, rule-driven code layout."
 default-run = "vstyle"
+description = "AST-based style checker and formatter for deterministic, rule-driven code layout."
 edition     = "2024"
 homepage    = "https://hack.ink/vibe-style"
 keywords    = []
@@ -16,6 +16,14 @@ version     = "0.1.0"
 
 [package.metadata.docs.rs]
 all-features = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }-v{ version }.{ archive-format }"
+bin-dir = "{ name }-{ target }-v{ version }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [[bin]]
 name = "vstyle"

@@ -1,8 +1,6 @@
 use std::path::Path;
 
-use ast::Attr;
-use ast::MacroCall;
-use ast::MethodCallExpr;
+use ast::{ArgList, Attr, Expr, MacroCall, MethodCallExpr};
 use ra_ap_syntax::{
 	AstNode,
 	ast::{self, HasArgList, HasAttrs, HasModuleItem, HasName},
@@ -15,6 +13,19 @@ const NUMERIC_SUFFIXES: [&str; 14] = [
 	"usize", "isize", "u128", "i128", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8", "f64",
 	"f32",
 ];
+
+#[derive(Debug, Default)]
+struct ArgSplitState {
+	paren: i32,
+	brace: i32,
+	bracket: i32,
+	in_str: bool,
+	escape: bool,
+	in_char: bool,
+	char_escape: bool,
+	in_line_comment: bool,
+	block_comment_depth: i32,
+}
 
 pub(crate) fn check_std_macro_calls(
 	ctx: &FileContext,
@@ -164,156 +175,12 @@ pub(crate) fn check_expect_unwrap(
 		let Some(name) = method_call.name_ref().map(|name| name.text().to_string()) else {
 			continue;
 		};
-		let line = shared::line_from_offset(
-			&ctx.line_starts,
-			usize::from(method_call.syntax().text_range().start()),
-		);
+		let line = method_call_line(ctx, &method_call);
 
-		if name == "unwrap" {
-			shared::push_violation(
-				violations,
-				ctx,
-				line,
-				"RUST-STYLE-RUNTIME-001",
-				"Do not use unwrap() in non-test code.",
-				true,
-			);
-
-			if emit_edits {
-				let name_range =
-					method_call.name_ref().map(|name_ref| name_ref.syntax().text_range());
-				let arg_range =
-					method_call.arg_list().map(|arg_list| arg_list.syntax().text_range());
-
-				if let (Some(name_range), Some(arg_range)) = (name_range, arg_range) {
-					edits.push(Edit {
-						start: usize::from(name_range.start()),
-						end: usize::from(arg_range.end()),
-						replacement: r#"expect("Expected operation to succeed.")"#.to_owned(),
-						rule: "RUST-STYLE-RUNTIME-001",
-					});
-				}
-			}
-
-			continue;
-		}
-		if name != "expect" {
-			continue;
-		}
-
-		let Some(arg_list) = method_call.arg_list() else {
-			shared::push_violation(
-				violations,
-				ctx,
-				line,
-				"RUST-STYLE-RUNTIME-002",
-				"expect() must use a clear, user-actionable string literal message.",
-				true,
-			);
-
-			if emit_edits {
-				let name_range =
-					method_call.name_ref().map(|name_ref| name_ref.syntax().text_range());
-
-				if let Some(name_range) = name_range {
-					edits.push(Edit {
-						start: usize::from(name_range.start()),
-						end: usize::from(method_call.syntax().text_range().end()),
-						replacement: r#"expect("Expected operation to succeed.")"#.to_owned(),
-						rule: "RUST-STYLE-RUNTIME-002",
-					});
-				}
-			}
-
-			continue;
-		};
-		let mut args = arg_list.args();
-		let Some(first_arg) = args.next() else {
-			shared::push_violation(
-				violations,
-				ctx,
-				line,
-				"RUST-STYLE-RUNTIME-002",
-				"expect() message must not be empty.",
-				true,
-			);
-
-			if emit_edits {
-				edits.push(Edit {
-					start: usize::from(arg_list.syntax().text_range().start()),
-					end: usize::from(arg_list.syntax().text_range().end()),
-					replacement: r#"("Expected operation to succeed.")"#.to_owned(),
-					rule: "RUST-STYLE-RUNTIME-002",
-				});
-			}
-
-			continue;
-		};
-		let literal = first_arg
-			.syntax()
-			.descendants()
-			.filter_map(ast::Literal::cast)
-			.next()
-			.and_then(|lit| parse_string_literal(&lit.syntax().text().to_string()));
-		let Some(message) = literal else {
-			shared::push_violation(
-				violations,
-				ctx,
-				line,
-				"RUST-STYLE-RUNTIME-002",
-				"expect() must use a clear, user-actionable string literal message.",
-				false,
-			);
-
-			continue;
-		};
-		let message = message.trim().to_owned();
-
-		if message.is_empty() {
-			shared::push_violation(
-				violations,
-				ctx,
-				line,
-				"RUST-STYLE-RUNTIME-002",
-				"expect() message must not be empty.",
-				true,
-			);
-
-			if emit_edits {
-				edits.push(Edit {
-					start: usize::from(first_arg.syntax().text_range().start()),
-					end: usize::from(first_arg.syntax().text_range().end()),
-					replacement: r#""Expected operation to succeed.""#.to_owned(),
-					rule: "RUST-STYLE-RUNTIME-002",
-				});
-			}
-
-			continue;
-		}
-
-		let first = message.chars().next().unwrap_or('a');
-		let last = message.chars().last().unwrap_or('.');
-
-		if !first.is_uppercase() || !matches!(last, '.' | '!' | '?') {
-			shared::push_violation(
-				violations,
-				ctx,
-				line,
-				"RUST-STYLE-RUNTIME-002",
-				"expect() message should start with a capital letter and end with punctuation.",
-				true,
-			);
-
-			if emit_edits {
-				let normalized = normalize_expect_message(&message);
-
-				edits.push(Edit {
-					start: usize::from(first_arg.syntax().text_range().start()),
-					end: usize::from(first_arg.syntax().text_range().end()),
-					replacement: format!("{normalized:?}"),
-					rule: "RUST-STYLE-RUNTIME-002",
-				});
-			}
+		match name.as_str() {
+			"unwrap" => handle_unwrap_call(ctx, violations, edits, emit_edits, &method_call, line),
+			"expect" => handle_expect_call(ctx, violations, edits, emit_edits, &method_call, line),
+			_ => {},
 		}
 	}
 }
@@ -500,6 +367,219 @@ pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation
 	}
 }
 
+fn method_call_line(ctx: &FileContext, method_call: &MethodCallExpr) -> usize {
+	shared::line_from_offset(
+		&ctx.line_starts,
+		usize::from(method_call.syntax().text_range().start()),
+	)
+}
+
+fn handle_unwrap_call(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	method_call: &MethodCallExpr,
+	line: usize,
+) {
+	shared::push_violation(
+		violations,
+		ctx,
+		line,
+		"RUST-STYLE-RUNTIME-001",
+		"Do not use unwrap() in non-test code.",
+		true,
+	);
+
+	if !emit_edits {
+		return;
+	}
+
+	let name_range = method_call.name_ref().map(|name_ref| name_ref.syntax().text_range());
+	let arg_range = method_call.arg_list().map(|arg_list| arg_list.syntax().text_range());
+
+	if let (Some(name_range), Some(arg_range)) = (name_range, arg_range) {
+		edits.push(Edit {
+			start: usize::from(name_range.start()),
+			end: usize::from(arg_range.end()),
+			replacement: r#"expect("Expected operation to succeed.")"#.to_owned(),
+			rule: "RUST-STYLE-RUNTIME-001",
+		});
+	}
+}
+
+fn handle_expect_call(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	method_call: &MethodCallExpr,
+	line: usize,
+) {
+	let Some(arg_list) = method_call.arg_list() else {
+		report_expect_missing_arg_list(ctx, violations, edits, emit_edits, method_call, line);
+
+		return;
+	};
+	let mut args = arg_list.args();
+	let Some(first_arg) = args.next() else {
+		report_expect_empty_arg_list(ctx, violations, edits, emit_edits, &arg_list, line);
+
+		return;
+	};
+	let literal_message = first_arg
+		.syntax()
+		.descendants()
+		.filter_map(ast::Literal::cast)
+		.next()
+		.and_then(|lit| parse_string_literal(&lit.syntax().text().to_string()));
+	let Some(message) = literal_message else {
+		shared::push_violation(
+			violations,
+			ctx,
+			line,
+			"RUST-STYLE-RUNTIME-002",
+			"expect() must use a clear, user-actionable string literal message.",
+			false,
+		);
+
+		return;
+	};
+	let message = message.trim().to_owned();
+
+	if message.is_empty() {
+		report_expect_empty_message(ctx, violations, edits, emit_edits, &first_arg, line);
+
+		return;
+	}
+
+	let first = message.chars().next().unwrap_or('a');
+	let last = message.chars().last().unwrap_or('.');
+
+	if !first.is_uppercase() || !matches!(last, '.' | '!' | '?') {
+		report_expect_non_sentence_message(
+			ctx, violations, edits, emit_edits, &first_arg, &message, line,
+		);
+	}
+}
+
+fn report_expect_missing_arg_list(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	method_call: &MethodCallExpr,
+	line: usize,
+) {
+	shared::push_violation(
+		violations,
+		ctx,
+		line,
+		"RUST-STYLE-RUNTIME-002",
+		"expect() must use a clear, user-actionable string literal message.",
+		true,
+	);
+
+	if !emit_edits {
+		return;
+	}
+
+	let name_range = method_call.name_ref().map(|name_ref| name_ref.syntax().text_range());
+
+	if let Some(name_range) = name_range {
+		edits.push(Edit {
+			start: usize::from(name_range.start()),
+			end: usize::from(method_call.syntax().text_range().end()),
+			replacement: r#"expect("Expected operation to succeed.")"#.to_owned(),
+			rule: "RUST-STYLE-RUNTIME-002",
+		});
+	}
+}
+
+fn report_expect_empty_arg_list(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	arg_list: &ArgList,
+	line: usize,
+) {
+	shared::push_violation(
+		violations,
+		ctx,
+		line,
+		"RUST-STYLE-RUNTIME-002",
+		"expect() message must not be empty.",
+		true,
+	);
+
+	if emit_edits {
+		edits.push(Edit {
+			start: usize::from(arg_list.syntax().text_range().start()),
+			end: usize::from(arg_list.syntax().text_range().end()),
+			replacement: r#"("Expected operation to succeed.")"#.to_owned(),
+			rule: "RUST-STYLE-RUNTIME-002",
+		});
+	}
+}
+
+fn report_expect_empty_message(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	first_arg: &Expr,
+	line: usize,
+) {
+	shared::push_violation(
+		violations,
+		ctx,
+		line,
+		"RUST-STYLE-RUNTIME-002",
+		"expect() message must not be empty.",
+		true,
+	);
+
+	if emit_edits {
+		edits.push(Edit {
+			start: usize::from(first_arg.syntax().text_range().start()),
+			end: usize::from(first_arg.syntax().text_range().end()),
+			replacement: r#""Expected operation to succeed.""#.to_owned(),
+			rule: "RUST-STYLE-RUNTIME-002",
+		});
+	}
+}
+
+fn report_expect_non_sentence_message(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	first_arg: &Expr,
+	message: &str,
+	line: usize,
+) {
+	shared::push_violation(
+		violations,
+		ctx,
+		line,
+		"RUST-STYLE-RUNTIME-002",
+		"expect() message should start with a capital letter and end with punctuation.",
+		true,
+	);
+
+	if emit_edits {
+		let normalized = normalize_expect_message(message);
+
+		edits.push(Edit {
+			start: usize::from(first_arg.syntax().text_range().start()),
+			end: usize::from(first_arg.syntax().text_range().end()),
+			replacement: format!("{normalized:?}"),
+			rule: "RUST-STYLE-RUNTIME-002",
+		});
+	}
+}
+
 fn parse_std_macro_prefix(path_text: &str) -> Option<(usize, usize, String)> {
 	fn skip_ws(text: &[u8], mut idx: usize) -> usize {
 		while idx < text.len() && text[idx].is_ascii_whitespace() {
@@ -577,15 +657,7 @@ fn parse_std_macro_prefix(path_text: &str) -> Option<(usize, usize, String)> {
 fn split_top_level_args(args: &str) -> Vec<String> {
 	let mut parts = Vec::new();
 	let mut start = 0_usize;
-	let mut paren = 0_i32;
-	let mut brace = 0_i32;
-	let mut bracket = 0_i32;
-	let mut in_str = false;
-	let mut escape = false;
-	let mut in_char = false;
-	let mut char_escape = false;
-	let mut in_line_comment = false;
-	let mut block_comment_depth = 0_i32;
+	let mut state = ArgSplitState::default();
 	let chars = args.char_indices().collect::<Vec<_>>();
 	let mut idx = 0_usize;
 
@@ -593,94 +665,25 @@ fn split_top_level_args(args: &str) -> Vec<String> {
 		let (offset, ch) = chars[idx];
 		let next = if idx + 1 < chars.len() { Some(chars[idx + 1].1) } else { None };
 
-		if in_line_comment {
-			if ch == '\n' {
-				in_line_comment = false;
-			}
-
-			idx += 1;
+		if let Some(step) = consume_split_context(&mut state, ch, next) {
+			idx += step;
 
 			continue;
 		}
-		if block_comment_depth > 0 {
-			if ch == '/' && next == Some('*') {
-				block_comment_depth += 1;
-				idx += 2;
-
-				continue;
-			}
-			if ch == '*' && next == Some('/') {
-				block_comment_depth -= 1;
-				idx += 2;
-
-				continue;
-			}
-
-			idx += 1;
-
-			continue;
-		}
-		if in_str {
-			if escape {
-				escape = false;
-			} else if ch == '\\' {
-				escape = true;
-			} else if ch == '"' {
-				in_str = false;
-			}
-
-			idx += 1;
-
-			continue;
-		}
-		if in_char {
-			if char_escape {
-				char_escape = false;
-			} else if ch == '\\' {
-				char_escape = true;
-			} else if ch == '\'' {
-				in_char = false;
-			}
-
-			idx += 1;
-
-			continue;
-		}
-		if ch == '/' && next == Some('/') {
-			in_line_comment = true;
-			idx += 2;
-
-			continue;
-		}
-		if ch == '/' && next == Some('*') {
-			block_comment_depth += 1;
-			idx += 2;
-
-			continue;
-		}
-		if ch == '"' {
-			in_str = true;
-			escape = false;
-			idx += 1;
-
-			continue;
-		}
-		if ch == '\'' {
-			in_char = true;
-			char_escape = false;
-			idx += 1;
+		if let Some(step) = enter_split_context(&mut state, ch, next) {
+			idx += step;
 
 			continue;
 		}
 
 		match ch {
-			'(' => paren += 1,
-			')' => paren = (paren - 1).max(0),
-			'{' => brace += 1,
-			'}' => brace = (brace - 1).max(0),
-			'[' => bracket += 1,
-			']' => bracket = (bracket - 1).max(0),
-			',' if paren == 0 && brace == 0 && bracket == 0 => {
+			'(' => state.paren += 1,
+			')' => state.paren = (state.paren - 1).max(0),
+			'{' => state.brace += 1,
+			'}' => state.brace = (state.brace - 1).max(0),
+			'[' => state.bracket += 1,
+			']' => state.bracket = (state.bracket - 1).max(0),
+			',' if state.paren == 0 && state.brace == 0 && state.bracket == 0 => {
 				let segment = args[start..offset].trim();
 
 				if !segment.is_empty() {
@@ -702,6 +705,81 @@ fn split_top_level_args(args: &str) -> Vec<String> {
 	}
 
 	parts
+}
+
+fn consume_split_context(state: &mut ArgSplitState, ch: char, next: Option<char>) -> Option<usize> {
+	if state.in_line_comment {
+		if ch == '\n' {
+			state.in_line_comment = false;
+		}
+
+		return Some(1);
+	}
+	if state.block_comment_depth > 0 {
+		if ch == '/' && next == Some('*') {
+			state.block_comment_depth += 1;
+
+			return Some(2);
+		}
+		if ch == '*' && next == Some('/') {
+			state.block_comment_depth -= 1;
+
+			return Some(2);
+		}
+
+		return Some(1);
+	}
+	if state.in_str {
+		if state.escape {
+			state.escape = false;
+		} else if ch == '\\' {
+			state.escape = true;
+		} else if ch == '"' {
+			state.in_str = false;
+		}
+
+		return Some(1);
+	}
+	if state.in_char {
+		if state.char_escape {
+			state.char_escape = false;
+		} else if ch == '\\' {
+			state.char_escape = true;
+		} else if ch == '\'' {
+			state.in_char = false;
+		}
+
+		return Some(1);
+	}
+
+	None
+}
+
+fn enter_split_context(state: &mut ArgSplitState, ch: char, next: Option<char>) -> Option<usize> {
+	if ch == '/' && next == Some('/') {
+		state.in_line_comment = true;
+
+		return Some(2);
+	}
+	if ch == '/' && next == Some('*') {
+		state.block_comment_depth += 1;
+
+		return Some(2);
+	}
+	if ch == '"' {
+		state.in_str = true;
+		state.escape = false;
+
+		return Some(1);
+	}
+	if ch == '\'' {
+		state.in_char = true;
+		state.char_escape = false;
+
+		return Some(1);
+	}
+
+	None
 }
 
 fn parse_string_literal(text: &str) -> Option<String> {

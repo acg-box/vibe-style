@@ -69,181 +69,216 @@ fn literal_ranges(text: &str) -> Vec<(usize, usize)> {
 	let mut idx = 0_usize;
 
 	while idx < bytes.len() {
-		if bytes[idx] == b'/' && idx + 1 < bytes.len() && bytes[idx + 1] == b'/' {
-			idx += 2;
-
-			while idx < bytes.len() && bytes[idx] != b'\n' {
-				idx += 1;
-			}
+		if let Some(next) = skip_line_comment(bytes, idx) {
+			idx = next;
 
 			continue;
 		}
-		if bytes[idx] == b'/' && idx + 1 < bytes.len() && bytes[idx + 1] == b'*' {
-			idx += 2;
-
-			let mut depth = 1_i32;
-
-			while idx + 1 < bytes.len() && depth > 0 {
-				if bytes[idx] == b'/' && bytes[idx + 1] == b'*' {
-					depth += 1;
-					idx += 2;
-
-					continue;
-				}
-				if bytes[idx] == b'*' && bytes[idx + 1] == b'/' {
-					depth -= 1;
-					idx += 2;
-
-					continue;
-				}
-
-				idx += 1;
-			}
+		if let Some(next) = skip_block_comment(bytes, idx) {
+			idx = next;
 
 			continue;
 		}
+		if let Some((start, end)) = consume_string_like_literal(bytes, idx) {
+			out.push((start, end));
 
-		let start = idx;
-		let mut prefix_len = 0_usize;
+			idx = end;
 
-		if bytes[idx] == b'b' && idx + 1 < bytes.len() && matches!(bytes[idx + 1], b'"' | b'r') {
-			prefix_len = 1;
+			continue;
 		}
+		if let Some((start, end)) = consume_char_literal(bytes, idx) {
+			out.push((start, end));
 
-		let raw_start = idx + prefix_len;
+			idx = end;
 
-		if raw_start < bytes.len() && bytes[raw_start] == b'r' {
-			let mut cursor = raw_start + 1;
-
-			while cursor < bytes.len() && bytes[cursor] == b'#' {
-				cursor += 1;
-			}
-
-			if cursor < bytes.len() && bytes[cursor] == b'"' {
-				let hash_count = cursor.saturating_sub(raw_start + 1);
-
-				cursor += 1;
-
-				while cursor < bytes.len() {
-					if bytes[cursor] != b'"' {
-						cursor += 1;
-
-						continue;
-					}
-
-					let mut ok = true;
-
-					for offset in 0..hash_count {
-						let pos = cursor + 1 + offset;
-
-						if pos >= bytes.len() || bytes[pos] != b'#' {
-							ok = false;
-
-							break;
-						}
-					}
-
-					if ok {
-						let end = cursor + 1 + hash_count;
-
-						out.push((start, end));
-
-						idx = end;
-
-						break;
-					}
-
-					cursor += 1;
-				}
-
-				if idx != start {
-					continue;
-				}
-			}
-		}
-		if raw_start < bytes.len() && bytes[raw_start] == b'"' {
-			let mut cursor = raw_start + 1;
-			let mut escaped = false;
-
-			while cursor < bytes.len() {
-				let ch = bytes[cursor];
-
-				if escaped {
-					escaped = false;
-					cursor += 1;
-
-					continue;
-				}
-				if ch == b'\\' {
-					escaped = true;
-					cursor += 1;
-
-					continue;
-				}
-				if ch == b'"' {
-					let end = cursor + 1;
-
-					out.push((start, end));
-
-					idx = end;
-
-					break;
-				}
-
-				cursor += 1;
-			}
-
-			if idx != start {
-				continue;
-			}
-		}
-		if bytes[idx] == b'\'' {
-			if is_lifetime_prefix(bytes, idx) {
-				idx += 1;
-
-				continue;
-			}
-
-			let mut cursor = idx + 1;
-			let mut escaped = false;
-
-			while cursor < bytes.len() {
-				let ch = bytes[cursor];
-
-				if escaped {
-					escaped = false;
-					cursor += 1;
-
-					continue;
-				}
-				if ch == b'\\' {
-					escaped = true;
-					cursor += 1;
-
-					continue;
-				}
-				if ch == b'\'' {
-					let end = cursor + 1;
-
-					out.push((idx, end));
-
-					idx = end;
-
-					break;
-				}
-
-				cursor += 1;
-			}
-
-			if idx != start {
-				continue;
-			}
+			continue;
 		}
 
 		idx += 1;
 	}
 
 	out
+}
+
+fn skip_line_comment(bytes: &[u8], idx: usize) -> Option<usize> {
+	if !(bytes.get(idx) == Some(&b'/') && bytes.get(idx + 1) == Some(&b'/')) {
+		return None;
+	}
+
+	let mut cursor = idx + 2;
+
+	while cursor < bytes.len() && bytes[cursor] != b'\n' {
+		cursor += 1;
+	}
+
+	Some(cursor)
+}
+
+fn skip_block_comment(bytes: &[u8], idx: usize) -> Option<usize> {
+	if !(bytes.get(idx) == Some(&b'/') && bytes.get(idx + 1) == Some(&b'*')) {
+		return None;
+	}
+
+	let mut cursor = idx + 2;
+	let mut depth = 1_i32;
+
+	while cursor + 1 < bytes.len() && depth > 0 {
+		if bytes[cursor] == b'/' && bytes[cursor + 1] == b'*' {
+			depth += 1;
+			cursor += 2;
+
+			continue;
+		}
+		if bytes[cursor] == b'*' && bytes[cursor + 1] == b'/' {
+			depth -= 1;
+			cursor += 2;
+
+			continue;
+		}
+
+		cursor += 1;
+	}
+
+	Some(cursor)
+}
+
+fn consume_string_like_literal(bytes: &[u8], start: usize) -> Option<(usize, usize)> {
+	let prefix_len = byte_string_prefix_len(bytes, start);
+	let raw_start = start + prefix_len;
+
+	if let Some(end) = consume_raw_string_literal(bytes, start, raw_start) {
+		return Some((start, end));
+	}
+	if let Some(end) = consume_quoted_string_literal(bytes, start, raw_start) {
+		return Some((start, end));
+	}
+
+	None
+}
+
+fn byte_string_prefix_len(bytes: &[u8], start: usize) -> usize {
+	if bytes.get(start) == Some(&b'b') && matches!(bytes.get(start + 1), Some(b'"' | b'r')) {
+		1
+	} else {
+		0
+	}
+}
+
+fn consume_raw_string_literal(bytes: &[u8], start: usize, raw_start: usize) -> Option<usize> {
+	if bytes.get(raw_start) != Some(&b'r') {
+		return None;
+	}
+
+	let mut cursor = raw_start + 1;
+
+	while cursor < bytes.len() && bytes[cursor] == b'#' {
+		cursor += 1;
+	}
+
+	if bytes.get(cursor) != Some(&b'"') {
+		return None;
+	}
+
+	let hash_count = cursor.saturating_sub(raw_start + 1);
+
+	cursor += 1;
+
+	while cursor < bytes.len() {
+		if bytes[cursor] != b'"' {
+			cursor += 1;
+
+			continue;
+		}
+		if raw_hash_suffix_matches(bytes, cursor + 1, hash_count) {
+			return Some(cursor + 1 + hash_count);
+		}
+
+		cursor += 1;
+	}
+
+	let _ = start;
+
+	None
+}
+
+fn raw_hash_suffix_matches(bytes: &[u8], start: usize, hash_count: usize) -> bool {
+	for offset in 0..hash_count {
+		let pos = start + offset;
+
+		if bytes.get(pos) != Some(&b'#') {
+			return false;
+		}
+	}
+
+	true
+}
+
+fn consume_quoted_string_literal(bytes: &[u8], start: usize, raw_start: usize) -> Option<usize> {
+	if bytes.get(raw_start) != Some(&b'"') {
+		return None;
+	}
+
+	let mut cursor = raw_start + 1;
+	let mut escaped = false;
+
+	while cursor < bytes.len() {
+		let ch = bytes[cursor];
+
+		if escaped {
+			escaped = false;
+			cursor += 1;
+
+			continue;
+		}
+		if ch == b'\\' {
+			escaped = true;
+			cursor += 1;
+
+			continue;
+		}
+		if ch == b'"' {
+			return Some(cursor + 1);
+		}
+
+		cursor += 1;
+	}
+
+	let _ = start;
+
+	None
+}
+
+fn consume_char_literal(bytes: &[u8], idx: usize) -> Option<(usize, usize)> {
+	if bytes.get(idx) != Some(&b'\'') || is_lifetime_prefix(bytes, idx) {
+		return None;
+	}
+
+	let mut cursor = idx + 1;
+	let mut escaped = false;
+
+	while cursor < bytes.len() {
+		let ch = bytes[cursor];
+
+		if escaped {
+			escaped = false;
+			cursor += 1;
+
+			continue;
+		}
+		if ch == b'\\' {
+			escaped = true;
+			cursor += 1;
+
+			continue;
+		}
+		if ch == b'\'' {
+			return Some((idx, cursor + 1));
+		}
+
+		cursor += 1;
+	}
+
+	None
 }
 
 fn intersects_literal_range(edit: &Edit, literal_ranges: &[(usize, usize)]) -> bool {
