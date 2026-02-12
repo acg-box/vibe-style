@@ -72,7 +72,42 @@ TODO
 
 ### Interaction
 
-TODO
+#### Rust Style Checker
+
+This project provides a Rust style checker that follows the style rules documented in `docs/guide/development/languages/rust.md`.
+
+Commands:
+
+```sh
+# Run style checks. Exit code is 0 when no violations are found.
+cargo run -- check
+
+# Run style checks for specific files.
+cargo run -- check src/main.rs src/cli.rs
+
+# Apply safe automatic fixes, then re-check.
+cargo run -- fix
+
+# Print implemented rule IDs.
+cargo run -- coverage
+```
+
+Behavior:
+
+- `check` reports all violations and exits with code `1` when violations exist.
+- `fix` applies safe automatic edits, re-runs checks, and exits with code `1` if any remaining violations require manual changes.
+- Violation lines marked with `(fixable)` can be auto-fixed by `fix`.
+
+Current auto-fix coverage:
+
+- `RUST-STYLE-IMPL-001`
+- `RUST-STYLE-IMPORT-006`
+- `RUST-STYLE-IMPORT-007`
+- `RUST-STYLE-MOD-007`
+- `RUST-STYLE-NUM-001`
+- `RUST-STYLE-NUM-002`
+
+All other implemented rules are check-only and require manual intervention.
 
 ### Update
 

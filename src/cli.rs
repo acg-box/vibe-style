@@ -1,15 +1,22 @@
 // crates.io
 use clap::{
-	Parser,
+	Parser, Subcommand,
 	builder::{
 		Styles,
 		styling::{AnsiColor, Effects},
 	},
 };
-// self
-use crate::prelude::*;
 
-/// Cli.
+// std
+use std::{path::PathBuf, process::ExitCode};
+
+// self
+use crate::{
+	prelude::*,
+	style_checker::{self, RunSummary},
+};
+
+/// Command-line interface for the Rust style checker.
 #[derive(Debug, Parser)]
 #[command(
 	version = concat!(
@@ -22,16 +29,72 @@ use crate::prelude::*;
 	rename_all = "kebab",
 	styles = styles(),
 )]
-pub struct Cli {
-	/// Placeholder.
-	#[arg(long, short, value_name = "NUM", default_value_t = String::from("Welcome to use vibe-mono!"))]
-	placeholder: String,
+pub(crate) struct Cli {
+	#[command(subcommand)]
+	command: Command,
 }
-impl Cli {
-	pub fn run(&self) -> Result<()> {
-		tracing::info!("{self:?}");
 
-		Ok(())
+#[derive(Debug, Subcommand)]
+enum Command {
+	/// Run style checks and report violations.
+	Check {
+		/// Optional Rust files. Defaults to git-tracked `*.rs`.
+		files: Vec<PathBuf>,
+	},
+	/// Apply all safe automatic fixes, then re-check.
+	Fix {
+		/// Optional Rust files. Defaults to git-tracked `*.rs`.
+		files: Vec<PathBuf>,
+	},
+	/// Print implemented rule IDs.
+	Coverage,
+}
+
+impl Cli {
+	pub(crate) fn run(&self) -> Result<ExitCode> {
+		match &self.command {
+			Command::Check { files } => {
+				let summary = style_checker::run_check(files)?;
+				print_summary(&summary, false);
+				if summary.violation_count > 0 {
+					eprintln!("\nFound {} style violation(s).", summary.violation_count);
+					return Ok(ExitCode::FAILURE);
+				}
+			},
+			Command::Fix { files } => {
+				let summary = style_checker::run_fix(files)?;
+				print_summary(&summary, true);
+				if summary.violation_count > 0 {
+					eprintln!(
+						"\nFound {} remaining style violation(s) after fix.",
+						summary.violation_count
+					);
+					return Ok(ExitCode::FAILURE);
+				}
+			},
+			Command::Coverage => style_checker::print_coverage(),
+		}
+
+		Ok(ExitCode::SUCCESS)
+	}
+}
+
+fn print_summary(summary: &RunSummary, fix_mode: bool) {
+	for line in &summary.output_lines {
+		println!("{line}");
+	}
+
+	if fix_mode {
+		println!(
+			"\nChecked {} file(s). Applied {} fix(es).",
+			summary.file_count, summary.applied_fix_count
+		);
+	} else {
+		println!("\nChecked {} file(s).", summary.file_count);
+	}
+
+	if summary.unfixable_count > 0 {
+		println!("{} violation(s) require manual fixes.", summary.unfixable_count);
 	}
 }
 
@@ -49,7 +112,8 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn default_placeholder_mentions_vibe_mono() {
-		assert_eq!(Cli::parse_from(["app"]).placeholder, "Welcome to use vibe-mono!");
+	fn parses_check_subcommand() {
+		let cli = Cli::parse_from(["app", "check"]);
+		assert!(matches!(cli.command, Command::Check { .. }));
 	}
 }
