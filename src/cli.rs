@@ -1,16 +1,16 @@
+use std::{path::PathBuf, process::ExitCode};
+
 use clap::{
-	Parser, Subcommand,
+	Args, Parser, Subcommand,
 	builder::{
 		Styles,
 		styling::{AnsiColor, Effects},
 	},
 };
 
-use std::{path::PathBuf, process::ExitCode};
-
 use crate::{
 	prelude::*,
-	style_checker::{self, RunSummary},
+	style::{self, CargoOptions, RunSummary},
 };
 
 /// Command-line interface for the Rust style checker.
@@ -30,16 +30,73 @@ pub(crate) struct Cli {
 	#[command(subcommand)]
 	command: Command,
 }
+impl Cli {
+	pub(crate) fn run(&self) -> Result<ExitCode> {
+		match &self.command {
+			Command::Curate { files, strict, cargo } => {
+				let summary = style::run_check(files, &cargo.as_options())?;
+
+				print_summary(&summary, false);
+
+				if summary.violation_count > 0 {
+					if *strict {
+						eprintln!(
+							"\nFound {} style violation(s) in strict mode.",
+							summary.violation_count
+						);
+					} else {
+						eprintln!("\nFound {} style violation(s).", summary.violation_count);
+					}
+
+					return Ok(ExitCode::FAILURE);
+				}
+			},
+			Command::Tune { files, strict, cargo } => {
+				let summary = style::run_fix(files, &cargo.as_options())?;
+
+				print_summary(&summary, true);
+
+				if summary.violation_count > 0 {
+					eprintln!(
+						"\nFound {} remaining style violation(s) after fix.",
+						summary.violation_count
+					);
+
+					if *strict {
+						return Ok(ExitCode::FAILURE);
+					}
+				}
+			},
+			Command::Coverage => style::print_coverage(),
+		}
+
+		Ok(ExitCode::SUCCESS)
+	}
+}
 
 #[derive(Debug, Subcommand)]
 enum Command {
-	/// Run style checks and report violations.
-	Check {
+	/// Curate style checks and report violations.
+	Curate {
+		/// Keep strict failure behavior explicit.
+		#[arg(long)]
+		strict: bool,
+
+		#[command(flatten)]
+		cargo: CargoCliOptions,
+
 		/// Optional Rust files. Defaults to git-tracked `*.rs`.
 		files: Vec<PathBuf>,
 	},
-	/// Apply all safe automatic fixes, then re-check.
-	Fix {
+	/// Tune style issues with safe automatic fixes, then re-check.
+	Tune {
+		/// Return a non-zero exit code when violations remain after fixes.
+		#[arg(long)]
+		strict: bool,
+
+		#[command(flatten)]
+		cargo: CargoCliOptions,
+
 		/// Optional Rust files. Defaults to git-tracked `*.rs`.
 		files: Vec<PathBuf>,
 	},
@@ -47,32 +104,33 @@ enum Command {
 	Coverage,
 }
 
-impl Cli {
-	pub(crate) fn run(&self) -> Result<ExitCode> {
-		match &self.command {
-			Command::Check { files } => {
-				let summary = style_checker::run_check(files)?;
-				print_summary(&summary, false);
-				if summary.violation_count > 0 {
-					eprintln!("\nFound {} style violation(s).", summary.violation_count);
-					return Ok(ExitCode::FAILURE);
-				}
-			},
-			Command::Fix { files } => {
-				let summary = style_checker::run_fix(files)?;
-				print_summary(&summary, true);
-				if summary.violation_count > 0 {
-					eprintln!(
-						"\nFound {} remaining style violation(s) after fix.",
-						summary.violation_count
-					);
-					return Ok(ExitCode::FAILURE);
-				}
-			},
-			Command::Coverage => style_checker::print_coverage(),
+#[derive(Debug, Clone, Args)]
+struct CargoCliOptions {
+	/// Check all packages in the workspace.
+	#[arg(long)]
+	workspace: bool,
+	/// Check only the specified package(s), like cargo/clippy -p.
+	#[arg(short = 'p', long = "package")]
+	packages: Vec<String>,
+	/// Space- or comma-separated feature list.
+	#[arg(long, value_delimiter = ',')]
+	features: Vec<String>,
+	/// Activate all available features.
+	#[arg(long = "all-features")]
+	all_features: bool,
+	/// Do not activate the `default` feature.
+	#[arg(long = "no-default-features")]
+	no_default_features: bool,
+}
+impl CargoCliOptions {
+	fn as_options(&self) -> CargoOptions {
+		CargoOptions {
+			workspace: self.workspace,
+			packages: self.packages.clone(),
+			features: self.features.clone(),
+			all_features: self.all_features,
+			no_default_features: self.no_default_features,
 		}
-
-		Ok(ExitCode::SUCCESS)
 	}
 }
 
@@ -89,7 +147,6 @@ fn print_summary(summary: &RunSummary, fix_mode: bool) {
 	} else {
 		println!("\nChecked {} file(s).", summary.file_count);
 	}
-
 	if summary.unfixable_count > 0 {
 		println!("{} violation(s) require manual fixes.", summary.unfixable_count);
 	}
@@ -108,8 +165,55 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn parses_check_subcommand() {
-		let cli = Cli::parse_from(["app", "check"]);
-		assert!(matches!(cli.command, Command::Check { .. }));
+	fn parses_curate_subcommand() {
+		let cli = Cli::parse_from(["app", "curate"]);
+
+		assert!(matches!(cli.command, Command::Curate { strict: false, .. }));
+	}
+
+	#[test]
+	fn parses_curate_strict_subcommand() {
+		let cli = Cli::parse_from(["app", "curate", "--strict"]);
+
+		assert!(matches!(cli.command, Command::Curate { strict: true, .. }));
+	}
+
+	#[test]
+	fn parses_tune_subcommand() {
+		let cli = Cli::parse_from(["app", "tune"]);
+
+		assert!(matches!(cli.command, Command::Tune { strict: false, .. }));
+	}
+
+	#[test]
+	fn parses_tune_strict_subcommand() {
+		let cli = Cli::parse_from(["app", "tune", "--strict"]);
+
+		assert!(matches!(cli.command, Command::Tune { strict: true, .. }));
+	}
+
+	#[test]
+	fn parses_tune_with_cargo_target_options() {
+		let cli = Cli::parse_from([
+			"app",
+			"tune",
+			"--workspace",
+			"-p",
+			"api",
+			"--features",
+			"serde,tracing",
+			"--all-features",
+			"--no-default-features",
+		]);
+
+		let Command::Tune { cargo, .. } = cli.command else {
+			panic!("Expected tune command.");
+		};
+
+		assert!(cargo.workspace);
+		assert_eq!(cargo.packages, vec!["api"]);
+		assert_eq!(cargo.features, vec!["serde", "tracing"]);
+		assert!(cargo.all_features);
+		assert!(cargo.no_default_features);
 	}
 }

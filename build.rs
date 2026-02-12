@@ -1,4 +1,5 @@
 use std::error::Error;
+
 use vergen_gitcl::{CargoBuilder, Emitter, GitclBuilder};
 
 fn main() -> Result<(), Box<dyn Error>> {
