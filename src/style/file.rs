@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
-use ra_ap_syntax::{AstNode, ast};
-
-use super::shared::{
-	Edit, FileContext, SERDE_DEFAULT_RE, TopItem, TopKind, Violation, offset_from_line,
+use ra_ap_syntax::{
+	AstNode,
+	ast::{self, HasAttrs},
 };
+
+use super::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
 
 pub(crate) fn check_mod_rs(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	if ctx.path.file_name().is_some_and(|name| name == "mod.rs") {
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			1,
@@ -25,52 +26,55 @@ pub(crate) fn check_serde_option_default(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
-	for (idx, line) in ctx.lines.iter().enumerate() {
-		if !SERDE_DEFAULT_RE.is_match(line) {
+	for field in ctx.source_file.syntax().descendants().filter_map(ast::RecordField::cast) {
+		let Some(ty) = field.ty() else {
+			continue;
+		};
+		let ty_text = ty.syntax().text().to_string().replace(' ', "");
+
+		if !is_option_type_text(&ty_text) {
 			continue;
 		}
 
-		let Some(next_idx) = next_non_attribute_line(&ctx.lines, idx) else {
-			continue;
-		};
+		for attr in field.attrs() {
+			let attr_text = attr.syntax().text().to_string();
 
-		if !ctx.lines[next_idx].contains(": Option<") {
-			continue;
-		}
+			if !is_serde_default_attr(&attr_text) {
+				continue;
+			}
 
-		super::shared::push_violation(
-			violations,
-			ctx,
-			idx + 1,
-			"RUST-STYLE-SERDE-001",
-			"Do not use #[serde(default)] on Option<T> fields.",
-			true,
-		);
+			let range = attr.syntax().text_range();
+			let start = usize::from(range.start());
+			let end = usize::from(range.end());
+			let line = shared::line_from_offset(&ctx.line_starts, start);
 
-		if !emit_edits {
-			continue;
-		}
+			shared::push_violation(
+				violations,
+				ctx,
+				line,
+				"RUST-STYLE-SERDE-001",
+				"Do not use #[serde(default)] on Option<T> fields.",
+				true,
+			);
 
-		let Some(start) = offset_from_line(&ctx.line_starts, idx + 1) else {
-			continue;
-		};
-		let Some(end) = offset_from_line(&ctx.line_starts, idx + 2) else {
-			continue;
-		};
+			if !emit_edits || end <= start {
+				continue;
+			}
 
-		match rewrite_serde_default_attr_line(line) {
-			Some(rewritten) => edits.push(Edit {
-				start,
-				end,
-				replacement: format!("{rewritten}\n"),
-				rule: "RUST-STYLE-SERDE-001",
-			}),
-			None => edits.push(Edit {
-				start,
-				end,
-				replacement: String::new(),
-				rule: "RUST-STYLE-SERDE-001",
-			}),
+			match rewrite_serde_default_attr_line(&attr_text) {
+				Some(rewritten) => edits.push(Edit {
+					start,
+					end,
+					replacement: rewritten,
+					rule: "RUST-STYLE-SERDE-001",
+				}),
+				None => edits.push(Edit {
+					start,
+					end,
+					replacement: String::new(),
+					rule: "RUST-STYLE-SERDE-001",
+				}),
+			}
 		}
 	}
 }
@@ -84,6 +88,7 @@ pub(crate) fn check_error_rs_no_use(
 	if ctx.path.file_name().is_none_or(|name| name != "error.rs") {
 		return;
 	}
+
 	let use_items =
 		ctx.top_items.iter().filter(|item| item.kind == TopKind::Use).collect::<Vec<_>>();
 
@@ -112,6 +117,7 @@ pub(crate) fn check_error_rs_no_use(
 
 			continue;
 		};
+
 		if bindings.is_empty() {
 			parse_failed = true;
 
@@ -148,9 +154,8 @@ pub(crate) fn check_error_rs_no_use(
 
 		symbol_ranges.insert(symbol.clone(), ranges);
 	}
-
 	for item in &use_items {
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			item.line,
@@ -174,10 +179,11 @@ pub(crate) fn check_error_rs_no_use(
 		}
 	}
 	for item in use_items {
-		let Some(start) = offset_from_line(&ctx.line_starts, item.start_line) else {
+		let Some(start) = shared::offset_from_line(&ctx.line_starts, item.start_line) else {
 			continue;
 		};
-		let end = offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
+		let end =
+			shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
 
 		edits.push(Edit { start, end, replacement: String::new(), rule: "RUST-STYLE-IMPORT-005" });
 	}
@@ -252,9 +258,11 @@ fn collect_import_bindings_from_segment(segment: &str, out: &mut Vec<(String, St
 			if brace_start.is_none() {
 				brace_start = Some(idx);
 			}
+
 			depth += 1;
 		} else if ch == '}' {
 			depth -= 1;
+
 			if depth < 0 {
 				return false;
 			}
@@ -292,6 +300,7 @@ fn collect_import_bindings_from_segment(segment: &str, out: &mut Vec<(String, St
 				if prefix.is_empty() {
 					return false;
 				}
+
 				let symbol = prefix.rsplit("::").next().unwrap_or(prefix).trim();
 				let symbol = normalize_ident(symbol);
 
@@ -425,28 +434,6 @@ fn unqualified_macro_call_rewrites(
 	rewrites
 }
 
-fn next_non_attribute_line(lines: &[String], idx: usize) -> Option<usize> {
-	let mut cursor = idx + 1;
-
-	while cursor < lines.len() {
-		let stripped = lines[cursor].trim();
-
-		if stripped.is_empty()
-			|| stripped.starts_with("#[")
-			|| stripped.starts_with("///")
-			|| stripped.starts_with("//!")
-		{
-			cursor += 1;
-
-			continue;
-		}
-
-		return Some(cursor);
-	}
-
-	None
-}
-
 fn rewrite_serde_default_attr_line(line: &str) -> Option<String> {
 	let open = line.find('(')?;
 	let close = line.rfind(')')?;
@@ -475,6 +462,40 @@ fn rewrite_serde_default_attr_line(line: &str) -> Option<String> {
 		.collect::<Vec<_>>();
 
 	if kept.is_empty() { None } else { Some(format!("{leading}#[serde({})]", kept.join(", "))) }
+}
+
+fn is_option_type_text(ty_text: &str) -> bool {
+	ty_text.starts_with("Option<")
+		|| ty_text.starts_with("std::option::Option<")
+		|| ty_text.starts_with("core::option::Option<")
+}
+
+fn is_serde_default_attr(attr_text: &str) -> bool {
+	let compact = attr_text.replace(' ', "");
+
+	if !compact.starts_with("#[serde(") || !compact.ends_with(")]") {
+		return false;
+	}
+
+	let Some(open) = compact.find('(') else {
+		return false;
+	};
+	let Some(close) = compact.rfind(')') else {
+		return false;
+	};
+
+	if close <= open {
+		return false;
+	}
+
+	let inner = &compact[open + 1..close];
+	let args = split_top_level_csv(inner);
+
+	args.into_iter().any(|arg| {
+		let arg = arg.trim();
+
+		arg == "default" || arg.starts_with("default=")
+	})
 }
 
 fn split_top_level_csv(text: &str) -> Vec<String> {
@@ -509,6 +530,7 @@ fn split_top_level_csv(text: &str) -> Vec<String> {
 			']' => depth_bracket -= 1,
 			',' if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 => {
 				out.push(text[start..idx].to_owned());
+
 				start = idx + 1;
 			},
 			_ => {},
@@ -516,5 +538,6 @@ fn split_top_level_csv(text: &str) -> Vec<String> {
 	}
 
 	out.push(text[start..].to_owned());
+
 	out
 }

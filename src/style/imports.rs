@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use ast::Path;
 use ra_ap_syntax::{
 	AstNode,
 	ast::{self, HasAttrs},
@@ -7,8 +8,18 @@ use ra_ap_syntax::{
 use regex::Regex;
 
 use super::shared::{
-	Edit, FileContext, TopItem, TopKind, USE_RE, Violation, WORKSPACE_IMPORT_ROOTS,
+	self, Edit, FileContext, TopItem, TopKind, USE_RE, Violation, WORKSPACE_IMPORT_ROOTS,
 };
+
+#[derive(Debug, Clone)]
+struct Import008Candidate {
+	line: usize,
+	start: usize,
+	end: usize,
+	symbol: String,
+	import_path: String,
+	replacement: String,
+}
 
 pub(crate) fn check_import_rules(
 	ctx: &FileContext,
@@ -25,6 +36,7 @@ pub(crate) fn check_import_rules(
 	let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
 	let mut has_prelude_glob = false;
 	let mut has_risky_glob_import = false;
+	let mut risky_glob_roots = HashSet::new();
 	let mut import007_lines = HashSet::new();
 	let mut import004_fixed_lines = HashSet::new();
 	let mut import009_fixed_lines = HashSet::new();
@@ -34,9 +46,17 @@ pub(crate) fn check_import_rules(
 			if path.replace(' ', "") == "crate::prelude::*" {
 				has_prelude_glob = true;
 			}
+
 			let compact_path = path.replace(' ', "");
+
 			if compact_path.ends_with("::*") && compact_path != "crate::prelude::*" {
 				has_risky_glob_import = true;
+
+				if let Some(root) = compact_path.split("::").next() {
+					if !root.is_empty() {
+						risky_glob_roots.insert(root.to_owned());
+					}
+				}
 			}
 		}
 	}
@@ -46,7 +66,7 @@ pub(crate) fn check_import_rules(
 		};
 
 		if let Some(normalized) = normalize_mixed_self_child_use_path(&path) {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				item.line,
@@ -75,7 +95,7 @@ pub(crate) fn check_import_rules(
 			.captures(&path)
 		{
 			if alias_caps.get(1).map(|m| m.as_str()) != Some("_") {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					item.line,
@@ -94,7 +114,7 @@ pub(crate) fn check_import_rules(
 		{
 			import007_lines.insert(item.line);
 
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				item.line,
@@ -105,8 +125,8 @@ pub(crate) fn check_import_rules(
 
 			if emit_edits {
 				if let (Some(start), Some(next)) = (
-					super::shared::offset_from_line(&ctx.line_starts, item.start_line),
-					super::shared::offset_from_line(&ctx.line_starts, item.end_line + 1),
+					shared::offset_from_line(&ctx.line_starts, item.start_line),
+					shared::offset_from_line(&ctx.line_starts, item.end_line + 1),
 				) {
 					edits.push(Edit {
 						start,
@@ -137,12 +157,12 @@ pub(crate) fn check_import_rules(
 				))
 				.expect("Expected operation to succeed.");
 				let local_fn_defined = ctx.lines.iter().any(|line| {
-					let code = super::shared::strip_string_and_line_comment(line, false).0;
+					let code = shared::strip_string_and_line_comment(line, false).0;
 
 					local_fn_def_re.is_match(&code)
 				});
 				let local_macro_defined = ctx.lines.iter().any(|line| {
-					let code = super::shared::strip_string_and_line_comment(line, false).0;
+					let code = shared::strip_string_and_line_comment(line, false).0;
 
 					local_macro_def_re.is_match(&code)
 				});
@@ -196,11 +216,8 @@ pub(crate) fn check_import_rules(
 									}
 								}
 							} else if let (Some(start), Some(next)) = (
-								super::shared::offset_from_line(&ctx.line_starts, item.start_line),
-								super::shared::offset_from_line(
-									&ctx.line_starts,
-									item.end_line + 1,
-								),
+								shared::offset_from_line(&ctx.line_starts, item.start_line),
+								shared::offset_from_line(&ctx.line_starts, item.end_line + 1),
 							) {
 								edits.push(Edit {
 									start,
@@ -213,7 +230,7 @@ pub(crate) fn check_import_rules(
 						}
 					}
 
-					super::shared::push_violation(
+					shared::push_violation(
 						violations,
 						ctx,
 						item.line,
@@ -255,7 +272,7 @@ pub(crate) fn check_import_rules(
 		}
 
 		for line in imported_symbol_lines.get(symbol).into_iter().flat_map(|lines| lines.iter()) {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				*line,
@@ -267,6 +284,7 @@ pub(crate) fn check_import_rules(
 			);
 		}
 	}
+
 	let mut local_defined_symbols = HashSet::new();
 
 	for item in &ctx.top_items {
@@ -276,6 +294,7 @@ pub(crate) fn check_import_rules(
 
 		local_defined_symbols.insert(normalize_ident(name).to_owned());
 	}
+
 	let qualified_type_paths_by_symbol = collect_qualified_type_paths_by_symbol(ctx);
 
 	for (symbol, imported_paths) in &imported_full_paths_by_symbol {
@@ -291,8 +310,12 @@ pub(crate) fn check_import_rules(
 		let has_other_qualified_path = qualified_type_paths_by_symbol
 			.get(symbol)
 			.is_some_and(|paths| paths.iter().any(|path| path != &imported_path));
-		let has_glob_ambiguity =
-			has_risky_glob_import && has_root_unqualified_path_use(ctx, symbol);
+		let imported_root = imported_path.split("::").next().unwrap_or_default();
+		let has_local_glob_ambiguity =
+			risky_glob_roots.iter().any(|root| matches!(root.as_str(), "self" | "super" | "crate"));
+		let has_glob_ambiguity = has_risky_glob_import
+			&& (has_local_glob_ambiguity || risky_glob_roots.contains(imported_root))
+			&& has_root_unqualified_path_use(ctx, symbol);
 
 		if !has_other_qualified_path && !has_glob_ambiguity {
 			continue;
@@ -314,6 +337,7 @@ pub(crate) fn check_import_rules(
 				import004_fix_plan(&path, symbol)
 			else {
 				fixable = false;
+
 				break;
 			};
 
@@ -325,7 +349,7 @@ pub(crate) fn check_import_rules(
 		}
 
 		for line in imported_symbol_lines.get(symbol).into_iter().flat_map(|lines| lines.iter()) {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				*line,
@@ -347,7 +371,6 @@ pub(crate) fn check_import_rules(
 		for (start, end, replacement) in value_rewrites {
 			edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-IMPORT-009" });
 		}
-
 		for (item, _qualified_symbol_path, rewritten_use_path) in use_item_plans {
 			if let Some(new_use_path) = rewritten_use_path {
 				if let Some((start, end)) = item_text_range(ctx, item) {
@@ -364,8 +387,8 @@ pub(crate) fn check_import_rules(
 					}
 				}
 			} else if let (Some(start), Some(next)) = (
-				super::shared::offset_from_line(&ctx.line_starts, item.start_line),
-				super::shared::offset_from_line(&ctx.line_starts, item.end_line + 1),
+				shared::offset_from_line(&ctx.line_starts, item.start_line),
+				shared::offset_from_line(&ctx.line_starts, item.end_line + 1),
 			) {
 				edits.push(Edit {
 					start,
@@ -377,6 +400,7 @@ pub(crate) fn check_import_rules(
 			}
 		}
 	}
+
 	let import008_candidates = collect_import008_candidates(ctx, has_prelude_glob);
 	let mut candidate_paths_by_symbol: HashMap<String, HashSet<String>> = HashMap::new();
 
@@ -398,6 +422,7 @@ pub(crate) fn check_import_rules(
 			blocked_symbols.insert(symbol.clone());
 		}
 	}
+
 	if has_risky_glob_import {
 		for symbol in candidate_paths_by_symbol.keys() {
 			blocked_symbols.insert(symbol.clone());
@@ -412,7 +437,7 @@ pub(crate) fn check_import_rules(
 			continue;
 		}
 
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			candidate.line,
@@ -479,7 +504,7 @@ pub(crate) fn check_import_rules(
 			let is_fixable = fixable_import_group_lines.contains(&curr.line);
 
 			if curr_origin < prev_origin {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					curr.line,
@@ -494,7 +519,7 @@ pub(crate) fn check_import_rules(
 			let has_header_comment = between.iter().any(|line| line.trim_start().starts_with("//"));
 
 			if curr_origin != prev_origin && !has_blank {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					curr.line,
@@ -504,7 +529,7 @@ pub(crate) fn check_import_rules(
 				);
 			}
 			if curr_origin == prev_origin && has_blank {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					curr.line,
@@ -514,7 +539,7 @@ pub(crate) fn check_import_rules(
 				);
 			}
 			if has_header_comment {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					curr.line,
@@ -525,16 +550,6 @@ pub(crate) fn check_import_rules(
 			}
 		}
 	}
-}
-
-#[derive(Debug, Clone)]
-struct Import008Candidate {
-	line: usize,
-	start: usize,
-	end: usize,
-	symbol: String,
-	import_path: String,
-	replacement: String,
 }
 
 fn collect_import008_candidates(
@@ -554,6 +569,7 @@ fn collect_import008_candidates(
 		}
 
 		let mut segments = Vec::new();
+
 		if !collect_path_segment_texts(&path, &mut segments) {
 			continue;
 		}
@@ -562,11 +578,13 @@ fn collect_import008_candidates(
 		}
 
 		let symbol = normalize_ident(segments[segments.len() - 1].as_str()).to_owned();
+
 		if matches!(symbol.as_str(), "" | "self" | "super" | "crate" | "Self") {
 			continue;
 		}
 
 		let import_path = segments.join("::");
+
 		if has_prelude_glob && import_path.starts_with("crate::") {
 			continue;
 		}
@@ -583,7 +601,7 @@ fn collect_import008_candidates(
 			continue;
 		}
 
-		let line = super::shared::line_from_offset(&ctx.line_starts, start);
+		let line = shared::line_from_offset(&ctx.line_starts, start);
 
 		candidates.push(Import008Candidate { line, start, end, symbol, import_path, replacement });
 	}
@@ -604,6 +622,7 @@ fn collect_qualified_type_paths_by_symbol(ctx: &FileContext) -> HashMap<String, 
 		}
 
 		let mut segments = Vec::new();
+
 		if !collect_path_segment_texts(&path, &mut segments) {
 			continue;
 		}
@@ -648,6 +667,7 @@ fn unqualified_type_path_rewrites(
 		if !is_same_ident(name_ref.text().as_str(), symbol) {
 			continue;
 		}
+
 		let segment_text = segment.syntax().text().to_string();
 		let name_text = name_ref.text().to_string();
 		let suffix = segment_text.strip_prefix(&name_text).unwrap_or_default();
@@ -734,15 +754,16 @@ fn has_root_unqualified_path_use(ctx: &FileContext, symbol: &str) -> bool {
 		let Some(name_ref) = segment.name_ref() else {
 			continue;
 		};
+
 		if !is_same_ident(name_ref.text().as_str(), symbol) {
 			continue;
 		}
 
-		let in_type_context = path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some());
-		let in_value_context = path
-			.syntax()
-			.ancestors()
-			.any(|node| ast::PathExpr::cast(node.clone()).is_some() || ast::PathPat::cast(node).is_some());
+		let in_type_context =
+			path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some());
+		let in_value_context = path.syntax().ancestors().any(|node| {
+			ast::PathExpr::cast(node.clone()).is_some() || ast::PathPat::cast(node).is_some()
+		});
 
 		if in_type_context || in_value_context {
 			return true;
@@ -760,7 +781,7 @@ fn use_item_imports_symbol_path(path: &str, symbol: &str, import_path: &str) -> 
 	imported_full_paths_from_use_path(path).into_iter().any(|path| path == import_path)
 }
 
-fn is_inside_cfg_test_module(path: &ast::Path) -> bool {
+fn is_inside_cfg_test_module(path: &Path) -> bool {
 	path.syntax().ancestors().filter_map(ast::Module::cast).any(|module| {
 		module
 			.attrs()
@@ -768,7 +789,7 @@ fn is_inside_cfg_test_module(path: &ast::Path) -> bool {
 	})
 }
 
-fn collect_path_segment_texts(path: &ast::Path, out: &mut Vec<String>) -> bool {
+fn collect_path_segment_texts(path: &Path, out: &mut Vec<String>) -> bool {
 	if let Some(qualifier) = path.qualifier() {
 		if !collect_path_segment_texts(&qualifier, out) {
 			return false;
@@ -849,9 +870,11 @@ fn collect_full_paths_from_use_segment(segment: &str, out: &mut Vec<String>) -> 
 			if brace_start.is_none() {
 				brace_start = Some(idx);
 			}
+
 			depth += 1;
 		} else if ch == '}' {
 			depth -= 1;
+
 			if depth < 0 {
 				return false;
 			}
@@ -930,7 +953,6 @@ fn build_import008_insert_edit(
 	for path in pending_import_paths {
 		grouped.entry(use_origin(path, local_module_roots)).or_default().push(path.clone());
 	}
-
 	for paths in grouped.values_mut() {
 		paths.sort();
 		paths.dedup();
@@ -986,7 +1008,7 @@ fn build_import008_insert_edit(
 
 	let insert_line = import008_insert_line(ctx);
 	let insert_pos =
-		super::shared::offset_from_line(&ctx.line_starts, insert_line).unwrap_or(ctx.text.len());
+		shared::offset_from_line(&ctx.line_starts, insert_line).unwrap_or(ctx.text.len());
 	let mut replacement = block;
 
 	if !ctx.top_items.is_empty() {
@@ -1096,6 +1118,7 @@ fn imported_symbols_from_use_path(path: &str) -> Vec<String> {
 		if let Some(stripped) = symbol.strip_prefix("r#") {
 			symbol = stripped.to_owned();
 		}
+
 		if matches!(symbol.as_str(), "*" | "self" | "super" | "crate") {
 			return None;
 		}
@@ -1123,6 +1146,7 @@ fn imported_symbols_from_use_path(path: &str) -> Vec<String> {
 				if brace_start.is_none() {
 					brace_start = Some(idx);
 				}
+
 				depth += 1;
 			} else if ch == '}' {
 				depth -= 1;
@@ -1162,7 +1186,6 @@ fn imported_symbols_from_use_path(path: &str) -> Vec<String> {
 
 			return true;
 		}
-
 		if let Some(symbol) = normalize_symbol(trimmed) {
 			out.push(symbol);
 		}
@@ -1171,6 +1194,7 @@ fn imported_symbols_from_use_path(path: &str) -> Vec<String> {
 	}
 
 	let mut out = Vec::new();
+
 	if !collect_symbols_from_segment(path, &mut out, &normalize_symbol) {
 		return Vec::new();
 	}
@@ -1346,12 +1370,41 @@ fn braced_import_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<St
 	}
 
 	let qualified_symbol_path = qualified_symbol_path?;
+	let module_path = prefix.trim_end_matches("::");
+	let use_module_alias = module_alias_from_parent_path(module_path);
+	let qualified_symbol_path = if let Some(alias) = use_module_alias.as_deref() {
+		if let Some(tail) =
+			qualified_symbol_path.strip_prefix(module_path).and_then(|rest| rest.strip_prefix("::"))
+		{
+			format!("{alias}::{tail}")
+		} else {
+			qualified_symbol_path
+		}
+	} else {
+		qualified_symbol_path
+	};
 
 	if kept.is_empty() {
+		if use_module_alias.is_some() {
+			return Some((qualified_symbol_path, Some(module_path.to_owned())));
+		}
+
 		return Some((qualified_symbol_path, None));
 	}
 
-	let rewritten_use_path = format!("{prefix}{{{}}}", kept.join(", "));
+	let rewritten_use_path = if use_module_alias.is_some() {
+		let mut kept_no_self = kept;
+
+		kept_no_self.retain(|segment| segment != "self");
+
+		if kept_no_self.is_empty() {
+			format!("{prefix}{{self}}")
+		} else {
+			format!("{prefix}{{self, {}}}", kept_no_self.join(", "))
+		}
+	} else {
+		format!("{prefix}{{{}}}", kept.join(", "))
+	};
 
 	Some((qualified_symbol_path, Some(rewritten_use_path)))
 }
@@ -1359,11 +1412,23 @@ fn braced_import_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<St
 fn import004_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<String>)> {
 	if let Some((prefix, imported_symbol)) = simple_import_prefix_symbol(path) {
 		if is_same_ident(&imported_symbol, symbol) {
+			if let Some(alias) = module_alias_from_parent_path(&prefix) {
+				return Some((format!("{alias}::{imported_symbol}"), Some(prefix)));
+			}
+
 			return Some((format!("{prefix}::{imported_symbol}"), None));
 		}
 	}
 
 	braced_import_fix_plan(path, symbol)
+}
+
+fn module_alias_from_parent_path(path: &str) -> Option<String> {
+	if !path.starts_with("super::") {
+		return None;
+	}
+
+	path.rsplit("::").next().filter(|segment| !segment.is_empty()).map(str::to_owned)
 }
 
 fn unqualified_function_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize, usize)> {
@@ -1713,17 +1778,17 @@ fn separator_lines<'a>(ctx: &'a FileContext, prev: &TopItem, curr: &TopItem) -> 
 }
 
 fn item_text_range(ctx: &FileContext, item: &TopItem) -> Option<(usize, usize)> {
-	let start = super::shared::offset_from_line(&ctx.line_starts, item.start_line)?;
-	let end = super::shared::offset_from_line(&ctx.line_starts, item.end_line + 1)
-		.unwrap_or(ctx.text.len());
+	let start = shared::offset_from_line(&ctx.line_starts, item.start_line)?;
+	let end =
+		shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
 
 	if end < start { None } else { Some((start, end)) }
 }
 
 fn run_text_range(ctx: &FileContext, first: &TopItem, last: &TopItem) -> Option<(usize, usize)> {
-	let start = super::shared::offset_from_line(&ctx.line_starts, first.start_line)?;
-	let end = super::shared::offset_from_line(&ctx.line_starts, last.end_line + 1)
-		.unwrap_or(ctx.text.len());
+	let start = shared::offset_from_line(&ctx.line_starts, first.start_line)?;
+	let end =
+		shared::offset_from_line(&ctx.line_starts, last.end_line + 1).unwrap_or(ctx.text.len());
 
 	if end < start { None } else { Some((start, end)) }
 }

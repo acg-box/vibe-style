@@ -1,12 +1,15 @@
 use std::path::Path;
 
+use ast::Attr;
+use ast::MacroCall;
+use ast::MethodCallExpr;
 use ra_ap_syntax::{
 	AstNode,
 	ast::{self, HasArgList, HasAttrs, HasModuleItem, HasName},
 };
 use regex::Regex;
 
-use super::shared::{Edit, FileContext, SNAKE_CASE_RE, Violation};
+use super::shared::{self, Edit, FileContext, SNAKE_CASE_RE, Violation};
 
 const NUMERIC_SUFFIXES: [&str; 14] = [
 	"usize", "isize", "u128", "i128", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8", "f64",
@@ -38,9 +41,9 @@ pub(crate) fn check_std_macro_calls(
 
 		let range = path.syntax().text_range();
 		let absolute_path_start = usize::from(range.start());
-		let line = super::shared::line_from_offset(&ctx.line_starts, absolute_path_start);
+		let line = shared::line_from_offset(&ctx.line_starts, absolute_path_start);
 
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			line,
@@ -58,76 +61,6 @@ pub(crate) fn check_std_macro_calls(
 			});
 		}
 	}
-}
-
-fn parse_std_macro_prefix(path_text: &str) -> Option<(usize, usize, String)> {
-	fn skip_ws(text: &[u8], mut idx: usize) -> usize {
-		while idx < text.len() && text[idx].is_ascii_whitespace() {
-			idx += 1;
-		}
-		idx
-	}
-
-	fn consume_double_colon(text: &[u8], mut idx: usize) -> Option<usize> {
-		idx = skip_ws(text, idx);
-		if idx >= text.len() || text[idx] != b':' {
-			return None;
-		}
-
-		idx += 1;
-		idx = skip_ws(text, idx);
-
-		if idx >= text.len() || text[idx] != b':' {
-			return None;
-		}
-
-		Some(idx + 1)
-	}
-
-	fn consume_ident(text: &[u8], mut idx: usize) -> Option<(usize, String)> {
-		idx = skip_ws(text, idx);
-		let start = idx;
-
-		if idx >= text.len() || !(text[idx].is_ascii_alphabetic() || text[idx] == b'_') {
-			return None;
-		}
-
-		idx += 1;
-		while idx < text.len() && (text[idx].is_ascii_alphanumeric() || text[idx] == b'_') {
-			idx += 1;
-		}
-
-		Some((idx, String::from_utf8_lossy(&text[start..idx]).to_string()))
-	}
-
-	let bytes = path_text.as_bytes();
-	let mut idx = skip_ws(bytes, 0);
-	let mut prefix_start = idx;
-
-	if let Some(next) = consume_double_colon(bytes, idx) {
-		prefix_start = idx;
-		idx = skip_ws(bytes, next);
-	}
-
-	let std_start = idx;
-	let (next_idx, ident) = consume_ident(bytes, idx)?;
-
-	if ident != "std" {
-		return None;
-	}
-
-	let prefix_end = consume_double_colon(bytes, next_idx)?;
-	let (next_idx, macro_name) = consume_ident(bytes, prefix_end)?;
-	let next_after_macro = skip_ws(bytes, next_idx);
-
-	if consume_double_colon(bytes, next_after_macro).is_some() {
-		return None;
-	}
-	if prefix_start == std_start {
-		prefix_start = std_start;
-	}
-
-	Some((prefix_start, prefix_end, macro_name))
 }
 
 pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Violation>) {
@@ -171,14 +104,14 @@ pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Viol
 			parts.clone()
 		};
 		let head_text = head_parts.join(", ");
-		let line = super::shared::line_from_offset(
+		let line = shared::line_from_offset(
 			&ctx.line_starts,
 			usize::from(macro_call.syntax().text_range().start()),
 		);
 
 		if let Some(message) = message {
 			if message.contains('{') || message.contains('}') {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					line,
@@ -188,7 +121,7 @@ pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Viol
 				);
 			}
 			if !is_sentence(&message) {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					line,
@@ -200,7 +133,7 @@ pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Viol
 		}
 
 		if parts.len() > 1 && !has_structured_fields(&head_text) {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -231,13 +164,13 @@ pub(crate) fn check_expect_unwrap(
 		let Some(name) = method_call.name_ref().map(|name| name.text().to_string()) else {
 			continue;
 		};
-		let line = super::shared::line_from_offset(
+		let line = shared::line_from_offset(
 			&ctx.line_starts,
 			usize::from(method_call.syntax().text_range().start()),
 		);
 
 		if name == "unwrap" {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -269,7 +202,7 @@ pub(crate) fn check_expect_unwrap(
 		}
 
 		let Some(arg_list) = method_call.arg_list() else {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -296,7 +229,7 @@ pub(crate) fn check_expect_unwrap(
 		};
 		let mut args = arg_list.args();
 		let Some(first_arg) = args.next() else {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -323,7 +256,7 @@ pub(crate) fn check_expect_unwrap(
 			.next()
 			.and_then(|lit| parse_string_literal(&lit.syntax().text().to_string()));
 		let Some(message) = literal else {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -337,7 +270,7 @@ pub(crate) fn check_expect_unwrap(
 		let message = message.trim().to_owned();
 
 		if message.is_empty() {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -362,7 +295,7 @@ pub(crate) fn check_expect_unwrap(
 		let last = message.chars().last().unwrap_or('.');
 
 		if !first.is_uppercase() || !matches!(last, '.' | '!' | '?') {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -400,13 +333,13 @@ pub(crate) fn check_numeric_literals(
 
 		let range = literal.syntax().text_range();
 		let start = usize::from(range.start());
-		let line = super::shared::line_from_offset(&ctx.line_starts, start);
+		let line = shared::line_from_offset(&ctx.line_starts, start);
 
 		if let Some(suffix_start) = numeric_suffix_start(&literal_text) {
 			let body = &literal_text[..suffix_start];
 
 			if is_decimal_body(body) && !body.ends_with('_') {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					line,
@@ -439,7 +372,7 @@ pub(crate) fn check_numeric_literals(
 			continue;
 		}
 
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			line,
@@ -467,7 +400,7 @@ pub(crate) fn function_ranges(ctx: &FileContext) -> Vec<(usize, usize)> {
 			continue;
 		};
 		let (start_line, end_line) =
-			super::shared::text_range_to_lines(&ctx.line_starts, body.syntax().text_range());
+			shared::text_range_to_lines(&ctx.line_starts, body.syntax().text_range());
 
 		ranges.push((start_line.saturating_sub(1), end_line.saturating_sub(1)));
 	}
@@ -484,7 +417,7 @@ pub(crate) fn check_function_length(ctx: &FileContext, violations: &mut Vec<Viol
 		let length = end - start + 1;
 
 		if length > 120 {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				start + 1,
@@ -509,12 +442,12 @@ pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation
 		let name = function.name().map(|name| name.text().to_string()).unwrap_or_default();
 
 		if !SNAKE_CASE_RE.is_match(&name) || !name.contains('_') {
-			let line = super::shared::line_from_offset(
+			let line = shared::line_from_offset(
 				&ctx.line_starts,
 				usize::from(function.syntax().text_range().start()),
 			);
 
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -555,7 +488,7 @@ pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation
 		});
 
 		if contains_behavior_tests {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				1,
@@ -565,6 +498,80 @@ pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation
 			);
 		}
 	}
+}
+
+fn parse_std_macro_prefix(path_text: &str) -> Option<(usize, usize, String)> {
+	fn skip_ws(text: &[u8], mut idx: usize) -> usize {
+		while idx < text.len() && text[idx].is_ascii_whitespace() {
+			idx += 1;
+		}
+
+		idx
+	}
+
+	fn consume_double_colon(text: &[u8], mut idx: usize) -> Option<usize> {
+		idx = skip_ws(text, idx);
+
+		if idx >= text.len() || text[idx] != b':' {
+			return None;
+		}
+
+		idx += 1;
+		idx = skip_ws(text, idx);
+
+		if idx >= text.len() || text[idx] != b':' {
+			return None;
+		}
+
+		Some(idx + 1)
+	}
+
+	fn consume_ident(text: &[u8], mut idx: usize) -> Option<(usize, String)> {
+		idx = skip_ws(text, idx);
+
+		let start = idx;
+
+		if idx >= text.len() || !(text[idx].is_ascii_alphabetic() || text[idx] == b'_') {
+			return None;
+		}
+
+		idx += 1;
+
+		while idx < text.len() && (text[idx].is_ascii_alphanumeric() || text[idx] == b'_') {
+			idx += 1;
+		}
+
+		Some((idx, String::from_utf8_lossy(&text[start..idx]).to_string()))
+	}
+
+	let bytes = path_text.as_bytes();
+	let mut idx = skip_ws(bytes, 0);
+	let mut prefix_start = idx;
+
+	if let Some(next) = consume_double_colon(bytes, idx) {
+		prefix_start = idx;
+		idx = skip_ws(bytes, next);
+	}
+
+	let std_start = idx;
+	let (next_idx, ident) = consume_ident(bytes, idx)?;
+
+	if ident != "std" {
+		return None;
+	}
+
+	let prefix_end = consume_double_colon(bytes, next_idx)?;
+	let (next_idx, macro_name) = consume_ident(bytes, prefix_end)?;
+	let next_after_macro = skip_ws(bytes, next_idx);
+
+	if consume_double_colon(bytes, next_after_macro).is_some() {
+		return None;
+	}
+	if prefix_start == std_start {
+		prefix_start = std_start;
+	}
+
+	Some((prefix_start, prefix_end, macro_name))
 }
 
 fn split_top_level_args(args: &str) -> Vec<String> {
@@ -757,7 +764,7 @@ fn has_structured_fields(text: &str) -> bool {
 			.is_match(text)
 }
 
-fn macro_path_text(macro_call: &ast::MacroCall) -> Option<String> {
+fn macro_path_text(macro_call: &MacroCall) -> Option<String> {
 	macro_call.path().map(|path| path.syntax().text().to_string())
 }
 
@@ -767,13 +774,13 @@ fn is_test_file(path: &Path) -> bool {
 	text.contains("/tests/") || text.ends_with("_test.rs")
 }
 
-fn has_attr_text(mut attrs: impl Iterator<Item = ast::Attr>, needle: &str) -> bool {
+fn has_attr_text(mut attrs: impl Iterator<Item = Attr>, needle: &str) -> bool {
 	let compact = needle.replace(' ', "");
 
 	attrs.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains(&compact))
 }
 
-fn method_call_in_test_context(call: &ast::MethodCallExpr) -> bool {
+fn method_call_in_test_context(call: &MethodCallExpr) -> bool {
 	for node in call.syntax().ancestors() {
 		if let Some(module) = ast::Module::cast(node.clone()) {
 			if has_attr_text(module.attrs(), "cfg(test)") {

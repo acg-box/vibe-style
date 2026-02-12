@@ -5,6 +5,7 @@ use std::{
 	process::Command,
 };
 
+use ast::Item;
 use cargo_metadata::{MetadataCommand, TargetKind};
 use once_cell::sync::Lazy;
 use ra_ap_syntax::{
@@ -47,10 +48,6 @@ pub(crate) const STYLE_RULE_IDS: [&str; 29] = [
 	"RUST-STYLE-TEST-002",
 ];
 
-pub(crate) static SERDE_DEFAULT_RE: Lazy<Regex> = Lazy::new(|| {
-	Regex::new(r"^\s*#\s*\[\s*serde\s*\(\s*default\b[^)]*\)\s*]\s*$")
-		.expect("Expected operation to succeed.")
-});
 pub(crate) static USE_RE: Lazy<Regex> = Lazy::new(|| {
 	Regex::new(r"^\s*(pub\s+)?use\s+(.+);\s*$").expect("Expected operation to succeed.")
 });
@@ -146,22 +143,6 @@ impl CargoOptions {
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum TopKind {
-	Mod,
-	Use,
-	MacroRules,
-	Type,
-	Const,
-	Static,
-	Trait,
-	Enum,
-	Struct,
-	Impl,
-	Fn,
-	Other,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct TopItem {
 	pub(crate) kind: TopKind,
@@ -184,6 +165,22 @@ pub(crate) struct FileContext {
 	pub(crate) line_starts: Vec<usize>,
 	pub(crate) source_file: SourceFile,
 	pub(crate) top_items: Vec<TopItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum TopKind {
+	Mod,
+	Use,
+	MacroRules,
+	Type,
+	Const,
+	Static,
+	Trait,
+	Enum,
+	Struct,
+	Impl,
+	Fn,
+	Other,
 }
 
 pub(crate) fn push_violation(
@@ -218,11 +215,13 @@ pub(crate) fn resolve_files(
 
 		return Ok(files);
 	}
+
 	let git_files = git_ls_files_rs()?;
 
 	if !cargo_options.has_package_filter() {
 		return Ok(git_files);
 	}
+
 	let mut cmd = MetadataCommand::new();
 
 	cmd.no_deps();
@@ -246,7 +245,6 @@ pub(crate) fn resolve_files(
 			selected_roots.insert(normalize_path(root));
 		}
 	}
-
 	if !cargo_options.packages.is_empty() {
 		let mut missing = cargo_options.packages.iter().cloned().collect::<HashSet<_>>();
 
@@ -269,6 +267,7 @@ pub(crate) fn resolve_files(
 
 				if hit {
 					missing.remove(requested);
+
 					matched = true;
 				}
 			}
@@ -294,7 +293,6 @@ pub(crate) fn resolve_files(
 			));
 		}
 	}
-
 	if selected_roots.is_empty() {
 		return Ok(Vec::new());
 	}
@@ -312,34 +310,6 @@ pub(crate) fn resolve_files(
 	}
 
 	Ok(files)
-}
-
-fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
-	let output = Command::new("git")
-		.args(["ls-files", "*.rs"])
-		.output()
-		.map_err(|err| eyre::eyre!("Failed to run git ls-files: {err}."))?;
-	if !output.status.success() {
-		return Err(eyre::eyre!("git ls-files failed with status {}.", output.status));
-	}
-
-	let stdout = String::from_utf8(output.stdout)?;
-	let mut files = Vec::new();
-
-	for line in stdout.lines() {
-		if !line.is_empty() {
-			files.push(PathBuf::from(line));
-		}
-	}
-
-	Ok(files)
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-	match fs::canonicalize(path) {
-		Ok(canonical) => canonical,
-		Err(_) => path.to_path_buf(),
-	}
 }
 
 pub(crate) fn read_file_context(path: &Path) -> Result<Option<FileContext>> {
@@ -468,6 +438,35 @@ pub(crate) fn strip_string_and_line_comment(line: &str, mut in_str: bool) -> (St
 	(out, in_str)
 }
 
+fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
+	let output = Command::new("git")
+		.args(["ls-files", "*.rs"])
+		.output()
+		.map_err(|err| eyre::eyre!("Failed to run git ls-files: {err}."))?;
+
+	if !output.status.success() {
+		return Err(eyre::eyre!("git ls-files failed with status {}.", output.status));
+	}
+
+	let stdout = String::from_utf8(output.stdout)?;
+	let mut files = Vec::new();
+
+	for line in stdout.lines() {
+		if !line.is_empty() {
+			files.push(PathBuf::from(line));
+		}
+	}
+
+	Ok(files)
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+	match fs::canonicalize(path) {
+		Ok(canonical) => canonical,
+		Err(_) => path.to_path_buf(),
+	}
+}
+
 fn build_line_starts(text: &str) -> Vec<usize> {
 	let mut starts = vec![0_usize];
 
@@ -516,7 +515,7 @@ fn collect_top_items(source_file: &SourceFile, line_starts: &[usize]) -> Vec<Top
 	items
 }
 
-fn classify_top_kind(item: &ast::Item) -> TopKind {
+fn classify_top_kind(item: &Item) -> TopKind {
 	match item {
 		ast::Item::Module(_) => TopKind::Mod,
 		ast::Item::Use(_) => TopKind::Use,
@@ -533,7 +532,7 @@ fn classify_top_kind(item: &ast::Item) -> TopKind {
 	}
 }
 
-fn item_name(item: &ast::Item) -> Option<String> {
+fn item_name(item: &Item) -> Option<String> {
 	match item {
 		ast::Item::Module(node) => node.name().map(|name| name.text().to_string()),
 		ast::Item::TypeAlias(node) => node.name().map(|name| name.text().to_string()),
@@ -547,7 +546,7 @@ fn item_name(item: &ast::Item) -> Option<String> {
 	}
 }
 
-fn item_visibility_is_pub(item: &ast::Item) -> bool {
+fn item_visibility_is_pub(item: &Item) -> bool {
 	match item {
 		ast::Item::Module(node) => node.visibility().is_some(),
 		ast::Item::Use(node) => node.visibility().is_some(),

@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use ast::Use;
 use ra_ap_syntax::{
 	AstNode,
 	ast::{self, HasAttrs, HasModuleItem, HasName},
 };
 
-use super::shared::{
-	Edit, FileContext, TopItem, TopKind, Violation, WORKSPACE_IMPORT_ROOTS, offset_from_line,
-};
+use super::shared::{self, Edit, FileContext, TopItem, TopKind, Violation, WORKSPACE_IMPORT_ROOTS};
 
 pub(crate) fn check_module_order(
 	ctx: &FileContext,
@@ -36,7 +35,7 @@ pub(crate) fn check_module_order(
 
 		if let Some(last) = order_seen.last().copied() {
 			if order < last {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					item.line,
@@ -57,7 +56,7 @@ pub(crate) fn check_module_order(
 
 		if item.is_pub {
 			if seen_non_pub {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					item.line,
@@ -86,7 +85,7 @@ pub(crate) fn check_module_order(
 		if item.is_async {
 			async_seen.insert(key, true);
 		} else if async_seen.get(&key).copied().unwrap_or(false) {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				item.line,
@@ -111,7 +110,7 @@ pub(crate) fn check_module_order(
 				continue;
 			}
 			if idx < last_non_test_idx {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					item.line,
@@ -194,12 +193,12 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 		}
 
 		if !found_super_use {
-			let line = super::shared::line_from_offset(
+			let line = shared::line_from_offset(
 				&ctx.line_starts,
 				usize::from(module.syntax().text_range().start()),
 			);
 
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				line,
@@ -213,7 +212,7 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 				let indent = items
 					.first()
 					.and_then(|nested_item| {
-						let nested_line = super::shared::line_from_offset(
+						let nested_line = shared::line_from_offset(
 							&ctx.line_starts,
 							usize::from(nested_item.syntax().text_range().start()),
 						);
@@ -253,7 +252,7 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 						if gap.chars().all(char::is_whitespace) {
 							let after_sep = if let Some(next_start) = first_non_use_start {
 								let next_line =
-									super::shared::line_from_offset(&ctx.line_starts, next_start);
+									shared::line_from_offset(&ctx.line_starts, next_start);
 								let next_indent = ctx
 									.lines
 									.get(next_line.saturating_sub(1))
@@ -302,7 +301,7 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 			let indent = items
 				.first()
 				.and_then(|nested_item| {
-					let nested_line = super::shared::line_from_offset(
+					let nested_line = shared::line_from_offset(
 						&ctx.line_starts,
 						usize::from(nested_item.syntax().text_range().start()),
 					);
@@ -373,15 +372,15 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 					continue;
 				}
 
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					leading_uses
 						.iter()
 						.find(|entry| entry.is_super_specific)
-						.map(|entry| super::shared::line_from_offset(&ctx.line_starts, entry.start))
+						.map(|entry| shared::line_from_offset(&ctx.line_starts, entry.start))
 						.unwrap_or_else(|| {
-							super::shared::line_from_offset(&ctx.line_starts, leading_uses[0].start)
+							shared::line_from_offset(&ctx.line_starts, leading_uses[0].start)
 						}),
 					"RUST-STYLE-MOD-007",
 					"In #[cfg(test)] mod tests, prefer `use super::*;` and remove specific super imports.",
@@ -433,9 +432,9 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 				let edit_start = leading_uses
 					.first()
 					.and_then(|entry| {
-						let line = super::shared::line_from_offset(&ctx.line_starts, entry.start);
+						let line = shared::line_from_offset(&ctx.line_starts, entry.start);
 
-						super::shared::offset_from_line(&ctx.line_starts, line)
+						shared::offset_from_line(&ctx.line_starts, line)
 					})
 					.unwrap_or_default();
 				let last_use_end = leading_uses.last().map(|entry| entry.end).unwrap_or(edit_start);
@@ -447,10 +446,9 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 					if gap.chars().all(char::is_whitespace) {
 						replacement.push_str("\n\n");
 
-						let next_line =
-							super::shared::line_from_offset(&ctx.line_starts, next_start);
+						let next_line = shared::line_from_offset(&ctx.line_starts, next_start);
 
-						edit_end = super::shared::offset_from_line(&ctx.line_starts, next_line)
+						edit_end = shared::offset_from_line(&ctx.line_starts, next_line)
 							.unwrap_or(next_start);
 					}
 				}
@@ -465,13 +463,10 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 				continue;
 			};
 
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
-				super::shared::line_from_offset(
-					&ctx.line_starts,
-					leading_uses[bad_pair_idx + 1].start,
-				),
+				shared::line_from_offset(&ctx.line_starts, leading_uses[bad_pair_idx + 1].start),
 				"RUST-STYLE-MOD-007",
 				"In #[cfg(test)] mod tests, order imports as std, third-party, self/workspace.",
 				true,
@@ -515,9 +510,9 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 				let edit_start = leading_uses
 					.first()
 					.and_then(|entry| {
-						let line = super::shared::line_from_offset(&ctx.line_starts, entry.start);
+						let line = shared::line_from_offset(&ctx.line_starts, entry.start);
 
-						super::shared::offset_from_line(&ctx.line_starts, line)
+						shared::offset_from_line(&ctx.line_starts, line)
 					})
 					.unwrap_or_default();
 				let last_use_end = leading_uses.last().map(|entry| entry.end).unwrap_or(edit_start);
@@ -529,10 +524,9 @@ pub(crate) fn check_cfg_test_mod_tests_use_super(
 					if gap.chars().all(char::is_whitespace) {
 						replacement.push_str("\n\n");
 
-						let next_line =
-							super::shared::line_from_offset(&ctx.line_starts, next_start);
+						let next_line = shared::line_from_offset(&ctx.line_starts, next_start);
 
-						edit_end = super::shared::offset_from_line(&ctx.line_starts, next_line)
+						edit_end = shared::offset_from_line(&ctx.line_starts, next_line)
 							.unwrap_or(next_start);
 					}
 				}
@@ -584,7 +578,7 @@ fn use_origin(path: &str, local_module_roots: &HashSet<String>) -> usize {
 	}
 }
 
-fn use_item_origin(use_item: &ast::Use, local_module_roots: &HashSet<String>) -> usize {
+fn use_item_origin(use_item: &Use, local_module_roots: &HashSet<String>) -> usize {
 	let path = use_item.use_tree().map(|tree| tree.syntax().text().to_string()).unwrap_or_default();
 
 	use_origin(&path.replace(' ', ""), local_module_roots)
@@ -614,9 +608,9 @@ fn separator_blank_only(ctx: &FileContext, prev: &TopItem, next: &TopItem) -> bo
 }
 
 fn item_text_range(ctx: &FileContext, item: &TopItem) -> Option<(usize, usize)> {
-	let start = super::shared::offset_from_line(&ctx.line_starts, item.start_line)?;
-	let end = super::shared::offset_from_line(&ctx.line_starts, item.end_line + 1)
-		.unwrap_or(ctx.text.len());
+	let start = shared::offset_from_line(&ctx.line_starts, item.start_line)?;
+	let end =
+		shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
 
 	if end < start { None } else { Some((start, end)) }
 }
@@ -677,7 +671,7 @@ fn check_top_level_const_group_spacing(
 
 		let can_autofix = between.iter().all(|line| line.trim().is_empty());
 
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			next.line,
@@ -687,10 +681,10 @@ fn check_top_level_const_group_spacing(
 		);
 
 		if emit_edits && can_autofix {
-			let Some(start) = offset_from_line(&ctx.line_starts, prev.end_line + 1) else {
+			let Some(start) = shared::offset_from_line(&ctx.line_starts, prev.end_line + 1) else {
 				continue;
 			};
-			let Some(end) = offset_from_line(&ctx.line_starts, next.start_line) else {
+			let Some(end) = shared::offset_from_line(&ctx.line_starts, next.start_line) else {
 				continue;
 			};
 
@@ -723,6 +717,7 @@ fn check_top_level_visibility_batch_spacing(
 		let (blank_count, has_non_blank) =
 			if between_start < between_end && between_end <= ctx.lines.len() {
 				let between = &ctx.lines[between_start..between_end];
+
 				(
 					between.iter().filter(|line| line.trim().is_empty()).count(),
 					between.iter().any(|line| !line.trim().is_empty()),
@@ -737,7 +732,7 @@ fn check_top_level_visibility_batch_spacing(
 
 		let can_autofix = !has_non_blank;
 
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			next.line,
@@ -747,10 +742,10 @@ fn check_top_level_visibility_batch_spacing(
 		);
 
 		if emit_edits && can_autofix {
-			let Some(start) = offset_from_line(&ctx.line_starts, prev.end_line + 1) else {
+			let Some(start) = shared::offset_from_line(&ctx.line_starts, prev.end_line + 1) else {
 				continue;
 			};
-			let Some(end) = offset_from_line(&ctx.line_starts, next.start_line) else {
+			let Some(end) = shared::offset_from_line(&ctx.line_starts, next.start_line) else {
 				continue;
 			};
 
@@ -795,7 +790,7 @@ fn check_top_level_excess_blank_lines(
 			continue;
 		}
 
-		super::shared::push_violation(
+		shared::push_violation(
 			violations,
 			ctx,
 			next.line,
@@ -805,10 +800,10 @@ fn check_top_level_excess_blank_lines(
 		);
 
 		if emit_edits {
-			let Some(start) = offset_from_line(&ctx.line_starts, prev.end_line + 1) else {
+			let Some(start) = shared::offset_from_line(&ctx.line_starts, prev.end_line + 1) else {
 				continue;
 			};
-			let Some(end) = offset_from_line(&ctx.line_starts, next.start_line) else {
+			let Some(end) = shared::offset_from_line(&ctx.line_starts, next.start_line) else {
 				continue;
 			};
 

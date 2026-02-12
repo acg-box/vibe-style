@@ -4,7 +4,7 @@ use regex::Regex;
 
 use super::{
 	quality,
-	shared::{Edit, FileContext, Violation, offset_from_line},
+	shared::{self, Edit, FileContext, Violation},
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -85,7 +85,7 @@ pub(crate) fn check_vertical_spacing(
 
 			if curr_is_pipe_continuation || next_is_pipe_continuation {
 				if blank_count != 0 {
-					super::shared::push_violation(
+					shared::push_violation(
 						violations,
 						ctx,
 						next_start + 1,
@@ -110,7 +110,7 @@ pub(crate) fn check_vertical_spacing(
 					between_same_type_can_autofix(&ctx.lines, curr_end + 1, *next_start);
 
 				if blank_count != 0 {
-					super::shared::push_violation(
+					shared::push_violation(
 						violations,
 						ctx,
 						next_start + 1,
@@ -141,7 +141,7 @@ pub(crate) fn check_vertical_spacing(
 					between_same_type_can_autofix(&ctx.lines, curr_end + 1, *next_start);
 
 				if blank_count != 1 {
-					super::shared::push_violation(
+					shared::push_violation(
 						violations,
 						ctx,
 						next_start + 1,
@@ -172,7 +172,7 @@ pub(crate) fn check_vertical_spacing(
 					between_same_type_can_autofix(&ctx.lines, curr_end + 1, *next_start);
 
 				if blank_count != 0 {
-					super::shared::push_violation(
+					shared::push_violation(
 						violations,
 						ctx,
 						next_start + 1,
@@ -196,7 +196,7 @@ pub(crate) fn check_vertical_spacing(
 					}
 				}
 			} else if blank_count != 1 {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					next_start + 1,
@@ -233,7 +233,7 @@ pub(crate) fn check_vertical_spacing(
 					"Insert exactly one blank line before the final tail expression."
 				};
 
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					ret_start + 1,
@@ -1079,8 +1079,8 @@ fn replace_between_lines_edit_with_rule(
 	replacement: &str,
 	rule: &'static str,
 ) -> Option<Edit> {
-	let start = offset_from_line(&ctx.line_starts, start_line_zero_based + 1)?;
-	let end = offset_from_line(&ctx.line_starts, end_line_zero_based_exclusive + 1)?;
+	let start = shared::offset_from_line(&ctx.line_starts, start_line_zero_based + 1)?;
+	let end = shared::offset_from_line(&ctx.line_starts, end_line_zero_based_exclusive + 1)?;
 
 	Some(Edit { start, end, replacement: replacement.to_owned(), rule })
 }

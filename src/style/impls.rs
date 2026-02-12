@@ -6,11 +6,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-use super::shared::{Edit, FileContext, INLINE_BOUNDS_RE, TopKind, Violation};
-
-fn line_start_offset_or_eof(ctx: &FileContext, line_one_based: usize) -> usize {
-	super::shared::offset_from_line(&ctx.line_starts, line_one_based).unwrap_or(ctx.text.len())
-}
+use super::shared::{self, Edit, FileContext, INLINE_BOUNDS_RE, TopItem, TopKind, Violation};
 
 pub(crate) fn check_impl_adjacency(
 	ctx: &FileContext,
@@ -49,7 +45,7 @@ pub(crate) fn check_impl_adjacency(
 			let item = &ctx.top_items[idx];
 
 			if item.kind != TopKind::Impl || item.impl_target.as_deref() != Some(target.as_str()) {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					item.line,
@@ -69,7 +65,7 @@ pub(crate) fn check_impl_adjacency(
 		}
 		for pos in 1..order_values.len() {
 			if order_values[pos] < order_values[pos - 1] {
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					ctx.top_items[impl_indices[pos]].line,
@@ -100,7 +96,7 @@ pub(crate) fn check_impl_adjacency(
 				impl_indices.windows(2).all(|pair| pair[1] == pair[0].saturating_add(1));
 			let can_relocate = impls_contiguous;
 
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				ctx.top_items[first_impl].line,
@@ -186,7 +182,7 @@ pub(crate) fn check_impl_adjacency(
 			if between.iter().any(|line| line.trim().is_empty()) {
 				let can_autofix = between.iter().all(|line| line.trim().is_empty());
 
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					ctx.top_items[first_impl].line,
@@ -198,10 +194,10 @@ pub(crate) fn check_impl_adjacency(
 				);
 
 				if emit_edits && can_autofix {
-					let start = super::shared::offset_from_line(&ctx.line_starts, type_end + 1)
-						.unwrap_or(0);
-					let end = super::shared::offset_from_line(&ctx.line_starts, impl_start)
-						.unwrap_or(start);
+					let start =
+						shared::offset_from_line(&ctx.line_starts, type_end + 1).unwrap_or(0);
+					let end =
+						shared::offset_from_line(&ctx.line_starts, impl_start).unwrap_or(start);
 
 					if end > start {
 						edits.push(Edit {
@@ -230,8 +226,7 @@ pub(crate) fn check_impl_rules(
 		let Some(self_ty) = impl_item.self_ty() else {
 			continue;
 		};
-		let Some(target) =
-			super::shared::extract_impl_target_name(&self_ty.syntax().text().to_string())
+		let Some(target) = shared::extract_impl_target_name(&self_ty.syntax().text().to_string())
 		else {
 			continue;
 		};
@@ -266,12 +261,12 @@ pub(crate) fn check_impl_rules(
 			let has_param_match = has_param_self_type_match(&signature_text, &param_self_type_re);
 
 			if has_return_match || has_param_match {
-				let line = super::shared::line_from_offset(
+				let line = shared::line_from_offset(
 					&ctx.line_starts,
 					usize::from(function.syntax().text_range().start()),
 				);
 
-				super::shared::push_violation(
+				shared::push_violation(
 					violations,
 					ctx,
 					line,
@@ -306,12 +301,12 @@ pub(crate) fn check_inline_trait_bounds(ctx: &FileContext, violations: &mut Vec<
 		for param in item.generic_params() {
 			if let ast::GenericParam::TypeParam(type_param) = param {
 				if type_param.type_bound_list().is_some() {
-					let line = super::shared::line_from_offset(
+					let line = shared::line_from_offset(
 						&ctx.line_starts,
 						usize::from(type_param.syntax().text_range().start()),
 					);
 
-					super::shared::push_violation(
+					shared::push_violation(
 						violations,
 						ctx,
 						line,
@@ -324,10 +319,10 @@ pub(crate) fn check_inline_trait_bounds(ctx: &FileContext, violations: &mut Vec<
 		}
 	}
 	for (idx, line) in ctx.lines.iter().enumerate() {
-		let code = super::shared::strip_string_and_line_comment(line, false).0;
+		let code = shared::strip_string_and_line_comment(line, false).0;
 
 		if INLINE_BOUNDS_RE.is_match(&code) {
-			super::shared::push_violation(
+			shared::push_violation(
 				violations,
 				ctx,
 				idx + 1,
@@ -337,6 +332,10 @@ pub(crate) fn check_inline_trait_bounds(ctx: &FileContext, violations: &mut Vec<
 			);
 		}
 	}
+}
+
+fn line_start_offset_or_eof(ctx: &FileContext, line_one_based: usize) -> usize {
+	shared::offset_from_line(&ctx.line_starts, line_one_based).unwrap_or(ctx.text.len())
 }
 
 fn is_path_separator_colon(text: &str, colon_offset: usize) -> bool {
@@ -373,7 +372,7 @@ fn replace_param_self_types(signature_text: &str, re: &Regex) -> String {
 }
 
 fn classify_impl_trait_order(raw: &str) -> usize {
-	let header = super::shared::strip_string_and_line_comment(raw, false).0;
+	let header = shared::strip_string_and_line_comment(raw, false).0;
 	let Some((left, _right)) = header.split_once(" for ") else {
 		return 0;
 	};
@@ -404,10 +403,10 @@ fn classify_impl_trait_order(raw: &str) -> usize {
 	}
 }
 
-fn top_item_text_range(ctx: &FileContext, item: &super::shared::TopItem) -> Option<(usize, usize)> {
-	let start = super::shared::offset_from_line(&ctx.line_starts, item.start_line)?;
-	let end = super::shared::offset_from_line(&ctx.line_starts, item.end_line + 1)
-		.unwrap_or(ctx.text.len());
+fn top_item_text_range(ctx: &FileContext, item: &TopItem) -> Option<(usize, usize)> {
+	let start = shared::offset_from_line(&ctx.line_starts, item.start_line)?;
+	let end =
+		shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
 
 	if end < start { None } else { Some((start, end)) }
 }

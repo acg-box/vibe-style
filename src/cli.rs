@@ -205,7 +205,6 @@ mod tests {
 			"--all-features",
 			"--no-default-features",
 		]);
-
 		let Command::Tune { cargo, .. } = cli.command else {
 			panic!("Expected tune command.");
 		};

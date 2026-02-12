@@ -13,9 +13,9 @@ pub(crate) use shared::{CargoOptions, RunSummary};
 use std::{fs, path::PathBuf};
 
 use rayon::prelude::*;
-use shared::{Edit, FileContext, Violation};
 
 use crate::prelude::*;
+use shared::{Edit, FileContext, Violation};
 
 const FILE_BATCH_SIZE: usize = 64;
 const MAX_FIX_PASSES: usize = 8;
@@ -541,7 +541,6 @@ fn example() {
 			shared::read_file_context_from_text(Path::new("import006_string.rs"), text.to_owned())
 				.expect("context")
 				.expect("has ctx");
-
 		let (violations, _edits) = collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006"));
@@ -558,7 +557,6 @@ fn example(value: usize) -> String {
 			shared::read_file_context_from_text(Path::new("import006_fix.rs"), original.to_owned())
 				.expect("context")
 				.expect("has ctx");
-
 		let (violations, edits) = collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006" && v.fixable));
@@ -692,9 +690,7 @@ use std::collections::HashSet;
 	#[test]
 	fn import_group_treats_workspace_members_as_self_group_for_spacing() {
 		let workspace_root = env!("CARGO_PKG_NAME").replace('-', "_");
-		let original = format!(
-			"\nuse anyhow::Result;\nuse {workspace_root}::internal::Alpha;\n"
-		);
+		let original = format!("\nuse anyhow::Result;\nuse {workspace_root}::internal::Alpha;\n");
 		let ctx = shared::read_file_context_from_text(
 			Path::new("import_workspace_member.rs"),
 			original.clone(),
@@ -1017,8 +1013,8 @@ fn sample() {
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
 		assert!(applied >= 2);
-		assert!(rewritten.contains("super::shared::line_from_offset()"));
-		assert!(rewritten.contains("use super::shared::{Edit, offset_from_line};"));
+		assert!(rewritten.contains("shared::line_from_offset()"));
+		assert!(rewritten.contains("use super::shared::{self, Edit, offset_from_line};"));
 		assert!(
 			!rewritten.contains("use super::shared::{Edit, line_from_offset, offset_from_line};")
 		);
@@ -1116,6 +1112,41 @@ mod tests {
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+	}
+
+	#[test]
+	fn import008_prefers_imported_symbol_over_redundant_qualified_type_path() {
+		let original = r#"
+use shared::{Edit, Violation};
+
+fn demo(v: Vec<shared::Violation>) -> Option<shared::Violation> {
+	let _ = Edit { start: 0, end: 0, replacement: String::new(), rule: "R" };
+
+	v.into_iter().next()
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_prefers_imported_symbol.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("Vec<Violation>"));
+		assert!(rewritten.contains("Option<Violation>"));
+		assert!(!rewritten.contains("Vec<shared::Violation>"));
+		assert!(!rewritten.contains("Option<shared::Violation>"));
 	}
 
 	#[test]
