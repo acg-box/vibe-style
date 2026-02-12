@@ -1,4 +1,3 @@
-// crates.io
 use clap::{
 	Parser, Subcommand,
 	builder::{
@@ -7,10 +6,8 @@ use clap::{
 	},
 };
 
-// std
 use std::{path::PathBuf, process::ExitCode};
 
-// self
 use crate::{
 	prelude::*,
 	style_checker::{self, RunSummary},
@@ -108,7 +105,6 @@ fn styles() -> Styles {
 
 #[cfg(test)]
 mod tests {
-	// self
 	use super::*;
 
 	#[test]

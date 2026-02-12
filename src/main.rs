@@ -9,13 +9,10 @@ mod prelude {
 	pub use color_eyre::{Result, eyre};
 }
 
-// crates.io
 use clap::Parser;
 
-// std
 use std::process::ExitCode;
 
-// self
 use crate::cli::Cli;
 
 fn main() -> ExitCode {

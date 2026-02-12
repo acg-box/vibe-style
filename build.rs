@@ -1,6 +1,4 @@
-// std
 use std::error::Error;
-// crates.io
 use vergen_gitcl::{CargoBuilder, Emitter, GitclBuilder};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -8,7 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 	emitter.add_instructions(&CargoBuilder::default().target_triple(true).build()?)?;
 
-	// Disable the git version if installed from <https://crates.io>.
+	// Disable the git version when the source checkout metadata is unavailable.
 	if emitter.add_instructions(&GitclBuilder::default().sha(true).build()?).is_err() {
 		println!("cargo:rustc-env=VERGEN_GIT_SHA=crates.io");
 	}

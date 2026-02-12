@@ -1,280 +1,120 @@
-# Rust Development and Style Guide
+# Rust Development Style Guide
 
-These rules apply to Rust code and Rust development workflows in this repository.
-All comments and messages must also follow the Global Language Rules in `AGENTS.md`.
+This document defines mandatory Rust style rules for this repository.
 
 ## Scope
 
-These rules apply to Rust crates, binaries, and tooling in this repository, typically within directories that include a `Cargo.toml`.
-Do not apply them to non-Rust projects.
+- Applies to all Rust crates, binaries, and tooling in this repository.
+- Does not apply to non-Rust projects.
+- Repository language and tone rules are defined in `AGENTS.md` and still apply.
 
-## Rule Keywords and Precedence
+## Enforcement Model
 
-- MUST indicates a strict requirement.
-- SHOULD indicates a strong preference.
-- MAY indicates an optional choice.
-- Treat imperative statements without SHOULD or MAY as MUST.
-- `rustfmt` output is always the final authority for formatting.
+- For rules with `RUST-STYLE-*` IDs, the checker implementation is authoritative:
+  - `src/style_checker/shared.rs` (ID registry)
+  - `src/style_checker/*.rs` (rule behavior and fix behavior)
+- This document defines intent and stable rule semantics.
+- Keep rule IDs stable.
 
-## Development Rules
+## Workflow
 
-### Tooling and Toolchain
+When claiming Rust work is complete:
 
-- The Rust toolchain is pinned.
-- Do not modify `rust-toolchain.toml`, `.cargo/config.toml`, or `rustfmt.toml`.
-- Do not install, update, or override toolchains.
-- Do not invoke system package managers.
+1. `cargo make fmt-rust`
+2. `cargo make lint-rust`
+3. `cargo make test-rust` when behavior changed.
+
+## Tooling and Platform Constraints
+
+- Rust toolchain is pinned. Do not modify `rust-toolchain.toml`, `.cargo/config.toml`, or `.rustfmt.toml`.
+- Do not install, update, or override system/toolchain packages.
+- Use `cargo make` tasks when applicable.
+
+## Non-ID Rules (Still Mandatory)
+
+### Time and TLS
+
+- Use `time` crate types for date/time. Do not add `chrono`.
+- Prefer rustls. Use native-tls only when rustls is unsupported.
+
+### Error Handling
+
+- Use `color_eyre::eyre::Result` for fallible APIs. Do not introduce `anyhow`.
+- Add boundary context while preserving the source error.
+- Boundary includes public APIs, entrypoints, and cross-module helpers.
+- Use `#[error(transparent)]` only for true thin wrappers.
+- Use short, action-oriented error messages.
+- Use `ok_or_else` for `Option` to `Result` conversion with context.
+
+### Readability and Ownership
+
+- Keep happy path linear.
+- Extract helpers when functions become hard to follow.
+- Avoid unnecessary `.clone()`.
+- Prefer borrowing (`&`) when equivalent.
+- Use explicit `drop` only when early release is required.
+- Use `let _ = value;` only to end a borrow on references when needed.
+
+## Style Rule IDs (Checker Mapping)
+
+### File Structure
+
+- `RUST-STYLE-FILE-001`: Do not use `mod.rs`; use flat module files.
+
+### Module Layout
+
+- `RUST-STYLE-MOD-001`: Top-level item order is `mod`, `use`, `macro_rules!`, `type`, `const`, `static`, `trait`, `enum`, `struct`, `impl`, `fn`.
+- `RUST-STYLE-MOD-002`: Place `pub` items before non-`pub` items within a group.
+- `RUST-STYLE-MOD-003`: Place non-`async` functions before `async` functions at the same visibility.
+- `RUST-STYLE-MOD-005`: Keep each type adjacent to its related `impl` blocks, with no blank line between the type and first `impl`.
+- `RUST-STYLE-MOD-007`: In `#[cfg(test)] mod tests`, include `#[allow(unused_imports)] use super::*;` unless it is a keep-alive module.
+
+### Serde
+
+- `RUST-STYLE-SERDE-001`: Do not use `#[serde(default)]` on `Option<T>` fields.
+
+### Imports and Paths
+
+- `RUST-STYLE-IMPORT-001`: Group imports by origin in order: standard library, third-party, self/workspace.
+- `RUST-STYLE-IMPORT-002`: Use exactly one blank line between groups; do not use import-group header comments. Normalize `use a::{b, b::c}` to `use a::{b::{self, c}}`.
+- `RUST-STYLE-IMPORT-003`: Do not alias imports, except `as _` in keep-alive test modules.
+- `RUST-STYLE-IMPORT-004`: Do not import free functions/macros into scope; use qualified paths. If imported symbols are ambiguous (same symbol name from multiple paths), do not import them and use fully qualified paths.
+- `RUST-STYLE-IMPORT-005`: In `error.rs`, do not add `use` imports.
+- `RUST-STYLE-IMPORT-006`: Do not qualify standard macros with `std::`.
+- `RUST-STYLE-IMPORT-007`: Avoid redundant `crate::...` imports when `crate::prelude::*` is imported.
+
+### Types and Generics
+
+- `RUST-STYLE-IMPL-001`: Use `Self` instead of concrete type names in `impl` method signatures.
+- `RUST-STYLE-IMPL-003`: Keep `impl` blocks contiguous and ordered as inherent, standard-library traits, third-party traits, workspace-member traits.
+- `RUST-STYLE-GENERICS-001`: Move trait bounds to `where`; do not use inline bounds.
+
+### Logging
+
+- `RUST-STYLE-LOG-002`: Use structured logging fields and complete-sentence messages.
 
 ### Runtime Safety
 
-- Do not use `unwrap()` in non-test code.
-- `expect()` requires a clear message.
-- Never block inside async contexts.
-
-## Style Rules
-
-### Indentation
-
-- Use tabs (`\t`) for indentation.
-
-### Declaration Order
-
-At module scope, order items as:
-
-```
-mod
-use
-macro_rules!
-type
-const
-static
-trait
-enum
-struct
-impl
-fn
-```
-
-Rules:
-
-- Within each group, place `pub` items before non-`pub` items.
-- Within the `fn` group at the same visibility, place non-`async` functions before `async` functions.
-- Any tests module, whether inline (`#[cfg(test)] mod tests { ... }`) or declared with `mod tests;`, MUST appear after all other items.
-- Inside `#[cfg(test)] mod tests`, you MUST use `use super::*;`.
-
-Example (illustrative):
-
-```rust
-pub fn build_request() -> Request {
-	// ...
-}
-
-pub async fn fetch_response() -> Response {
-	// ...
-}
-```
-
-### Imports and Headers
-
-Allowed `use` section headers and meanings:
-
-- `// std` (paths starting with `std::`).
-- `// crates.io` (third-party crates declared in `Cargo.toml`).
-- `// self` (current crate paths starting with `crate::` or `self::`).
-
-Rules:
-
-- Preserve existing groups. Do not invent new groups or add headers above non-import items.
-- Within each group, order imports lexicographically by full path text (ASCII order, case-sensitive).
-- Do not import functions directly; import the module and call `module::function(...)`.
-- Keep a single module qualifier in calls. For nested modules, import and alias so calls are `module::function(...)`, not `module::module::function(...)`.
-- If `crate::prelude::*` is imported, do not add redundant imports.
-
-### Module Layout (No mod.rs)
-
-Use a flat structure:
-
-```
-src/foo.rs
-src/foo/bar.rs
-src/foo/baz.rs
-```
-
-Do not create or modify `mod.rs`.
-
-### Structs, Enums, and Impl Blocks
-
-For each type:
-
-1. The first `impl` block MUST appear immediately after the type definition.
-2. All `impl` blocks MUST be contiguous without blank lines between them.
-3. `impl` order MUST be:
-   1. Inherent `impl`.
-   2. Standard library traits.
-   3. Third-party traits.
-   4. Project or self traits.
-
-Inside `impl Type` blocks, you MUST use `Self` instead of the concrete type name when referring to the implementing type in method signatures (parameters and return types), including references, slices, and generic containers.
-
-Examples (illustrative):
-
-Allowed:
-
-```rust
-struct A;
-impl A {
-	fn new() -> Self {
-		Self
-	}
-
-	fn from_owned(value: Self) -> Self {
-		value
-	}
-
-	fn from_ref(value: &Self) -> &Self {
-		value
-	}
-
-	fn collect_all(values: &[Self]) -> Vec<Self> {
-		values.to_vec()
-	}
-}
-```
-
-Forbidden:
-
-```rust
-struct A;
-impl A {
-	fn new() -> A {
-		A
-	}
-
-	fn from_owned(value: A) -> A {
-		value
-	}
-
-	fn from_ref(value: &A) -> &A {
-		value
-	}
-
-	fn collect_all(values: &[A]) -> Vec<A> {
-		values.to_vec()
-	}
-}
-```
-
-### Generics and Trait Bounds
-
-- All bounds MUST go in a `where` clause.
-- Inline trait bounds MUST NOT be used.
-- You MAY use `impl Trait`.
-
-Allowed:
-
-```rust
-fn render<T>(value: T) -> String
-where
-	T: Display,
-{
-```
-
-Forbidden:
-
-```rust
-fn render<T: Display>(value: T) -> String {
-```
-
-### Logging Rules
-
-- Tracing macros MUST be fully qualified (for example, `tracing::info!`).
-- Tracing macros MUST NOT be imported.
-- Tracing calls MUST use structured fields for dynamic values such as identifiers, names, counts, statuses, sizes, durations, and errors.
-- You MUST NOT encode those values only in the message string.
-- Use a short, action-oriented message alongside structured fields.
-- Do not create temporary variables solely for logging.
-
-Allowed:
-
-```rust
-tracing::info!(user_id, org_id, "User logged in.");
-```
-
-Forbidden:
-
-```rust
-tracing::info!("User {user_id} logged in (org {org_id}).");
-```
+- `RUST-STYLE-RUNTIME-001`: Do not use `unwrap()` in non-test code.
+- `RUST-STYLE-RUNTIME-002`: `expect()` must use a clear, user-actionable string literal message.
 
 ### Numeric Literals
 
-- When using a numeric type suffix, you MUST separate the value and suffix with a single underscore.
-- For decimal integer literals with more than three digits (ignoring the sign), you MUST insert an underscore every three digits from the right.
+- `RUST-STYLE-NUM-001`: Separate numeric literal suffixes with an underscore.
+- `RUST-STYLE-NUM-002`: Use underscore grouping for integers with more than three digits.
 
-Allowed:
+### Readability
 
-- `10_f64`.
-- `1_u32`.
-- `0_i64`.
-- `1_000`.
-- `10_000`.
-- `1_000_000`.
-
-Forbidden:
-
-- `10f64`.
-- `1u32`.
-- `0i64`.
-- `1000`.
-- `10000`.
-- `1000000`.
-
-### Error Wrapping
-
-- Add contextual messages at crate or module boundaries and keep the original error as the source.
-- Use `#[error(transparent)]` only for thin wrappers where this crate adds no context and the upstream message is already sufficient for developers.
-- Use short, action-oriented messages that name the operation and include the source error.
-
-Example (illustrative):
-
-```rust
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-	#[error(transparent)]
-	Utf8(#[from] std::str::Utf8Error),
-
-	#[error("Failed to serialize JetStream payload: {0}.")]
-	Json(#[from] serde_json::Error),
-}
-```
-
-### Borrowing and Ownership
-
-- Prefer borrowing with `&` over `.as_*()` conversions when both are applicable.
-- Avoid `.clone()` unless it is required by ownership or lifetimes, or it clearly improves clarity. Do not pay a cost with no benefit.
-- Use `into_iter()` when intentionally consuming collections.
-- Do not use scope blocks solely to end a borrow.
-- When an early release is required, use an explicit `drop`.
-- When the value is a reference and you need to end a borrow without a drop warning, use `let _ = value;`.
-- Do not create single-use `let` bindings that only forward a value. Inline the expression unless it improves readability, error handling, or avoids repeated work.
+- `RUST-STYLE-READ-002`: Keep functions at or under 120 lines.
 
 ### Vertical Spacing
 
-Inside Rust functions:
+- `RUST-STYLE-SPACE-003`: No blank lines within the same statement type; exactly one blank line between different statement types.
+- `RUST-STYLE-SPACE-004`: Exactly one blank line before each `return`, and before final tail expressions unless the body is a single expression.
 
-- Do not insert blank lines within the same statement type.
-- Insert one blank line between different statement types.
-- Insert exactly one blank line before the final return or tail expression, unless the body is a single expression.
+For statement-type classification details (including turbofish, UFCS, method grouping, and recursive nested-block checks), the checker implementation is authoritative.
 
-Treat statements as the same type when they share the same syntactic form or call target, such as:
+### Tests
 
-- Multiple `let` statements.
-- Multiple `if` or `if let` statements.
-- Multiple `match` statements.
-- Multiple loop statements (`for`, `while`, `loop`).
-- Multiple macro calls (`println!`, `tracing::...`).
-- Multiple `Type::function(...)` calls.
-- Multiple `self.method(...)` calls.
-- Multiple assignment statements like `a = b`.
-
-This list is not exhaustive. Apply the same rule to any repeated statement shape.
+- `RUST-STYLE-TEST-001`: Use descriptive `snake_case` test names.
+- `RUST-STYLE-TEST-002`: Reserve `#[cfg(test)] mod _test` for keep-alive imports only.
