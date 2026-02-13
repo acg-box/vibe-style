@@ -10,7 +10,11 @@ mod spacing;
 
 pub(crate) use shared::{CargoOptions, RunSummary};
 
-use std::{fs, path::PathBuf};
+use std::{
+	collections::BTreeMap,
+	fs,
+	path::{Path, PathBuf},
+};
 
 use rayon::prelude::*;
 
@@ -23,7 +27,10 @@ const MAX_FIX_PASSES: usize = 8;
 #[derive(Debug)]
 struct FileFixOutcome {
 	path: PathBuf,
+	original_text: Option<String>,
 	rewritten_text: Option<String>,
+	fallback_without_import_shortening: Option<String>,
+	had_import_shortening_edits: bool,
 	applied_count: usize,
 }
 
@@ -74,48 +81,44 @@ pub(crate) fn run_fix(
 ) -> Result<RunSummary> {
 	let files = shared::resolve_files(requested_files, cargo_options)?;
 	let mut total_applied = 0_usize;
+	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
+	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
+	let baseline_error_files = semantic::collect_compiler_error_files(&files, cargo_options)?;
 
 	for batch in files.chunks(FILE_BATCH_SIZE) {
 		let outcomes = batch
 			.par_iter()
 			.map(|file| -> Result<FileFixOutcome> {
-				let mut text = match fs::read_to_string(file) {
+				let original_text = match fs::read_to_string(file) {
 					Ok(text) => text,
 					Err(_) => {
 						return Ok(FileFixOutcome {
 							path: file.clone(),
+							original_text: None,
 							rewritten_text: None,
+							fallback_without_import_shortening: None,
+							had_import_shortening_edits: false,
 							applied_count: 0,
 						});
 					},
 				};
-				let mut pass = 0_usize;
-				let mut applied_count = 0_usize;
+				let (text, applied_count, had_import_shortening_edits) =
+					apply_fix_passes(file, &original_text, true)?;
+				let fallback_without_import_shortening = if had_import_shortening_edits {
+					let (fallback, _fallback_applied, _fallback_import_edits) =
+						apply_fix_passes(file, &original_text, false)?;
 
-				while pass < MAX_FIX_PASSES {
-					pass += 1;
-
-					let Some(ctx) = shared::read_file_context_from_text(file, text.clone())? else {
-						break;
-					};
-					let (_violations, edits) = collect_violations(&ctx, true);
-
-					if edits.is_empty() {
-						break;
-					}
-
-					let applied = fixes::apply_edits(&mut text, edits)?;
-
-					if applied == 0 {
-						break;
-					}
-
-					applied_count += applied;
-				}
+					(text != fallback).then_some(fallback)
+				} else {
+					None
+				};
 
 				Ok(FileFixOutcome {
 					path: file.clone(),
+					original_text: if applied_count > 0 { Some(original_text) } else { None },
 					rewritten_text: if applied_count > 0 { Some(text) } else { None },
+					fallback_without_import_shortening,
+					had_import_shortening_edits,
 					applied_count,
 				})
 			})
@@ -128,6 +131,36 @@ pub(crate) fn run_fix(
 
 			if let Some(text) = outcome.rewritten_text {
 				fs::write(&outcome.path, text)?;
+			}
+			if let Some(original_text) = outcome.original_text {
+				changed_originals
+					.insert(normalize_path(&outcome.path), (outcome.path.clone(), original_text));
+			}
+
+			if outcome.had_import_shortening_edits
+				&& let Some(fallback) = outcome.fallback_without_import_shortening
+			{
+				import_fallbacks.insert(normalize_path(&outcome.path), (outcome.path, fallback));
+			}
+		}
+	}
+
+	if !import_fallbacks.is_empty() || !changed_originals.is_empty() {
+		let post_error_files = semantic::collect_compiler_error_files(&files, cargo_options)?;
+		let mut handled = BTreeMap::<PathBuf, ()>::new();
+
+		for normalized in post_error_files.difference(&baseline_error_files) {
+			if let Some((path, fallback)) = import_fallbacks.get(normalized) {
+				fs::write(path, fallback)?;
+				handled.insert(normalized.clone(), ());
+			}
+		}
+		for normalized in post_error_files.difference(&baseline_error_files) {
+			if handled.contains_key(normalized) {
+				continue;
+			}
+			if let Some((path, original_text)) = changed_originals.get(normalized) {
+				fs::write(path, original_text)?;
 			}
 		}
 	}
@@ -143,6 +176,59 @@ pub(crate) fn run_fix(
 		applied_fix_count: total_applied,
 		output_lines: checked.output_lines,
 	})
+}
+
+fn apply_fix_passes(
+	path: &Path,
+	initial_text: &str,
+	with_import_shortening: bool,
+) -> Result<(String, usize, bool)> {
+	let mut text = initial_text.to_owned();
+	let mut pass = 0_usize;
+	let mut applied_count = 0_usize;
+	let mut had_import_shortening_edits = false;
+
+	while pass < MAX_FIX_PASSES {
+		pass += 1;
+
+		let Some(ctx) = shared::read_file_context_from_text(path, text.clone())? else {
+			break;
+		};
+		let (_violations, mut edits) = collect_violations(&ctx, true);
+
+		if with_import_shortening {
+			if edits.iter().any(|edit| is_import_shortening_rule(edit.rule)) {
+				had_import_shortening_edits = true;
+			}
+		} else {
+			edits.retain(|edit| !is_import_shortening_rule(edit.rule));
+		}
+
+		if edits.is_empty() {
+			break;
+		}
+
+		let applied = fixes::apply_edits(&mut text, edits)?;
+
+		if applied == 0 {
+			break;
+		}
+
+		applied_count += applied;
+	}
+
+	Ok((text, applied_count, had_import_shortening_edits))
+}
+
+fn is_import_shortening_rule(rule: &str) -> bool {
+	matches!(rule, "RUST-STYLE-IMPORT-008" | "RUST-STYLE-IMPORT-009")
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+	match fs::canonicalize(path) {
+		Ok(canonical) => canonical,
+		Err(_) => path.to_path_buf(),
+	}
 }
 
 pub(crate) fn print_coverage() {
@@ -591,6 +677,56 @@ impl Usage {
 		assert!(rewritten.contains("usage: rig::completion::Usage"));
 		assert!(rewritten.contains("-> Self"));
 		assert!(!rewritten.contains(":: Self"));
+	}
+
+	#[test]
+	fn impl_fix_skips_trait_impl_signatures() {
+		let original = r#"
+struct UserData;
+mod grpc {
+	pub struct UserData;
+}
+impl From<UserData> for grpc::UserData {
+	fn from(user: UserData) -> grpc::UserData {
+		let _ = user;
+		grpc::UserData
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("impl_trait_signature_guard.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-001"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPL-001"));
+	}
+
+	#[test]
+	fn impl_fix_does_not_rewrite_generic_target_variants_to_self() {
+		let original = r#"
+struct Inference<T> {
+	output: T,
+}
+impl<T> Inference<T> {
+	fn map_output<U>(self, f: impl FnOnce(T) -> U) -> Inference<U> {
+		Inference { output: f(self.output) }
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("impl_generic_self_guard.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-001"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPL-001"));
 	}
 
 	#[test]
@@ -1087,7 +1223,41 @@ where
 		let (violations, edits) = collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+	}
+
+	#[test]
+	fn import008_merges_alias_child_import_into_existing_parent_module_use() {
+		let original = r#"
+use futures::channel::mpsc;
+
+fn send(tx: mpsc::UnboundedSender<u8>) {
+	let _ = tx;
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_merge_alias_child.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("use futures::channel::mpsc::{self, UnboundedSender};"));
+		assert!(rewritten.contains("fn send(tx: UnboundedSender<u8>)"));
+		assert!(!rewritten.contains("use mpsc::UnboundedSender;"));
 	}
 
 	#[test]
@@ -1150,7 +1320,7 @@ fn demo(v: Vec<shared::Violation>) -> Option<shared::Violation> {
 	}
 
 	#[test]
-	fn import008_does_not_shorten_when_glob_import_exists() {
+	fn import008_does_not_shorten_result_when_only_local_glob_exists() {
 		let original = r#"
 use sqlx::Result;
 
@@ -1178,6 +1348,120 @@ pub async fn get_by_id(db: &PgPool, dry_run_id: i64) -> sqlx::Result<Option<Feed
 
 		assert!(rewritten.contains("-> sqlx::Result<"));
 		assert!(!rewritten.contains("-> Result<"));
+	}
+
+	#[test]
+	fn import008_shortens_when_same_root_glob_exists() {
+		let original = r#"
+use sqlx::Result;
+use sqlx::*;
+
+pub async fn get_by_id(db: &PgPool, dry_run_id: i64) -> sqlx::Result<Option<i64>> {
+	let _ = (db, dry_run_id);
+	todo!()
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import008_same_root_glob_ambiguity_guard.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("-> sqlx::Result<"));
+		assert!(rewritten.contains("-> Result<"));
+	}
+
+	#[test]
+	fn import008_skips_non_importable_self_root_paths() {
+		let text = r#"
+trait Job {
+	type Output;
+	fn run(&self) -> Self::Output;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import008_skip_self_root.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+	}
+
+	#[test]
+	fn import008_skips_non_importable_generic_root_paths() {
+		let text = r#"
+use serde::Serializer;
+
+pub fn serialize<S>(serializer: S) -> Result<S::Ok, S::Error>
+where
+	S: Serializer,
+{
+	let _ = serializer;
+	todo!()
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import008_skip_generic_root.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+	}
+
+	#[test]
+	fn import008_skips_std_result_alias_shortening() {
+		let text = r#"
+pub fn run() -> std::result::Result<(), String> {
+	Ok(())
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import008_skip_std_result_alias.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+	}
+
+	#[test]
+	fn import008_blocks_high_risk_symbols_with_foreign_glob_imports() {
+		let text = r#"
+use crate::_prelude::*;
+
+fn classify(error: pubfi_ai::Error) {
+	let _ = error;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import008_high_risk_glob_guard.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
 	}
 
 	#[test]
@@ -1236,11 +1520,11 @@ fn sample(a: A, aa: b::A) {
 	}
 
 	#[test]
-	fn import009_fix_rewrites_when_glob_import_conflicts() {
+	fn import009_does_not_rewrite_when_no_mixed_qualified_paths() {
 		let original = r#"
 use sqlx::Result;
+use sqlx::*;
 
-use super::*;
 use pubfi_db::service::feed::dry_runs::FeedDryRunRow;
 
 pub async fn get_by_id(db: &PgPool, dry_run_id: i64) -> Result<Option<FeedDryRunRow>> {
@@ -1256,15 +1540,197 @@ pub async fn get_by_id(db: &PgPool, dry_run_id: i64) -> Result<Option<FeedDryRun
 		.expect("has ctx");
 		let (violations, edits) = collect_violations(&ctx, true);
 
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("\nuse sqlx::Result;"));
+		assert!(rewritten.contains("-> Result<"));
+	}
+
+	#[test]
+	fn import009_does_not_rewrite_external_imports_for_local_glob_only() {
+		let original = r#"
+use super::*;
+use pubfi_db::service::users::UserRow;
+
+pub struct UserProfile {
+	pub user: UserRow,
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_local_glob_only.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+	}
+
+	#[test]
+	fn import009_rewrites_result_when_local_glob_is_present() {
+		let original = r#"
+use actix_web::Result;
+
+use super::*;
+
+pub async fn channels_get(state: Data<State>) -> Result<HttpResponse> {
+	let _ = state;
+	todo!()
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_local_glob_result.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
 
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
-		assert!(!rewritten.contains("\nuse sqlx::Result;"));
-		assert!(rewritten.contains("-> sqlx::Result<"));
-		assert!(!rewritten.contains("-> Result<"));
+		assert!(!rewritten.contains("use actix_web::Result;"));
+		assert!(rewritten.contains("-> actix_web::Result<HttpResponse>"));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_non_importable_generic_root_use() {
+		let original = r#"
+use serde::Serializer;
+use S::Error;
+use S::Ok;
+
+pub fn serialize<S>(serializer: S) -> Result<Ok, Error>
+where
+	S: Serializer,
+{
+	let _ = serializer;
+	todo!()
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_non_importable_generic_root.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("use S::Error;"));
+		assert!(!rewritten.contains("use S::Ok;"));
+		assert!(rewritten.contains("-> Result<S::Ok, S::Error>"));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_non_importable_self_root_use() {
+		let original = r#"
+use Self::Error;
+
+trait Task {
+	type Error;
+	fn run(&self) -> Result<(), Error>;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_non_importable_self_root.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("use Self::Error;"));
+		assert!(rewritten.contains("-> Result<(), Self::Error>"));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_std_fmt_result_import_to_qualified_non_generic_uses() {
+		let original = r#"
+use std::fmt::Result;
+
+fn format_output() -> Result {
+	Ok(())
+}
+
+fn parse_value() -> Result<u8, &'static str> {
+	Ok(1)
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import009_std_fmt_result.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
+
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(!rewritten.contains("use std::fmt::Result;"));
+		assert!(rewritten.contains("fn format_output() -> std::fmt::Result"));
+		assert!(rewritten.contains("fn parse_value() -> Result<u8, &'static str>"));
+	}
+
+	#[test]
+	fn import009_fix_removes_std_fmt_result_import_when_generic_result_is_used() {
+		let original = r#"
+use std::fmt::Result;
+
+fn parse_value() -> Result<u8, &'static str> {
+	Ok(1)
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import009_std_fmt_result_generic_only.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(!rewritten.contains("use std::fmt::Result;"));
+		assert!(rewritten.contains("fn parse_value() -> Result<u8, &'static str>"));
 	}
 
 	#[test]
