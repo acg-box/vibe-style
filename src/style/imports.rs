@@ -1199,9 +1199,7 @@ fn split_import_leaf_alias(leaf: &str) -> Option<(&str, Option<String>)> {
 }
 
 fn has_non_inline_child_modules(ctx: &FileContext) -> bool {
-	ctx.top_items
-		.iter()
-		.any(|item| item.kind == TopKind::Mod && item.raw.trim_end().ends_with(';'))
+	ctx.top_items.iter().any(|item| item.kind == TopKind::Mod && item.raw.trim_end().ends_with(';'))
 }
 
 fn apply_import004_free_fn_macro_rule(
@@ -3571,13 +3569,8 @@ fn normalize_mixed_self_child_use_path(ctx: &FileContext, path: &str) -> Option<
 		.unwrap_or_default();
 	let allow_drop_unused_self = matches!(root, "crate" | "self" | "super");
 	let (groups, parsed_heads) = build_mixed_use_groups(&segments);
-	let rewritten = rewrite_mixed_use_segments(
-		ctx,
-		&segments,
-		&groups,
-		&parsed_heads,
-		allow_drop_unused_self,
-	)?;
+	let rewritten =
+		rewrite_mixed_use_segments(ctx, &segments, &groups, &parsed_heads, allow_drop_unused_self)?;
 	let rewritten_path = format!("{prefix}{}{}", rewritten.join(", "), &path[close..=close]);
 
 	if rewritten_path == path { None } else { Some(rewritten_path) }
