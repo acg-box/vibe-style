@@ -50,6 +50,9 @@ pub(crate) fn check_impl_rules(
 		let ast::Item::Impl(impl_item) = item else {
 			continue;
 		};
+		if impl_item.trait_().is_some() {
+			continue;
+		}
 		let Some(self_ty) = impl_item.self_ty() else {
 			continue;
 		};
@@ -84,7 +87,8 @@ pub(crate) fn check_impl_rules(
 			} else {
 				function.syntax().text().to_string()
 			};
-			let has_return_match = return_self_type_re.is_match(&signature_text);
+			let has_return_match =
+				has_return_self_type_match(&signature_text, &return_self_type_re);
 			let has_param_match = has_param_self_type_match(&signature_text, &param_self_type_re);
 
 			if has_return_match || has_param_match {
@@ -105,8 +109,7 @@ pub(crate) fn check_impl_rules(
 				);
 
 				if emit_edits {
-					let replaced =
-						return_self_type_re.replace_all(&signature_text, "-> Self").to_string();
+					let replaced = replace_return_self_types(&signature_text, &return_self_type_re);
 					let replaced = replace_param_self_types(&replaced, &param_self_type_re);
 					let start = usize::from(function.syntax().text_range().start());
 					let end = start + signature_text.len();
@@ -126,22 +129,22 @@ pub(crate) fn check_impl_rules(
 pub(crate) fn check_inline_trait_bounds(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	for item in ctx.source_file.syntax().descendants().filter_map(ast::GenericParamList::cast) {
 		for param in item.generic_params() {
-			if let ast::GenericParam::TypeParam(type_param) = param {
-				if type_param.type_bound_list().is_some() {
-					let line = shared::line_from_offset(
-						&ctx.line_starts,
-						usize::from(type_param.syntax().text_range().start()),
-					);
+			if let ast::GenericParam::TypeParam(type_param) = param
+				&& type_param.type_bound_list().is_some()
+			{
+				let line = shared::line_from_offset(
+					&ctx.line_starts,
+					usize::from(type_param.syntax().text_range().start()),
+				);
 
-					shared::push_violation(
-						violations,
-						ctx,
-						line,
-						"RUST-STYLE-GENERICS-001",
-						"Inline trait bounds are not allowed. Move bounds into a where clause.",
-						false,
-					);
-				}
+				shared::push_violation(
+					violations,
+					ctx,
+					line,
+					"RUST-STYLE-GENERICS-001",
+					"Inline trait bounds are not allowed. Move bounds into a where clause.",
+					false,
+				);
 			}
 		}
 	}
@@ -281,7 +284,7 @@ fn check_type_impl_adjacency(
 
 	if impl_start > type_end + 1 {
 		push_blank_between_type_and_impl_violation(
-			ctx, violations, edits, emit_edits, type_name, first_impl, type_end, impl_start,
+			ctx, violations, edits, emit_edits, type_name, type_idx, first_impl,
 		);
 	}
 }
@@ -355,10 +358,11 @@ fn push_blank_between_type_and_impl_violation(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 	type_name: &str,
+	type_idx: usize,
 	first_impl: usize,
-	type_end: usize,
-	impl_start: usize,
 ) {
+	let type_end = ctx.top_items[type_idx].end_line;
+	let impl_start = ctx.top_items[first_impl].start_line;
 	let between = &ctx.lines[type_end..impl_start.saturating_sub(1)];
 
 	if !between.iter().any(|line| line.trim().is_empty()) {
@@ -394,9 +398,49 @@ fn is_path_separator_colon(text: &str, colon_offset: usize) -> bool {
 	colon_offset > 0 && text.as_bytes().get(colon_offset - 1) == Some(&b':')
 }
 
-fn has_param_self_type_match(signature_text: &str, re: &Regex) -> bool {
+fn has_immediate_type_args(text: &str, mut end_offset: usize) -> bool {
+	let bytes = text.as_bytes();
+
+	while end_offset < bytes.len() && bytes[end_offset].is_ascii_whitespace() {
+		end_offset += 1;
+	}
+
+	bytes.get(end_offset) == Some(&b'<')
+}
+
+fn has_return_self_type_match(signature_text: &str, re: &Regex) -> bool {
 	re.find_iter(signature_text)
-		.any(|matched| !is_path_separator_colon(signature_text, matched.start()))
+		.any(|matched| !has_immediate_type_args(signature_text, matched.end()))
+}
+
+fn has_param_self_type_match(signature_text: &str, re: &Regex) -> bool {
+	re.find_iter(signature_text).any(|matched| {
+		!is_path_separator_colon(signature_text, matched.start())
+			&& !has_immediate_type_args(signature_text, matched.end())
+	})
+}
+
+fn replace_return_self_types(signature_text: &str, re: &Regex) -> String {
+	let mut out = String::with_capacity(signature_text.len());
+	let mut cursor = 0_usize;
+
+	for matched in re.find_iter(signature_text) {
+		if has_immediate_type_args(signature_text, matched.end()) {
+			continue;
+		}
+
+		out.push_str(&signature_text[cursor..matched.start()]);
+		out.push_str("-> Self");
+		cursor = matched.end();
+	}
+
+	if cursor == 0 {
+		return signature_text.to_owned();
+	}
+
+	out.push_str(&signature_text[cursor..]);
+
+	out
 }
 
 fn replace_param_self_types(signature_text: &str, re: &Regex) -> String {
@@ -404,7 +448,9 @@ fn replace_param_self_types(signature_text: &str, re: &Regex) -> String {
 	let mut cursor = 0_usize;
 
 	for matched in re.find_iter(signature_text) {
-		if is_path_separator_colon(signature_text, matched.start()) {
+		if is_path_separator_colon(signature_text, matched.start())
+			|| has_immediate_type_args(signature_text, matched.end())
+		{
 			continue;
 		}
 
@@ -431,10 +477,10 @@ fn classify_impl_trait_order(raw: &str) -> usize {
 	let mut trait_part =
 		left.split_once("impl").map(|(_, right)| right.trim().to_owned()).unwrap_or_default();
 
-	if trait_part.starts_with('<') {
-		if let Some((_, after)) = trait_part.split_once('>') {
-			trait_part = after.trim().to_owned();
-		}
+	if trait_part.starts_with('<')
+		&& let Some((_, after)) = trait_part.split_once('>')
+	{
+		trait_part = after.trim().to_owned();
 	}
 
 	let trait_name = trait_part.split(['<', ' ', '{']).next().unwrap_or_default().trim();

@@ -35,6 +35,19 @@ struct ImportedSymbolMaps {
 	full_paths_by_symbol: HashMap<String, HashSet<String>>,
 }
 
+struct Import009Context<'a> {
+	use_items: &'a [&'a TopItem],
+	maps: &'a ImportedSymbolMaps,
+	local_defined_symbols: &'a HashSet<String>,
+	qualified_type_paths_by_symbol: &'a HashMap<String, HashSet<String>>,
+	glob_roots: &'a HashSet<String>,
+}
+
+struct UseItemFlags {
+	has_prelude_glob: bool,
+	glob_roots: HashSet<String>,
+}
+
 #[derive(Default)]
 struct MixedUseGroup {
 	indices: Vec<usize>,
@@ -68,28 +81,30 @@ pub(crate) fn check_import_rules(
 	let local_module_roots = collect_local_module_roots(ctx);
 	let use_runs = collect_non_pub_use_runs(ctx);
 	let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
-	let (has_prelude_glob, has_risky_glob_import, risky_glob_roots) =
-		collect_use_item_flags(ctx, &use_items);
-	let (import007_lines, import004_fixed_lines) =
-		apply_use_item_rules(ctx, violations, edits, emit_edits, &use_items, has_prelude_glob);
+	let use_flags = collect_use_item_flags(ctx, &use_items);
+	let (import007_lines, import004_fixed_lines) = apply_use_item_rules(
+		ctx,
+		violations,
+		edits,
+		emit_edits,
+		&use_items,
+		use_flags.has_prelude_glob,
+	);
 	let imported_symbol_maps = collect_imported_symbol_maps(ctx, &use_items);
 
 	push_import004_ambiguous_symbol_violations(ctx, violations, &imported_symbol_maps);
 
 	let local_defined_symbols = collect_local_defined_symbols(ctx);
 	let qualified_type_paths_by_symbol = collect_qualified_type_paths_by_symbol(ctx);
-	let import009_fixed_lines = apply_import009_rules(
-		ctx,
-		violations,
-		edits,
-		emit_edits,
-		&use_items,
-		&imported_symbol_maps,
-		&local_defined_symbols,
-		&qualified_type_paths_by_symbol,
-		has_risky_glob_import,
-		&risky_glob_roots,
-	);
+	let import009_ctx = Import009Context {
+		use_items: &use_items,
+		maps: &imported_symbol_maps,
+		local_defined_symbols: &local_defined_symbols,
+		qualified_type_paths_by_symbol: &qualified_type_paths_by_symbol,
+		glob_roots: &use_flags.glob_roots,
+	};
+	let import009_fixed_lines =
+		apply_import009_rules(ctx, violations, edits, emit_edits, &import009_ctx);
 	let import008_group_skip_lines = apply_import008_rules(
 		ctx,
 		violations,
@@ -99,8 +114,8 @@ pub(crate) fn check_import_rules(
 		&local_module_roots,
 		&local_defined_symbols,
 		&imported_symbol_maps.full_paths_by_symbol,
-		has_prelude_glob,
-		has_risky_glob_import,
+		use_flags.has_prelude_glob,
+		&use_flags.glob_roots,
 	);
 	let mut import_group_skip_lines = import007_lines;
 
@@ -124,13 +139,9 @@ pub(crate) fn check_import_rules(
 	);
 }
 
-fn collect_use_item_flags(
-	ctx: &FileContext,
-	use_items: &[&TopItem],
-) -> (bool, bool, HashSet<String>) {
+fn collect_use_item_flags(ctx: &FileContext, use_items: &[&TopItem]) -> UseItemFlags {
 	let mut has_prelude_glob = false;
-	let mut has_risky_glob_import = false;
-	let mut risky_glob_roots = HashSet::new();
+	let mut glob_roots = HashSet::new();
 
 	for item in use_items {
 		let Some(path) = extract_use_path(ctx, item) else {
@@ -141,18 +152,12 @@ fn collect_use_item_flags(
 		if compact_path == "crate::prelude::*" {
 			has_prelude_glob = true;
 		}
-		if compact_path.ends_with("::*") && compact_path != "crate::prelude::*" {
-			has_risky_glob_import = true;
-
-			if let Some(root) = compact_path.split("::").next() {
-				if !root.is_empty() {
-					risky_glob_roots.insert(root.to_owned());
-				}
-			}
+		if let Some(root) = glob_import_root(&compact_path) {
+			glob_roots.insert(root);
 		}
 	}
 
-	(has_prelude_glob, has_risky_glob_import, risky_glob_roots)
+	UseItemFlags { has_prelude_glob, glob_roots }
 }
 
 fn apply_use_item_rules(
@@ -170,6 +175,18 @@ fn apply_use_item_rules(
 		let Some(path) = extract_use_path(ctx, item) else {
 			continue;
 		};
+		if apply_import009_std_fmt_result_rule(ctx, violations, edits, emit_edits, item, &path) {
+			import004_fixed_lines.insert(item.line);
+
+			continue;
+		}
+		if apply_import009_non_importable_root_use_rule(
+			ctx, violations, edits, emit_edits, item, &path,
+		) {
+			import004_fixed_lines.insert(item.line);
+
+			continue;
+		}
 
 		apply_import002_normalization_rule(ctx, violations, edits, emit_edits, item, &path);
 		push_alias_violation_if_needed(ctx, violations, item, &path);
@@ -183,6 +200,98 @@ fn apply_use_item_rules(
 	}
 
 	(import007_lines, import004_fixed_lines)
+}
+
+fn apply_import009_std_fmt_result_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	item: &TopItem,
+	path: &str,
+) -> bool {
+	if !imported_full_paths_from_use_path(path).iter().any(|full| full == "std::fmt::Result") {
+		return false;
+	}
+
+	let nongeneric_rewrites =
+		unqualified_nongeneric_type_path_rewrites(ctx, "Result", "std::fmt::Result");
+	let has_generic_result_uses = has_unqualified_generic_type_path_use(ctx, "Result");
+	let Some((_qualified_symbol_path, rewritten_use_path)) = import004_fix_plan(path, "Result")
+	else {
+		return false;
+	};
+
+	if nongeneric_rewrites.is_empty() && !has_generic_result_uses {
+		return false;
+	}
+
+	shared::push_violation(
+		violations,
+		ctx,
+		item.line,
+		"RUST-STYLE-IMPORT-009",
+		"Do not import `std::fmt::Result`; use `std::fmt::Result` at call sites and keep generic `Result<T, E>` unshadowed.",
+		true,
+	);
+
+	if !emit_edits {
+		return true;
+	}
+
+	for (start, end, replacement) in nongeneric_rewrites {
+		edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-IMPORT-009" });
+	}
+
+	apply_import009_use_item_rewrite(ctx, edits, item, rewritten_use_path.as_deref())
+}
+
+fn apply_import009_non_importable_root_use_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	item: &TopItem,
+	path: &str,
+) -> bool {
+	let compact_path = path.replace(' ', "");
+	let Some(root) = compact_path.split("::").next() else {
+		return false;
+	};
+
+	if !is_non_importable_use_root(root) {
+		return false;
+	}
+
+	let mut rewrites = Vec::new();
+
+	for full_path in imported_full_paths_from_use_path(path) {
+		let Some(symbol) = symbol_from_full_import_path(&full_path) else {
+			continue;
+		};
+
+		rewrites.extend(unqualified_type_path_rewrites(ctx, &symbol, &full_path));
+		rewrites.extend(unqualified_value_path_rewrites(ctx, &symbol, &full_path));
+	}
+
+	shared::push_violation(
+		violations,
+		ctx,
+		item.line,
+		"RUST-STYLE-IMPORT-009",
+		"Do not import symbols from non-importable roots (`Self` or generic parameters); use qualified paths.",
+		true,
+	);
+
+	if !emit_edits {
+		return true;
+	}
+
+	for (start, end, replacement) in rewrites {
+		edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-IMPORT-009" });
+	}
+
+	apply_import009_use_item_rewrite(ctx, edits, item, None)
 }
 
 fn apply_import002_normalization_rule(
@@ -210,17 +319,11 @@ fn apply_import002_normalization_rule(
 		return;
 	}
 
-	if let Some((start, end)) = item_text_range(ctx, item) {
-		if let Some(raw) = ctx.text.get(start..end) {
-			if let Some(rewritten) = rewrite_use_item_with_path(raw, &normalized) {
-				edits.push(Edit {
-					start,
-					end,
-					replacement: rewritten,
-					rule: "RUST-STYLE-IMPORT-002",
-				});
-			}
-		}
+	if let Some((start, end)) = item_text_range(ctx, item)
+		&& let Some(raw) = ctx.text.get(start..end)
+		&& let Some(rewritten) = rewrite_use_item_with_path(raw, &normalized)
+	{
+		edits.push(Edit { start, end, replacement: rewritten, rule: "RUST-STYLE-IMPORT-002" });
 	}
 }
 
@@ -276,18 +379,17 @@ fn apply_import007_rule(
 		true,
 	);
 
-	if emit_edits {
-		if let (Some(start), Some(next)) = (
+	if emit_edits
+		&& let (Some(start), Some(next)) = (
 			shared::offset_from_line(&ctx.line_starts, item.start_line),
 			shared::offset_from_line(&ctx.line_starts, item.end_line + 1),
 		) {
-			edits.push(Edit {
-				start,
-				end: next,
-				replacement: String::new(),
-				rule: "RUST-STYLE-IMPORT-007",
-			});
-		}
+		edits.push(Edit {
+			start,
+			end: next,
+			replacement: String::new(),
+			rule: "RUST-STYLE-IMPORT-007",
+		});
 	}
 
 	true
@@ -406,19 +508,13 @@ fn apply_import004_use_item_rewrite(
 	rewritten_use_path: Option<&str>,
 ) -> bool {
 	if let Some(new_use_path) = rewritten_use_path {
-		if let Some((start, end)) = item_text_range(ctx, item) {
-			if let Some(raw) = ctx.text.get(start..end) {
-				if let Some(rewritten) = rewrite_use_item_with_path(raw, new_use_path) {
-					edits.push(Edit {
-						start,
-						end,
-						replacement: rewritten,
-						rule: "RUST-STYLE-IMPORT-004",
-					});
+		if let Some((start, end)) = item_text_range(ctx, item)
+			&& let Some(raw) = ctx.text.get(start..end)
+			&& let Some(rewritten) = rewrite_use_item_with_path(raw, new_use_path)
+		{
+			edits.push(Edit { start, end, replacement: rewritten, rule: "RUST-STYLE-IMPORT-004" });
 
-					return true;
-				}
-			}
+			return true;
 		}
 
 		return false;
@@ -508,17 +604,12 @@ fn apply_import009_rules(
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
-	use_items: &[&TopItem],
-	maps: &ImportedSymbolMaps,
-	local_defined_symbols: &HashSet<String>,
-	qualified_type_paths_by_symbol: &HashMap<String, HashSet<String>>,
-	has_risky_glob_import: bool,
-	risky_glob_roots: &HashSet<String>,
+	import009_ctx: &Import009Context<'_>,
 ) -> HashSet<usize> {
 	let mut import009_fixed_lines = HashSet::new();
 
-	for (symbol, imported_paths) in &maps.full_paths_by_symbol {
-		if imported_paths.len() != 1 || local_defined_symbols.contains(symbol) {
+	for (symbol, imported_paths) in &import009_ctx.maps.full_paths_by_symbol {
+		if imported_paths.len() != 1 || import009_ctx.local_defined_symbols.contains(symbol) {
 			continue;
 		}
 
@@ -527,17 +618,18 @@ fn apply_import009_rules(
 		};
 		let Some((fixable, type_rewrites, value_rewrites, use_item_plans)) = build_import009_plan(
 			ctx,
-			use_items,
+			import009_ctx.use_items,
 			symbol,
 			&imported_path,
-			qualified_type_paths_by_symbol,
-			has_risky_glob_import,
-			risky_glob_roots,
+			import009_ctx.qualified_type_paths_by_symbol,
+			import009_ctx.glob_roots,
 		) else {
 			continue;
 		};
 
-		for line in maps.symbol_lines.get(symbol).into_iter().flat_map(|lines| lines.iter()) {
+		for line in
+			import009_ctx.maps.symbol_lines.get(symbol).into_iter().flat_map(|lines| lines.iter())
+		{
 			shared::push_violation(
 				violations,
 				ctx,
@@ -576,22 +668,19 @@ fn build_import009_plan<'a>(
 	symbol: &str,
 	imported_path: &str,
 	qualified_type_paths_by_symbol: &HashMap<String, HashSet<String>>,
-	has_risky_glob_import: bool,
-	risky_glob_roots: &HashSet<String>,
+	glob_roots: &HashSet<String>,
 ) -> Option<Import009Plan<'a>> {
 	let type_rewrites = unqualified_type_path_rewrites(ctx, symbol, imported_path);
 	let value_rewrites = unqualified_value_path_rewrites(ctx, symbol, imported_path);
+	let has_unqualified_uses = !type_rewrites.is_empty() || !value_rewrites.is_empty();
 	let has_other_qualified_path = qualified_type_paths_by_symbol
 		.get(symbol)
 		.is_some_and(|paths| paths.iter().any(|path| path != imported_path));
-	let imported_root = imported_path.split("::").next().unwrap_or_default();
-	let has_local_glob_ambiguity =
-		risky_glob_roots.iter().any(|root| matches!(root.as_str(), "self" | "super" | "crate"));
-	let has_glob_ambiguity = has_risky_glob_import
-		&& (has_local_glob_ambiguity || risky_glob_roots.contains(imported_root))
-		&& has_root_unqualified_path_use(ctx, symbol);
+	let has_local_glob_shadow_ambiguity =
+		has_high_risk_glob_shadow_ambiguity(symbol, imported_path, glob_roots)
+			&& has_unqualified_uses;
 
-	if !has_other_qualified_path && !has_glob_ambiguity {
+	if !has_unqualified_uses || (!has_other_qualified_path && !has_local_glob_shadow_ambiguity) {
 		return None;
 	}
 
@@ -631,19 +720,13 @@ fn apply_import009_use_item_rewrite(
 	rewritten_use_path: Option<&str>,
 ) -> bool {
 	if let Some(new_use_path) = rewritten_use_path {
-		if let Some((start, end)) = item_text_range(ctx, item) {
-			if let Some(raw) = ctx.text.get(start..end) {
-				if let Some(rewritten) = rewrite_use_item_with_path(raw, new_use_path) {
-					edits.push(Edit {
-						start,
-						end,
-						replacement: rewritten,
-						rule: "RUST-STYLE-IMPORT-009",
-					});
+		if let Some((start, end)) = item_text_range(ctx, item)
+			&& let Some(raw) = ctx.text.get(start..end)
+			&& let Some(rewritten) = rewrite_use_item_with_path(raw, new_use_path)
+		{
+			edits.push(Edit { start, end, replacement: rewritten, rule: "RUST-STYLE-IMPORT-009" });
 
-					return true;
-				}
-			}
+			return true;
 		}
 
 		return false;
@@ -676,7 +759,7 @@ fn apply_import008_rules(
 	local_defined_symbols: &HashSet<String>,
 	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
 	has_prelude_glob: bool,
-	has_risky_glob_import: bool,
+	glob_roots: &HashSet<String>,
 ) -> HashSet<usize> {
 	let import008_candidates = collect_import008_candidates(ctx, has_prelude_glob);
 	let mut candidate_paths_by_symbol: HashMap<String, HashSet<String>> = HashMap::new();
@@ -698,10 +781,10 @@ fn apply_import008_rules(
 		if all_paths.len() > 1 || local_defined_symbols.contains(symbol) {
 			blocked_symbols.insert(symbol.clone());
 		}
-	}
-
-	if has_risky_glob_import {
-		for symbol in candidate_paths_by_symbol.keys() {
+		if candidate_paths
+			.iter()
+			.any(|path| has_high_risk_glob_shadow_ambiguity(symbol, path, glob_roots))
+		{
 			blocked_symbols.insert(symbol.clone());
 		}
 	}
@@ -731,22 +814,32 @@ fn apply_import008_rules(
 			.get(&candidate.symbol)
 			.is_some_and(|paths| paths.contains(&candidate.import_path));
 
-		if already_imported {
-			edits.push(Edit {
-				start: candidate.start,
-				end: candidate.end,
-				replacement: candidate.replacement,
-				rule: "RUST-STYLE-IMPORT-008",
-			});
-			import008_group_skip_lines.insert(candidate.line);
-		} else {
+		edits.push(Edit {
+			start: candidate.start,
+			end: candidate.end,
+			replacement: candidate.replacement,
+			rule: "RUST-STYLE-IMPORT-008",
+		});
+		import008_group_skip_lines.insert(candidate.line);
+
+		if !already_imported {
 			pending_import_paths.insert(candidate.import_path);
 		}
 	}
 
 	if emit_edits {
+			let (pending_after_merge, merged_lines) = merge_import008_into_existing_module_use_items(
+				ctx,
+				edits,
+				use_runs,
+				&pending_import_paths,
+				imported_full_paths_by_symbol,
+			);
+
+		import008_group_skip_lines.extend(merged_lines);
+
 		if let Some((edit, touched_lines)) =
-			build_import008_insert_edit(ctx, use_runs, local_module_roots, &pending_import_paths)
+			build_import008_insert_edit(ctx, use_runs, local_module_roots, &pending_after_merge)
 		{
 			edits.push(edit);
 			import008_group_skip_lines.extend(touched_lines);
@@ -854,8 +947,23 @@ fn collect_import008_candidates(
 		if matches!(symbol.as_str(), "" | "self" | "super" | "crate" | "Self") {
 			continue;
 		}
+		let root = segments[0].as_str();
+
+		if is_non_importable_root(root) {
+			continue;
+		}
 
 		let import_path = segments.join("::");
+
+		if matches!(
+			import_path.as_str(),
+			"std::fmt::Result"
+				| "core::fmt::Result"
+				| "std::result::Result"
+				| "core::result::Result"
+		) {
+			continue;
+		}
 
 		if has_prelude_glob && import_path.starts_with("crate::") {
 			continue;
@@ -899,6 +1007,11 @@ fn collect_qualified_type_paths_by_symbol(ctx: &FileContext) -> HashMap<String, 
 			continue;
 		}
 		if segments.len() < 2 {
+			continue;
+		}
+		let root = segments[0].as_str();
+
+		if is_non_importable_root(root) {
 			continue;
 		}
 
@@ -954,6 +1067,84 @@ fn unqualified_type_path_rewrites(
 	rewrites
 }
 
+fn unqualified_nongeneric_type_path_rewrites(
+	ctx: &FileContext,
+	symbol: &str,
+	qualified_path: &str,
+) -> Vec<(usize, usize, String)> {
+	let mut rewrites = Vec::new();
+
+	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+		let Some(path) = path_type.path() else {
+			continue;
+		};
+
+		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
+			continue;
+		}
+
+		let Some(segment) = path.segment() else {
+			continue;
+		};
+		let Some(name_ref) = segment.name_ref() else {
+			continue;
+		};
+
+		if !is_same_ident(name_ref.text().as_str(), symbol) {
+			continue;
+		}
+
+		let segment_text = segment.syntax().text().to_string();
+		let name_text = name_ref.text().to_string();
+		let suffix = segment_text.strip_prefix(&name_text).unwrap_or_default();
+
+		if !suffix.is_empty() {
+			continue;
+		}
+
+		rewrites.push((
+			usize::from(path.syntax().text_range().start()),
+			usize::from(path.syntax().text_range().end()),
+			qualified_path.to_owned(),
+		));
+	}
+
+	rewrites
+}
+
+fn has_unqualified_generic_type_path_use(ctx: &FileContext, symbol: &str) -> bool {
+	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+		let Some(path) = path_type.path() else {
+			continue;
+		};
+
+		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
+			continue;
+		}
+
+		let Some(segment) = path.segment() else {
+			continue;
+		};
+		let Some(name_ref) = segment.name_ref() else {
+			continue;
+		};
+
+		if !is_same_ident(name_ref.text().as_str(), symbol) {
+			continue;
+		}
+
+		let segment_text = segment.syntax().text().to_string();
+		let name_text = name_ref.text().to_string();
+		let suffix = segment_text.strip_prefix(&name_text).unwrap_or_default();
+
+		if !suffix.is_empty() {
+			return true;
+		}
+	}
+
+	false
+}
+
 fn unqualified_value_path_rewrites(
 	ctx: &FileContext,
 	symbol: &str,
@@ -1005,46 +1196,6 @@ fn unqualified_value_path_rewrites(
 	rewrites
 }
 
-fn has_root_unqualified_path_use(ctx: &FileContext, symbol: &str) -> bool {
-	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
-		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::Use::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::MacroCall::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().skip(1).any(|node| ast::Path::cast(node).is_some()) {
-			continue;
-		}
-
-		let Some(segment) = path.segment() else {
-			continue;
-		};
-		let Some(name_ref) = segment.name_ref() else {
-			continue;
-		};
-
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
-			continue;
-		}
-
-		let in_type_context =
-			path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some());
-		let in_value_context = path.syntax().ancestors().any(|node| {
-			ast::PathExpr::cast(node.clone()).is_some() || ast::PathPat::cast(node).is_some()
-		});
-
-		if in_type_context || in_value_context {
-			return true;
-		}
-	}
-
-	false
-}
-
 fn use_item_imports_symbol_path(path: &str, symbol: &str, import_path: &str) -> bool {
 	if !imported_symbols_from_use_path(path).iter().any(|item_symbol| item_symbol == symbol) {
 		return false;
@@ -1062,10 +1213,10 @@ fn is_inside_cfg_test_module(path: &Path) -> bool {
 }
 
 fn collect_path_segment_texts(path: &Path, out: &mut Vec<String>) -> bool {
-	if let Some(qualifier) = path.qualifier() {
-		if !collect_path_segment_texts(&qualifier, out) {
-			return false;
-		}
+	if let Some(qualifier) = path.qualifier()
+		&& !collect_path_segment_texts(&qualifier, out)
+	{
+		return false;
 	}
 
 	let Some(segment) = path.segment() else {
@@ -1264,10 +1415,10 @@ fn build_import008_insert_edit(
 		let first_new_origin = grouped.keys().next().copied();
 		let mut replacement = String::new();
 
-		if let (Some(last_origin), Some(first_new_origin)) = (last_origin, first_new_origin) {
-			if last_origin != first_new_origin {
-				replacement.push('\n');
-			}
+		if let (Some(last_origin), Some(first_new_origin)) = (last_origin, first_new_origin)
+			&& last_origin != first_new_origin
+		{
+			replacement.push('\n');
 		}
 
 		replacement.push_str(&block);
@@ -1291,6 +1442,143 @@ fn build_import008_insert_edit(
 		Edit { start: insert_pos, end: insert_pos, replacement, rule: "RUST-STYLE-IMPORT-008" },
 		HashSet::new(),
 	))
+}
+
+fn merge_import008_into_existing_module_use_items(
+	ctx: &FileContext,
+	edits: &mut Vec<Edit>,
+	use_runs: &[Vec<&TopItem>],
+	pending_import_paths: &BTreeSet<String>,
+	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
+) -> (BTreeSet<String>, HashSet<usize>) {
+	if pending_import_paths.is_empty() {
+		return (BTreeSet::new(), HashSet::new());
+	}
+
+	#[derive(Clone)]
+	struct MergeTarget {
+		anchor_line: usize,
+	}
+
+	let mut remaining = BTreeSet::new();
+	let mut plans: BTreeMap<usize, (String, BTreeSet<String>)> = BTreeMap::new();
+	let mut touched_lines = HashSet::new();
+	let mut use_items = HashMap::new();
+	let mut merge_targets_by_pending: HashMap<String, MergeTarget> = HashMap::new();
+	let mut successful_merge_lines = HashSet::new();
+
+	for item in use_runs.iter().flat_map(|run| run.iter().copied()) {
+		use_items.insert(item.line, item);
+	}
+
+	for pending in pending_import_paths {
+		let Some((root, child_tail)) = pending.split_once("::") else {
+			remaining.insert(pending.clone());
+
+			continue;
+		};
+		let child_tail = child_tail.trim();
+
+		if child_tail.is_empty() {
+			remaining.insert(pending.clone());
+
+			continue;
+		}
+		let Some(root_full_paths) = imported_full_paths_by_symbol.get(root) else {
+			remaining.insert(pending.clone());
+
+			continue;
+		};
+		if root_full_paths.len() != 1 {
+			remaining.insert(pending.clone());
+
+			continue;
+		}
+		let Some(root_full) = root_full_paths.iter().next() else {
+			remaining.insert(pending.clone());
+
+			continue;
+		};
+		let Some(anchor_line) = find_exact_use_item_line_for_path(ctx, use_runs, root_full) else {
+			remaining.insert(pending.clone());
+
+			continue;
+		};
+
+		plans
+			.entry(anchor_line)
+			.and_modify(|(_, children)| {
+				children.insert(child_tail.to_owned());
+			})
+			.or_insert_with(|| {
+				let mut children = BTreeSet::new();
+
+				children.insert(child_tail.to_owned());
+
+				(root_full.clone(), children)
+			});
+		merge_targets_by_pending.insert(pending.clone(), MergeTarget { anchor_line });
+	}
+
+	for (line, (root_full, children)) in plans {
+		let Some(item) = use_items.get(&line).copied() else {
+			continue;
+		};
+		let Some((start, end)) = item_text_range(ctx, item) else {
+			continue;
+		};
+		let Some(raw) = ctx.text.get(start..end) else {
+			continue;
+		};
+		let merged_path = format!(
+			"{root_full}::{{self, {}}}",
+			children.into_iter().collect::<Vec<_>>().join(", ")
+		);
+
+		if let Some(rewritten) = rewrite_use_item_with_path(raw, &merged_path)
+			&& rewritten != raw
+		{
+			edits.push(Edit { start, end, replacement: rewritten, rule: "RUST-STYLE-IMPORT-008" });
+			touched_lines.insert(line);
+			successful_merge_lines.insert(line);
+		}
+	}
+
+	for pending in pending_import_paths {
+		let Some(target) = merge_targets_by_pending.get(pending) else {
+			remaining.insert(pending.clone());
+
+			continue;
+		};
+
+		let can_consume = successful_merge_lines.contains(&target.anchor_line);
+
+		if !can_consume {
+			remaining.insert(pending.clone());
+		}
+	}
+
+	(remaining, touched_lines)
+}
+
+fn find_exact_use_item_line_for_path(
+	ctx: &FileContext,
+	use_runs: &[Vec<&TopItem>],
+	target_path: &str,
+) -> Option<usize> {
+	let target_compact = target_path.replace(' ', "");
+
+	for item in use_runs.iter().flat_map(|run| run.iter().copied()) {
+		let Some(path) = extract_use_path(ctx, item) else {
+			continue;
+		};
+
+		if path.replace(' ', "") == target_compact {
+			return Some(item.line);
+		}
+	}
+
+	None
 }
 
 fn import008_insert_line(ctx: &FileContext) -> usize {
@@ -1480,6 +1768,57 @@ fn normalize_ident(name: &str) -> &str {
 
 fn is_same_ident(lhs: &str, rhs: &str) -> bool {
 	normalize_ident(lhs) == normalize_ident(rhs)
+}
+
+fn is_non_importable_root(root: &str) -> bool {
+	if matches!(root, "Self" | "self" | "super" | "crate") {
+		return root == "Self";
+	}
+
+	root.chars().next().is_some_and(char::is_uppercase)
+}
+
+fn is_non_importable_use_root(root: &str) -> bool {
+	root == "Self" || (root.len() == 1 && root.chars().next().is_some_and(char::is_uppercase))
+}
+
+fn is_high_risk_shadow_symbol(symbol: &str) -> bool {
+	matches!(symbol, "Result" | "Error")
+}
+
+fn glob_import_root(path: &str) -> Option<String> {
+	let compact = path.replace(' ', "");
+
+	if !compact.ends_with("::*") {
+		return None;
+	}
+
+	let prefix = compact.trim_end_matches("::*");
+	let root = prefix.split("::").next().map(normalize_ident)?.trim();
+
+	if root.is_empty() { None } else { Some(root.to_owned()) }
+}
+
+fn import_root(path: &str) -> Option<String> {
+	let root = path.split("::").next().map(normalize_ident)?.trim();
+
+	if root.is_empty() { None } else { Some(root.to_owned()) }
+}
+
+fn has_high_risk_glob_shadow_ambiguity(
+	symbol: &str,
+	import_path: &str,
+	glob_roots: &HashSet<String>,
+) -> bool {
+	if !is_high_risk_shadow_symbol(symbol) || glob_roots.is_empty() {
+		return false;
+	}
+
+	let Some(candidate_root) = import_root(import_path) else {
+		return false;
+	};
+
+	glob_roots.iter().any(|root| root != &candidate_root)
 }
 
 fn simple_import_prefix_symbol(path: &str) -> Option<(String, String)> {
@@ -1745,14 +2084,14 @@ fn parse_braced_path_parts(path: &str) -> Option<(String, usize, Vec<String>)> {
 }
 
 fn import004_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<String>)> {
-	if let Some((prefix, imported_symbol)) = simple_import_prefix_symbol(path) {
-		if is_same_ident(&imported_symbol, symbol) {
-			if let Some(alias) = module_alias_from_parent_path(&prefix) {
-				return Some((format!("{alias}::{imported_symbol}"), Some(prefix)));
-			}
-
-			return Some((format!("{prefix}::{imported_symbol}"), None));
+	if let Some((prefix, imported_symbol)) = simple_import_prefix_symbol(path)
+		&& is_same_ident(&imported_symbol, symbol)
+	{
+		if let Some(alias) = module_alias_from_parent_path(&prefix) {
+			return Some((format!("{alias}::{imported_symbol}"), Some(prefix)));
 		}
+
+		return Some((format!("{prefix}::{imported_symbol}"), None));
 	}
 
 	braced_import_fix_plan(path, symbol)
