@@ -12,6 +12,14 @@ use super::{
 
 type StatementSpan = (usize, usize, String);
 
+static CONTROL_FLOW_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^(if|if\s+let|match|for|while|loop|return|let)\b")
+		.expect("Expected operation to succeed.")
+});
+static STRUCT_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+,?$").expect("Expected operation to succeed.")
+});
+
 #[derive(Clone, Copy, Debug, Default)]
 struct CodeMaskState {
 	in_block_comment_depth: usize,
@@ -21,14 +29,6 @@ struct CodeMaskState {
 	char_escape: bool,
 	raw_hashes: Option<usize>,
 }
-
-static CONTROL_FLOW_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r"^(if|if\s+let|match|for|while|loop|return|let)\b")
-		.expect("Expected operation to succeed.")
-});
-static STRUCT_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+,?$").expect("Expected operation to succeed.")
-});
 
 struct StatementPair {
 	blank_count: usize,

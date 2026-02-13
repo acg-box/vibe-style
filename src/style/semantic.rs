@@ -8,7 +8,15 @@ use std::{
 use serde_json::Value;
 
 use super::shared::CargoOptions;
-use crate::prelude::*;
+use crate::prelude::{Result, eyre};
+
+const MAX_IMPORT_SUGGESTION_ROUNDS: usize = 4;
+
+#[derive(Debug, Clone)]
+struct ImportSuggestion {
+	line: usize,
+	imports: Vec<String>,
+}
 
 pub(crate) fn apply_semantic_fixes(
 	files: &[PathBuf],
@@ -19,19 +27,29 @@ pub(crate) fn apply_semantic_fixes(
 	}
 
 	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
-	let stdout = run_semantic_cargo_check(cargo_options)?;
-	let warning_lines = collect_unused_super_glob_lines(&stdout);
-	let mut applied = 0_usize;
+	let mut applied_total = 0_usize;
 
-	for (path, lines) in warning_lines {
-		if !tracked.contains(&path) {
-			continue;
+	for _ in 0..MAX_IMPORT_SUGGESTION_ROUNDS {
+		let stdout = run_semantic_cargo_check(cargo_options)?;
+		let suggestions = collect_missing_import_suggestions(&stdout);
+		let mut applied_round = 0_usize;
+
+		for (path, imports) in suggestions {
+			if !tracked.contains(&path) {
+				continue;
+			}
+
+			applied_round += apply_missing_import_suggestions(&path, &imports)?;
 		}
 
-		applied += add_allow_unused_imports_for_super_glob(&path, &lines)?;
+		applied_total += applied_round;
+
+		if applied_round == 0 {
+			break;
+		}
 	}
 
-	Ok(applied)
+	Ok(applied_total)
 }
 
 pub(crate) fn collect_compiler_error_files(
@@ -82,15 +100,6 @@ fn run_semantic_cargo_check(cargo_options: &CargoOptions) -> Result<String> {
 	String::from_utf8(output.stdout).map_err(Into::into)
 }
 
-fn leading_whitespace(line: &str) -> &str {
-	let cut = line
-		.char_indices()
-		.find_map(|(idx, ch)| (!ch.is_whitespace()).then_some(idx))
-		.unwrap_or(line.len());
-
-	&line[..cut]
-}
-
 fn normalize_path(path: &Path) -> PathBuf {
 	match fs::canonicalize(path) {
 		Ok(canonical) => canonical,
@@ -98,8 +107,8 @@ fn normalize_path(path: &Path) -> PathBuf {
 	}
 }
 
-fn collect_unused_super_glob_lines(output: &str) -> BTreeMap<PathBuf, BTreeSet<usize>> {
-	let mut result: BTreeMap<PathBuf, BTreeSet<usize>> = BTreeMap::new();
+fn collect_missing_import_suggestions(output: &str) -> BTreeMap<PathBuf, Vec<ImportSuggestion>> {
+	let mut suggestions: BTreeMap<PathBuf, Vec<ImportSuggestion>> = BTreeMap::new();
 
 	for line in output.lines() {
 		let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -113,42 +122,188 @@ fn collect_unused_super_glob_lines(output: &str) -> BTreeMap<PathBuf, BTreeSet<u
 		let Some(message) = value.get("message") else {
 			continue;
 		};
-
-		if message.get("level").and_then(Value::as_str) != Some("warning") {
-			continue;
-		}
-
-		let text = message.get("message").and_then(Value::as_str).unwrap_or_default();
-
-		if !text.contains("unused import") || !text.contains("super::*") {
-			continue;
-		}
-
-		let Some(spans) = message.get("spans").and_then(Value::as_array) else {
+		let Some(children) = message.get("children").and_then(Value::as_array) else {
 			continue;
 		};
-		let Some(primary) = spans
-			.iter()
-			.find(|span| span.get("is_primary").and_then(Value::as_bool).unwrap_or(false))
+
+		for child in children {
+			if child.get("level").and_then(Value::as_str) != Some("help") {
+				continue;
+			}
+
+			let Some(spans) = child.get("spans").and_then(Value::as_array) else {
+				continue;
+			};
+			let Some(best) = select_best_import_from_help_spans(spans) else {
+				continue;
+			};
+
+			suggestions.entry(best.0).or_default().push(best.1);
+		}
+	}
+
+	suggestions
+}
+
+fn extract_use_statements_from_replacement(replacement: &str) -> Vec<String> {
+	let mut out = replacement
+		.lines()
+		.map(str::trim)
+		.filter(|line| line.starts_with("use ") && line.ends_with(';'))
+		.filter(|line| !line.contains('*'))
+		.map(ToOwned::to_owned)
+		.collect::<Vec<_>>();
+
+	out.sort();
+	out.dedup();
+
+	out
+}
+
+fn select_best_import_from_help_spans(spans: &[Value]) -> Option<(PathBuf, ImportSuggestion)> {
+	let mut candidates = Vec::new();
+
+	for span in spans {
+		let Some(replacement) = span.get("suggested_replacement").and_then(Value::as_str) else {
+			continue;
+		};
+		let Some(file_name) = span.get("file_name").and_then(Value::as_str) else {
+			continue;
+		};
+		let Some(line) = span.get("line_start").and_then(Value::as_u64).map(|value| value as usize)
 		else {
 			continue;
 		};
-		let Some(file_name) = primary.get("file_name").and_then(Value::as_str) else {
-			continue;
-		};
-		let Some(line_start) = primary.get("line_start").and_then(Value::as_u64) else {
-			continue;
-		};
-		let line_start = line_start as usize;
+		let imports = extract_use_statements_from_replacement(replacement);
 
-		if line_start == 0 {
+		if imports.is_empty() {
 			continue;
 		}
 
-		result.entry(normalize_path(Path::new(file_name))).or_default().insert(line_start);
+		candidates.push((
+			normalize_path(Path::new(file_name)),
+			ImportSuggestion { line, imports: imports.clone() },
+			import_candidate_rank(&imports[0]),
+		));
 	}
 
-	result
+	candidates
+		.into_iter()
+		.min_by(|left, right| left.2.cmp(&right.2))
+		.map(|(path, suggestion, _)| (path, suggestion))
+}
+
+fn import_candidate_rank(import_stmt: &str) -> (usize, usize, usize) {
+	let path = import_stmt.trim_start_matches("use ").trim_end_matches(';').trim();
+	let root = path.split("::").next().unwrap_or_default();
+	let root_penalty = match root {
+		"crate" | "self" | "super" => 2,
+		"std" | "core" | "alloc" => 0,
+		_ => 1,
+	};
+	let segments = path.split("::").count();
+
+	(root_penalty, segments, path.len())
+}
+
+fn apply_missing_import_suggestions(
+	path: &Path,
+	suggestions: &[ImportSuggestion],
+) -> Result<usize> {
+	if suggestions.is_empty() {
+		return Ok(0);
+	}
+
+	let Ok(mut text) = fs::read_to_string(path) else {
+		return Ok(0);
+	};
+	let mut applied = 0_usize;
+	let mut ordered = suggestions.to_vec();
+
+	ordered.sort_by(|left, right| right.line.cmp(&left.line));
+
+	for suggestion in ordered {
+		let line_start = line_start_offset(&text, suggestion.line).unwrap_or(0);
+		let indent = indentation_of_line_at(&text, line_start);
+		let mut block = String::new();
+		let mut inserted_any = false;
+
+		for import in suggestion.imports {
+			if has_use_near_line(&text, suggestion.line, &import) {
+				continue;
+			}
+
+			block.push_str(&indent);
+			block.push_str(&import);
+			block.push('\n');
+
+			inserted_any = true;
+		}
+
+		if !inserted_any {
+			continue;
+		}
+
+		text.insert_str(line_start, &block);
+
+		applied += 1;
+	}
+
+	if applied == 0 {
+		return Ok(0);
+	}
+
+	fs::write(path, text)?;
+
+	Ok(applied)
+}
+
+fn line_start_offset(text: &str, line: usize) -> Option<usize> {
+	if line <= 1 {
+		return Some(0);
+	}
+
+	let mut current_line = 1_usize;
+	let mut offset = 0_usize;
+
+	for segment in text.split_inclusive('\n') {
+		current_line += 1;
+		offset += segment.len();
+
+		if current_line == line {
+			return Some(offset);
+		}
+	}
+
+	None
+}
+
+fn indentation_of_line_at(text: &str, line_start: usize) -> String {
+	text.get(line_start..)
+		.and_then(|tail| tail.lines().next())
+		.unwrap_or_default()
+		.chars()
+		.take_while(|ch| ch.is_whitespace())
+		.collect()
+}
+
+fn has_use_near_line(text: &str, line: usize, import: &str) -> bool {
+	let target = import.trim();
+	let start = line.saturating_sub(3);
+	let end = line + 3;
+
+	for (idx, candidate) in text.lines().enumerate() {
+		let line_no = idx + 1;
+
+		if line_no < start || line_no > end {
+			continue;
+		}
+		if candidate.trim() == target {
+			return true;
+		}
+	}
+
+	false
 }
 
 fn collect_compiler_error_files_from_output(output: &str) -> BTreeSet<PathBuf> {
@@ -190,101 +345,57 @@ fn collect_compiler_error_files_from_output(output: &str) -> BTreeSet<PathBuf> {
 	result
 }
 
-fn add_allow_unused_imports_for_super_glob(path: &Path, lines: &BTreeSet<usize>) -> Result<usize> {
-	if lines.is_empty() {
-		return Ok(0);
-	}
-
-	let Ok(text) = fs::read_to_string(path) else {
-		return Ok(0);
-	};
-	let has_trailing_newline = text.ends_with('\n');
-	let mut all_lines = text.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
-	let mut inserted = 0_usize;
-
-	for line_no in lines.iter().rev() {
-		let idx = line_no.saturating_sub(1);
-		let Some(use_line) = all_lines.get(idx) else {
-			continue;
-		};
-
-		if !use_line.contains("use super::*;") {
-			continue;
-		}
-
-		let indent = leading_whitespace(use_line).to_owned();
-		let allow_line = format!("{indent}#[allow(unused_imports)]");
-		let already_allowed = idx > 0 && all_lines[idx - 1].trim() == "#[allow(unused_imports)]";
-
-		if already_allowed {
-			continue;
-		}
-
-		all_lines.insert(idx, allow_line);
-
-		inserted += 1;
-	}
-
-	if inserted == 0 {
-		return Ok(0);
-	}
-
-	let mut rewritten = all_lines.join("\n");
-
-	if has_trailing_newline {
-		rewritten.push('\n');
-	}
-
-	fs::write(path, rewritten)?;
-
-	Ok(inserted)
-}
-
 #[cfg(test)]
 mod tests {
 	use std::{
-		collections::BTreeSet,
 		env,
 		path::Path,
 		process,
 		time::{SystemTime, UNIX_EPOCH},
 	};
 
-	use super::*;
+	use super::{
+		ImportSuggestion, apply_missing_import_suggestions, collect_missing_import_suggestions, fs,
+		normalize_path,
+	};
 
 	#[test]
-	fn injects_allow_before_super_glob() {
-		let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Read timestamp.").as_nanos();
-		let path = env::temp_dir().join(format!("vstyle-semantic-fix-{}-{now}.rs", process::id()));
-		let content =
-			"#[cfg(test)]\nmod tests {\n\tuse super::*;\n\t#[test]\n\tfn sample_case() {}\n}\n";
+	fn extracts_use_suggestions_from_rustc_help_replacement() {
+		let output = r#"{"reason":"compiler-message","message":{"children":[{"level":"help","spans":[{"file_name":"a.rs","line_start":1,"suggested_replacement":"use std::collections::HashMap;\n\n"}]}]}}"#;
+		let suggestions = collect_missing_import_suggestions(output);
+		let imports =
+			suggestions.get(&normalize_path(Path::new("a.rs"))).expect("import suggestions");
 
-		fs::write(&path, content).expect("Write fixture.");
-
-		let mut lines = BTreeSet::new();
-
-		lines.insert(3);
-
-		let applied = add_allow_unused_imports_for_super_glob(&path, &lines).expect("Apply fix.");
-
-		assert_eq!(applied, 1);
-
-		let rewritten = fs::read_to_string(&path).expect("Read fixture.");
-
-		assert!(rewritten.contains("\t#[allow(unused_imports)]\n\tuse super::*;"));
-
-		let _ = fs::remove_file(path);
+		assert!(
+			imports
+				.iter()
+				.flat_map(|suggestion| suggestion.imports.iter())
+				.any(|import| import == "use std::collections::HashMap;")
+		);
 	}
 
 	#[test]
-	fn collects_compiler_error_files() {
-		let output = r#"{"reason":"compiler-message","message":{"level":"warning","message":"unused import","spans":[]}}
-{"reason":"compiler-message","message":{"level":"error","code":{"code":"E0659"},"spans":[{"is_primary":true,"file_name":"src/demo.rs"}]}}
-{"reason":"compiler-message","message":{"level":"error","code":{"code":"E0412"},"spans":[{"is_primary":true,"file_name":"src/other.rs"}]}}"#;
-		let files = collect_compiler_error_files_from_output(output);
+	fn applies_missing_import_suggestions_once() {
+		let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Read timestamp.").as_nanos();
+		let path =
+			env::temp_dir().join(format!("vstyle-semantic-imports-{}-{now}.rs", process::id()));
+		let content = "fn run() {\n\tlet _ = HashMap::<u8, u8>::new();\n}\n";
 
-		assert_eq!(files.len(), 2);
-		assert!(files.iter().any(|path| path.ends_with(Path::new("src/demo.rs"))));
-		assert!(files.iter().any(|path| path.ends_with(Path::new("src/other.rs"))));
+		fs::write(&path, content).expect("Write fixture.");
+
+		let suggestions = vec![ImportSuggestion {
+			line: 1,
+			imports: vec!["use std::collections::HashMap;".to_owned()],
+		}];
+		let applied =
+			apply_missing_import_suggestions(&path, &suggestions).expect("Apply suggestions.");
+		let rewritten = fs::read_to_string(&path).expect("Read rewritten file.");
+
+		assert_eq!(applied, 1);
+		assert!(rewritten.contains("use std::collections::HashMap;"));
+
+		let second = apply_missing_import_suggestions(&path, &suggestions).expect("Re-apply.");
+
+		assert_eq!(second, 0);
 	}
 }

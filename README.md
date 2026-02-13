@@ -130,7 +130,6 @@ Rules are built into the checker.
 - `RUST-STYLE-MOD-002`: Place `pub` items before non-`pub` items within the same kind. Visibility boundaries define separate batches and must be separated by exactly one blank line.
 - `RUST-STYLE-MOD-003`: Place non-`async` functions before `async` functions at the same visibility.
 - `RUST-STYLE-MOD-005`: Keep each type adjacent to related `impl` blocks, with no blank line between the type and its first `impl`.
-- `RUST-STYLE-MOD-007`: In `#[cfg(test)] mod tests`, require `use super::*;` (with `#[allow(unused_imports)]` inserted when needed) unless it is a keep-alive module.
 
 ### Serde
 
@@ -144,9 +143,9 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPORT-004`: Do not import free functions or macros into scope; use qualified paths. If imported symbols are ambiguous, use fully qualified paths.
 - `RUST-STYLE-IMPORT-005`: In `error.rs`, do not add `use` imports.
 - `RUST-STYLE-IMPORT-006`: Do not qualify standard macros with `std::`.
-- `RUST-STYLE-IMPORT-007`: Avoid redundant `crate::...` imports when `crate::prelude::*` is already imported.
 - `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
+- `RUST-STYLE-IMPORT-007`: Do not use glob imports (`use ...::*` or equivalent). Use explicit imports only.
 
 ### Types and generics
 

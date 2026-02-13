@@ -9,7 +9,7 @@ use clap::{
 };
 
 use crate::{
-	prelude::*,
+	prelude::Result,
 	style::{self, CargoOptions, RunSummary},
 };
 
@@ -162,7 +162,8 @@ fn styles() -> Styles {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use super::{Cli, Command};
+	use clap::Parser;
 
 	#[test]
 	fn parses_curate_subcommand() {

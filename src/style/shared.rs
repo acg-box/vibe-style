@@ -5,23 +5,20 @@ use std::{
 	process::Command,
 };
 
-use ast::Item;
 use cargo_metadata::{MetadataCommand, TargetKind};
+use color_eyre::{Result, eyre};
 use once_cell::sync::Lazy;
 use ra_ap_syntax::{
 	AstNode, Edition, SourceFile, TextRange,
-	ast::{self, HasAttrs, HasModuleItem, HasName, HasVisibility},
+	ast::{self, HasAttrs, HasModuleItem, HasName, HasVisibility, Item},
 };
 use regex::Regex;
 
-use crate::prelude::*;
-
-pub(crate) const STYLE_RULE_IDS: [&str; 29] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 28] = [
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
 	"RUST-STYLE-MOD-003",
 	"RUST-STYLE-MOD-005",
-	"RUST-STYLE-MOD-007",
 	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-SERDE-001",
 	"RUST-STYLE-IMPORT-001",
@@ -30,9 +27,9 @@ pub(crate) const STYLE_RULE_IDS: [&str; 29] = [
 	"RUST-STYLE-IMPORT-004",
 	"RUST-STYLE-IMPORT-005",
 	"RUST-STYLE-IMPORT-006",
-	"RUST-STYLE-IMPORT-007",
 	"RUST-STYLE-IMPORT-008",
 	"RUST-STYLE-IMPORT-009",
+	"RUST-STYLE-IMPORT-007",
 	"RUST-STYLE-IMPL-001",
 	"RUST-STYLE-IMPL-003",
 	"RUST-STYLE-GENERICS-001",

@@ -50,9 +50,11 @@ pub(crate) fn check_impl_rules(
 		let ast::Item::Impl(impl_item) = item else {
 			continue;
 		};
+
 		if impl_item.trait_().is_some() {
 			continue;
 		}
+
 		let Some(self_ty) = impl_item.self_ty() else {
 			continue;
 		};
@@ -431,6 +433,7 @@ fn replace_return_self_types(signature_text: &str, re: &Regex) -> String {
 
 		out.push_str(&signature_text[cursor..matched.start()]);
 		out.push_str("-> Self");
+
 		cursor = matched.end();
 	}
 

@@ -16,9 +16,9 @@ use std::{
 	path::{Path, PathBuf},
 };
 
-use rayon::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::prelude::*;
+use crate::prelude::Result;
 use shared::{Edit, FileContext, Violation};
 
 const FILE_BATCH_SIZE: usize = 64;
@@ -145,6 +145,8 @@ pub(crate) fn run_fix(
 		}
 	}
 
+	total_applied += semantic::apply_semantic_fixes(&files, cargo_options)?;
+
 	if !import_fallbacks.is_empty() || !changed_originals.is_empty() {
 		let post_error_files = semantic::collect_compiler_error_files(&files, cargo_options)?;
 		let mut handled = BTreeMap::<PathBuf, ()>::new();
@@ -152,6 +154,7 @@ pub(crate) fn run_fix(
 		for normalized in post_error_files.difference(&baseline_error_files) {
 			if let Some((path, fallback)) = import_fallbacks.get(normalized) {
 				fs::write(path, fallback)?;
+
 				handled.insert(normalized.clone(), ());
 			}
 		}
@@ -159,13 +162,12 @@ pub(crate) fn run_fix(
 			if handled.contains_key(normalized) {
 				continue;
 			}
+
 			if let Some((path, original_text)) = changed_originals.get(normalized) {
 				fs::write(path, original_text)?;
 			}
 		}
 	}
-
-	total_applied += semantic::apply_semantic_fixes(&files, cargo_options)?;
 
 	let checked = run_check(requested_files, cargo_options)?;
 
@@ -176,6 +178,12 @@ pub(crate) fn run_fix(
 		applied_fix_count: total_applied,
 		output_lines: checked.output_lines,
 	})
+}
+
+pub(crate) fn print_coverage() {
+	for rule in shared::STYLE_RULE_IDS {
+		println!("{rule}\timplemented");
+	}
 }
 
 fn apply_fix_passes(
@@ -203,7 +211,6 @@ fn apply_fix_passes(
 		} else {
 			edits.retain(|edit| !is_import_shortening_rule(edit.rule));
 		}
-
 		if edits.is_empty() {
 			break;
 		}
@@ -231,12 +238,6 @@ fn normalize_path(path: &Path) -> PathBuf {
 	}
 }
 
-pub(crate) fn print_coverage() {
-	for rule in shared::STYLE_RULE_IDS {
-		println!("{rule}\timplemented");
-	}
-}
-
 fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, Vec<Edit>) {
 	let mut violations = Vec::new();
 	let mut edits = Vec::new();
@@ -246,7 +247,6 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
 	imports::check_import_rules(ctx, &mut violations, &mut edits, with_fixes);
 	module::check_module_order(ctx, &mut violations, &mut edits, with_fixes);
-	module::check_cfg_test_mod_tests_use_super(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_impl_adjacency(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_impl_rules(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_inline_trait_bounds(ctx, &mut violations);
@@ -270,7 +270,7 @@ fn violation_signature(violation: &Violation) -> (usize, &'static str, &str, boo
 mod tests {
 	use std::path::Path;
 
-	use super::*;
+	use super::{Edit, MAX_FIX_PASSES, collect_violations, fixes, shared, violation_signature};
 
 	#[test]
 	fn suffix_rewrite_works() {
@@ -405,17 +405,6 @@ struct Payload {
 	}
 
 	#[test]
-	fn detects_cfg_test_super_use() {
-		let text = "#[cfg(test)]\nmod tests {\n\t#[test]\n\tfn sample_case() {}\n}\n";
-		let ctx = shared::read_file_context_from_text(Path::new("b.rs"), text.to_owned())
-			.expect("context")
-			.expect("has ctx");
-		let (violations, _) = collect_violations(&ctx, false);
-
-		assert!(violations.iter().any(|violation| violation.rule == "RUST-STYLE-MOD-007"));
-	}
-
-	#[test]
 	fn import005_fix_rewrites_error_rs_to_fully_qualified_paths() {
 		let original = r#"
 use std::fmt::{Display, Formatter};
@@ -476,90 +465,156 @@ pub enum Error {
 	}
 
 	#[test]
-	fn fixes_cfg_test_super_use_with_allow_unused_imports() {
-		let original = "#[cfg(test)]\nmod tests {\n\t#[test]\n\tfn sample_case() {}\n}\n";
-		let ctx = shared::read_file_context_from_text(Path::new("mod007.rs"), original.to_owned())
-			.expect("context")
-			.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(applied >= 1);
-		assert!(rewritten.contains("use super::*;"));
-		assert!(rewritten.contains("use super::*;\n\n\t#[test]"));
-	}
-
-	#[test]
-	fn fixes_cfg_test_super_use_after_std_import_group() {
+	fn import007_reports_non_fixable_glob_without_safe_expansion() {
 		let original = r#"
-#[cfg(test)]
-mod tests {
-	use std::collections::HashSet;
-	#[test]
-	fn sample_case() {
-		let _ = HashSet::<usize>::new();
-	}
+use crate::prelude::*;
+use sqlx::*;
+use std::collections::HashMap;
+
+fn run() {
+	let _ = HashMap::<u8, u8>::new();
 }
 "#;
 		let ctx = shared::read_file_context_from_text(
-			Path::new("mod007_import_order.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(applied >= 1);
-		assert!(
-			rewritten.contains("use std::collections::HashSet;\n\n\tuse super::*;\n\n\t#[test]")
-		);
-	}
-
-	#[test]
-	fn fixes_cfg_test_super_use_when_existing_order_is_wrong() {
-		let original = r#"
-#[cfg(test)]
-mod tests {
-	#[allow(unused_imports)]
-	use super::*;
-	use std::collections::HashSet;
-	use super::{ExtractedKeyphrase, topic_count};
-	#[test]
-	fn sample_case() {}
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("mod007_wrong_order_existing.rs"),
+			Path::new("import010_glob.rs"),
 			original.to_owned(),
 		)
 		.expect("context")
 		.expect("has ctx");
 		let (violations, edits) = collect_violations(&ctx, true);
 
-		assert!(violations.iter().any(|v| {
-			v.rule == "RUST-STYLE-MOD-007"
-				&& (v.message
-					== "In #[cfg(test)] mod tests, order imports as std, third-party, self/workspace."
-					|| v.message
-						== "In #[cfg(test)] mod tests, prefer `use super::*;` and remove specific super imports.")
-				&& v.fixable
-		}));
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && !v.fixable));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-007"));
 
 		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
-		assert!(applied >= 1);
-		assert!(rewritten.contains("use std::collections::HashSet;"));
-		assert!(rewritten.contains("use super::*;"));
+		assert!(rewritten.contains("use crate::prelude::*;"));
+		assert!(rewritten.contains("use sqlx::*;"));
+		assert!(rewritten.contains("use std::collections::HashMap;"));
+	}
 
-		let std_idx = rewritten.find("use std::collections::HashSet;").expect("std import");
-		let super_idx = rewritten.find("use super::*;").expect("super glob import");
+	#[test]
+	fn import007_fixes_super_glob_when_used_symbols_can_be_resolved() {
+		let original = r#"
+fn helper() {}
 
-		assert!(std_idx < super_idx);
-		assert!(!rewritten.contains("use super::{ExtractedKeyphrase, topic_count};"));
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn sample_case() {
+		helper();
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import010_nested_glob.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-007"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("use super::*;"));
+		assert!(rewritten.contains("use super::{"));
+		assert!(rewritten.contains("helper"));
+	}
+
+	#[test]
+	fn import007_fix_expands_crate_prelude_glob_when_module_exports_are_known() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Read timestamp.")
+			.as_nanos();
+		let root = std::env::temp_dir()
+			.join(format!("vstyle-prelude-expand-{}-{now}", std::process::id()));
+		let src_dir = root.join("src");
+		let sample_path = src_dir.join("sample.rs");
+		let original = "use crate::prelude::*;\n\nfn run() -> Result<()> {\n\tOk(())\n}\n";
+
+		std::fs::create_dir_all(&src_dir).expect("Create temp src directory.");
+		std::fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"vstyle-prelude-expand\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+		)
+		.expect("Write Cargo manifest.");
+		std::fs::write(
+			root.join("src/main.rs"),
+			"mod prelude {\n\tpub use color_eyre::{Result, eyre};\n}\n",
+		)
+		.expect("Write crate root.");
+		std::fs::write(&sample_path, original).expect("Write sample source.");
+
+		let ctx =
+			shared::read_file_context(&sample_path).expect("Read context.").expect("Have context.");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("Apply edits.");
+
+		assert!(rewritten.contains("use crate::prelude::{Result};"));
+		assert!(!rewritten.contains("use crate::prelude::*;"));
+	}
+
+	#[test]
+	fn import007_fix_expands_crate_prelude_glob_inside_braced_use() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Read timestamp.")
+			.as_nanos();
+		let root = std::env::temp_dir()
+			.join(format!("vstyle-prelude-braced-{}-{now}", std::process::id()));
+		let src_dir = root.join("src");
+		let sample_path = src_dir.join("sample.rs");
+		let original = "use crate::{prelude::*, style::RunSummary};\n\nfn run(summary: RunSummary) -> Result<()> {\n\tlet _ = summary;\n\tOk(())\n}\n";
+
+		std::fs::create_dir_all(&src_dir).expect("Create temp src directory.");
+		std::fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"vstyle-prelude-braced\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+		)
+		.expect("Write Cargo manifest.");
+		std::fs::write(
+			root.join("src/main.rs"),
+			"mod prelude {\n\tpub use color_eyre::{Result, eyre};\n}\nmod style { pub struct RunSummary; }\n",
+		)
+		.expect("Write crate root.");
+		std::fs::write(&sample_path, original).expect("Write sample source.");
+
+		let ctx =
+			shared::read_file_context(&sample_path).expect("Read context.").expect("Have context.");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("Apply edits.");
+
+		assert!(rewritten.contains("use crate::{prelude::{Result},style::RunSummary};"));
+		assert!(!rewritten.contains("prelude::*"));
+	}
+
+	#[test]
+	fn import007_fix_rewrites_rayon_prelude_glob_to_traits() {
+		let original = "use rayon::prelude::*;\n\nfn sample(batch: &[usize]) {\n\tlet _ = batch.par_iter().map(|value| value + 1).count();\n}\n";
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import007_rayon.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("use rayon::prelude::*;"));
+		assert!(rewritten.contains("use rayon::iter::{"));
+		assert!(rewritten.contains("IntoParallelRefIterator"));
+		assert!(rewritten.contains("ParallelIterator"));
 	}
 
 	#[test]
@@ -861,7 +916,7 @@ use config::GatewayConfig;
 use context::Context;
 use db::Database;
 use grpc::gateway_service_server::GatewayServiceServer;
-use prelude::*;
+use prelude::Core;
 use service::GatewayService;
 use types::App;
 
@@ -904,7 +959,7 @@ mod prelude {
 			rewritten.contains("use tracing_subscriber::EnvFilter;\n\nuse auth::AuthInterceptor;")
 		);
 		assert!(
-			rewritten.contains("use prelude::*;\nuse service::GatewayService;\nuse types::App;")
+			rewritten.contains("use prelude::Core;\nuse service::GatewayService;\nuse types::App;")
 		);
 	}
 
@@ -1160,14 +1215,14 @@ fn sample() {
 	fn import008_fix_imports_unambiguous_type_paths_and_keeps_group_order() {
 		let original = r#"
 use std::collections::HashSet;
-
-use crate::prelude::*;
+use crate::local::Marker;
 
 fn run<'e, E>(_exec: E)
 where
 	E: sqlx::Executor<'e>,
 {
 	let _ = HashSet::<usize>::new();
+	let _ = Marker;
 }
 "#;
 		let mut rewritten = original.to_owned();
@@ -1193,7 +1248,7 @@ where
 
 		let std_idx = rewritten.find("use std::collections::HashSet;").expect("std");
 		let third_party_idx = rewritten.find("use sqlx::Executor;").expect("third-party");
-		let self_idx = rewritten.find("use crate::prelude::*;").expect("self");
+		let self_idx = rewritten.find("use crate::local::Marker;").expect("self");
 
 		assert!(std_idx < third_party_idx);
 		assert!(third_party_idx < self_idx);
@@ -1431,66 +1486,6 @@ fn demo(v: Vec<shared::Violation>) -> Option<shared::Violation> {
 	}
 
 	#[test]
-	fn import008_does_not_shorten_result_when_only_local_glob_exists() {
-		let original = r#"
-use sqlx::Result;
-
-use super::*;
-use pubfi_db::service::feed::dry_runs::FeedDryRunRow;
-
-pub async fn get_by_id(db: &PgPool, dry_run_id: i64) -> sqlx::Result<Option<FeedDryRunRow>> {
-	let _ = (db, dry_run_id);
-	todo!()
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("import008_glob_ambiguity_guard.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
-
-		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
-		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
-
-		let mut rewritten = original.to_owned();
-		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(rewritten.contains("-> sqlx::Result<"));
-		assert!(!rewritten.contains("-> Result<"));
-	}
-
-	#[test]
-	fn import008_shortens_when_same_root_glob_exists() {
-		let original = r#"
-use sqlx::Result;
-use sqlx::*;
-
-pub async fn get_by_id(db: &PgPool, dry_run_id: i64) -> sqlx::Result<Option<i64>> {
-	let _ = (db, dry_run_id);
-	todo!()
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("import008_same_root_glob_ambiguity_guard.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
-
-		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
-		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
-
-		let mut rewritten = original.to_owned();
-		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(!rewritten.contains("-> sqlx::Result<"));
-		assert!(rewritten.contains("-> Result<"));
-	}
-
-	#[test]
 	fn import008_skips_non_importable_self_root_paths() {
 		let text = r#"
 trait Job {
@@ -1555,27 +1550,6 @@ pub fn run() -> std::result::Result<(), String> {
 	}
 
 	#[test]
-	fn import008_blocks_high_risk_symbols_with_foreign_glob_imports() {
-		let text = r#"
-use crate::_prelude::*;
-
-fn classify(error: pubfi_ai::Error) {
-	let _ = error;
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("import008_high_risk_glob_guard.rs"),
-			text.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
-
-		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
-		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
-	}
-
-	#[test]
 	fn import_rules_skip_error_rs_and_do_not_add_imports() {
 		let text = r#"
 pub enum Error {
@@ -1597,7 +1571,6 @@ pub enum Error {
 					| "RUST-STYLE-IMPORT-003"
 					| "RUST-STYLE-IMPORT-004"
 					| "RUST-STYLE-IMPORT-006"
-					| "RUST-STYLE-IMPORT-007"
 					| "RUST-STYLE-IMPORT-008"
 					| "RUST-STYLE-IMPORT-009"
 			)
@@ -1628,89 +1601,6 @@ fn sample(a: A, aa: b::A) {
 
 		assert!(!rewritten.contains("use a::A;"));
 		assert!(rewritten.contains("fn sample(a: a::A, aa: b::A)"));
-	}
-
-	#[test]
-	fn import009_does_not_rewrite_when_no_mixed_qualified_paths() {
-		let original = r#"
-use sqlx::Result;
-use sqlx::*;
-
-use pubfi_db::service::feed::dry_runs::FeedDryRunRow;
-
-pub async fn get_by_id(db: &PgPool, dry_run_id: i64) -> Result<Option<FeedDryRunRow>> {
-	let _ = (db, dry_run_id);
-	todo!()
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("import009_glob_conflict.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
-
-		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
-		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
-
-		let mut rewritten = original.to_owned();
-		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(rewritten.contains("\nuse sqlx::Result;"));
-		assert!(rewritten.contains("-> Result<"));
-	}
-
-	#[test]
-	fn import009_does_not_rewrite_external_imports_for_local_glob_only() {
-		let original = r#"
-use super::*;
-use pubfi_db::service::users::UserRow;
-
-pub struct UserProfile {
-	pub user: UserRow,
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("import009_local_glob_only.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
-
-		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
-		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
-	}
-
-	#[test]
-	fn import009_rewrites_result_when_local_glob_is_present() {
-		let original = r#"
-use actix_web::Result;
-
-use super::*;
-
-pub async fn channels_get(state: Data<State>) -> Result<HttpResponse> {
-	let _ = state;
-	todo!()
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("import009_local_glob_result.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
-
-		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
-		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
-
-		let mut rewritten = original.to_owned();
-		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(!rewritten.contains("use actix_web::Result;"));
-		assert!(rewritten.contains("-> actix_web::Result<HttpResponse>"));
 	}
 
 	#[test]

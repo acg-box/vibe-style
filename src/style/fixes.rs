@@ -1,5 +1,5 @@
 use super::shared::Edit;
-use crate::prelude::*;
+use crate::prelude::{Result, eyre};
 
 pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usize> {
 	if edits.is_empty() {
