@@ -5,10 +5,10 @@ use std::{
 	process::Command,
 };
 
+use color_eyre::{Result, eyre};
 use serde_json::Value;
 
 use super::shared::CargoOptions;
-use crate::prelude::{Result, eyre};
 
 const MAX_IMPORT_SUGGESTION_ROUNDS: usize = 4;
 

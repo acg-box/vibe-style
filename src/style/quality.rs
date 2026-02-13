@@ -27,53 +27,6 @@ struct ArgSplitState {
 	block_comment_depth: i32,
 }
 
-pub(crate) fn check_std_macro_calls(
-	ctx: &FileContext,
-	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
-) {
-	const STD_MACROS: [&str; 7] =
-		["vec", "format", "println", "eprintln", "dbg", "write", "writeln"];
-
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
-		let Some(path) = macro_call.path() else {
-			continue;
-		};
-		let path_text = path.syntax().text().to_string();
-		let Some((prefix_start, prefix_end, macro_name)) = parse_std_macro_prefix(&path_text)
-		else {
-			continue;
-		};
-
-		if !STD_MACROS.contains(&macro_name.as_str()) {
-			continue;
-		}
-
-		let range = path.syntax().text_range();
-		let absolute_path_start = usize::from(range.start());
-		let line = shared::line_from_offset(&ctx.line_starts, absolute_path_start);
-
-		shared::push_violation(
-			violations,
-			ctx,
-			line,
-			"RUST-STYLE-IMPORT-006",
-			"Do not qualify standard macros with std::.",
-			true,
-		);
-
-		if emit_edits {
-			edits.push(Edit {
-				start: absolute_path_start + prefix_start,
-				end: absolute_path_start + prefix_end,
-				replacement: String::new(),
-				rule: "RUST-STYLE-IMPORT-006",
-			});
-		}
-	}
-}
-
 pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
 		let Some(path_text) = macro_path_text(&macro_call) else {
@@ -578,80 +531,6 @@ fn report_expect_non_sentence_message(
 			rule: "RUST-STYLE-RUNTIME-002",
 		});
 	}
-}
-
-fn parse_std_macro_prefix(path_text: &str) -> Option<(usize, usize, String)> {
-	fn skip_ws(text: &[u8], mut idx: usize) -> usize {
-		while idx < text.len() && text[idx].is_ascii_whitespace() {
-			idx += 1;
-		}
-
-		idx
-	}
-
-	fn consume_double_colon(text: &[u8], mut idx: usize) -> Option<usize> {
-		idx = skip_ws(text, idx);
-
-		if idx >= text.len() || text[idx] != b':' {
-			return None;
-		}
-
-		idx += 1;
-		idx = skip_ws(text, idx);
-
-		if idx >= text.len() || text[idx] != b':' {
-			return None;
-		}
-
-		Some(idx + 1)
-	}
-
-	fn consume_ident(text: &[u8], mut idx: usize) -> Option<(usize, String)> {
-		idx = skip_ws(text, idx);
-
-		let start = idx;
-
-		if idx >= text.len() || !(text[idx].is_ascii_alphabetic() || text[idx] == b'_') {
-			return None;
-		}
-
-		idx += 1;
-
-		while idx < text.len() && (text[idx].is_ascii_alphanumeric() || text[idx] == b'_') {
-			idx += 1;
-		}
-
-		Some((idx, String::from_utf8_lossy(&text[start..idx]).to_string()))
-	}
-
-	let bytes = path_text.as_bytes();
-	let mut idx = skip_ws(bytes, 0);
-	let mut prefix_start = idx;
-
-	if let Some(next) = consume_double_colon(bytes, idx) {
-		prefix_start = idx;
-		idx = skip_ws(bytes, next);
-	}
-
-	let std_start = idx;
-	let (next_idx, ident) = consume_ident(bytes, idx)?;
-
-	if ident != "std" {
-		return None;
-	}
-
-	let prefix_end = consume_double_colon(bytes, next_idx)?;
-	let (next_idx, macro_name) = consume_ident(bytes, prefix_end)?;
-	let next_after_macro = skip_ws(bytes, next_idx);
-
-	if consume_double_colon(bytes, next_after_macro).is_some() {
-		return None;
-	}
-	if prefix_start == std_start {
-		prefix_start = std_start;
-	}
-
-	Some((prefix_start, prefix_end, macro_name))
 }
 
 fn split_top_level_args(args: &str) -> Vec<String> {

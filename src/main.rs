@@ -5,10 +5,6 @@
 mod cli;
 mod style;
 
-mod prelude {
-	pub use color_eyre::{Result, eyre};
-}
-
 use std::process::ExitCode;
 
 use clap::Parser;

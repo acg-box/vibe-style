@@ -16,9 +16,9 @@ use std::{
 	path::{Path, PathBuf},
 };
 
+use color_eyre::Result;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::prelude::Result;
 use shared::{Edit, FileContext, Violation};
 
 const FILE_BATCH_SIZE: usize = 64;
@@ -250,7 +250,6 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	impls::check_impl_adjacency(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_impl_rules(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_inline_trait_bounds(ctx, &mut violations);
-	quality::check_std_macro_calls(ctx, &mut violations, &mut edits, with_fixes);
 	quality::check_logging_quality(ctx, &mut violations);
 	quality::check_expect_unwrap(ctx, &mut violations, &mut edits, with_fixes);
 	quality::check_numeric_literals(ctx, &mut violations, &mut edits, with_fixes);
@@ -669,48 +668,6 @@ fn example() {
 	}
 
 	#[test]
-	fn import006_ignores_std_macro_tokens_inside_string_literals() {
-		let text = r##"
-fn example() {
-	let prompt = r#"
-	- keep std::format!(...) in examples.
-	"#;
-	println!("{prompt}");
-}
-"##;
-		let ctx =
-			shared::read_file_context_from_text(Path::new("import006_string.rs"), text.to_owned())
-				.expect("context")
-				.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
-
-		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006"));
-	}
-
-	#[test]
-	fn import006_fix_rewrites_real_std_macro_call() {
-		let original = r#"
-fn example(value: usize) -> String {
-	std::format!("{value}")
-}
-"#;
-		let ctx =
-			shared::read_file_context_from_text(Path::new("import006_fix.rs"), original.to_owned())
-				.expect("context")
-				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
-
-		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006" && v.fixable));
-
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(applied >= 1);
-		assert!(rewritten.contains("format!(\"{value}\")"));
-		assert!(!rewritten.contains("std::format!"));
-	}
-
-	#[test]
 	fn impl_fix_does_not_break_foreign_usage_paths() {
 		let original = r#"
 impl Usage {
@@ -1045,6 +1002,104 @@ use std::{
 					== "Normalize imports like `use a::{b, b::c}` to `use a::{b::{self, c}}`."
 		}));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-002"));
+	}
+
+	#[test]
+	fn import003_fix_rewrites_trait_keep_alive_simple_use_to_as_underscore() {
+		let original = r#"
+use std::io::Read;
+
+fn sample(mut data: &[u8]) -> usize {
+	let mut out = [0_u8; 1];
+	let _ = data.read(&mut out);
+	out[0] as usize
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_keep_alive_simple.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003"
+				&& v.message.contains("Trait keep-alive import `Read` should use `as _`")
+				&& v.fixable
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(rewritten.contains("use std::io::Read as _;"));
+	}
+
+	#[test]
+	fn import003_fix_rewrites_trait_keep_alive_braced_use_to_as_underscore() {
+		let original = r#"
+use std::io::{Read, Write};
+
+fn sample(mut data: &[u8], mut sink: Vec<u8>) -> usize {
+	let mut out = [0_u8; 1];
+	let _ = data.read(&mut out);
+	let _ = sink.write(&out);
+	out[0] as usize
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_keep_alive_braced.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003"
+				&& v.message.contains("Trait keep-alive import `Read` should use `as _`")
+				&& v.fixable
+		}));
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003"
+				&& v.message.contains("Trait keep-alive import `Write` should use `as _`")
+				&& v.fixable
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(rewritten.contains("use std::io::{Read as _, Write as _};"));
+	}
+
+	#[test]
+	fn import003_does_not_require_as_underscore_when_trait_name_is_referenced() {
+		let text = r#"
+use std::io::Read;
+
+fn read_one<R: Read>(mut reader: R) -> usize {
+	let mut out = [0_u8; 1];
+	let _ = reader.read(&mut out);
+	out[0] as usize
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_name_referenced.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003"
+				&& v.message.contains("Trait keep-alive import `Read` should use `as _`")
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
 	}
 
 	#[test]
@@ -1570,7 +1625,6 @@ pub enum Error {
 					| "RUST-STYLE-IMPORT-002"
 					| "RUST-STYLE-IMPORT-003"
 					| "RUST-STYLE-IMPORT-004"
-					| "RUST-STYLE-IMPORT-006"
 					| "RUST-STYLE-IMPORT-008"
 					| "RUST-STYLE-IMPORT-009"
 			)

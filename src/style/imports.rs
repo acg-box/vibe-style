@@ -569,6 +569,9 @@ fn apply_use_item_rules(
 		}
 
 		apply_import002_normalization_rule(ctx, violations, edits, emit_edits, item, &path);
+		if apply_import003_trait_keep_alive_rule(ctx, violations, edits, emit_edits, item, &path) {
+			import004_fixed_lines.insert(item.line);
+		}
 		push_alias_violation_if_needed(ctx, violations, item, &path);
 
 		if apply_import004_free_fn_macro_rule(ctx, violations, edits, emit_edits, item, &path) {
@@ -723,10 +726,243 @@ fn push_alias_violation_if_needed(
 			ctx,
 			item.line,
 			"RUST-STYLE-IMPORT-003",
-			"Import aliases are not allowed except `as _` in test keep-alive modules.",
+			"Import aliases are not allowed except `as _` keep-alive imports.",
 			false,
 		);
 	}
+}
+
+fn apply_import003_trait_keep_alive_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	item: &TopItem,
+	path: &str,
+) -> bool {
+	let candidate_symbols = collect_trait_keep_alive_candidate_symbols(ctx, path);
+
+	if candidate_symbols.is_empty() {
+		return false;
+	}
+
+	let rewritten_use_path = rewrite_use_path_with_trait_as_underscore(path, &candidate_symbols);
+	let fixable = rewritten_use_path.is_some();
+	let mut symbols = candidate_symbols.into_iter().collect::<Vec<_>>();
+
+	symbols.sort();
+
+	for symbol in symbols {
+		shared::push_violation(
+			violations,
+			ctx,
+			item.line,
+			"RUST-STYLE-IMPORT-003",
+			&format!(
+				"Trait keep-alive import `{symbol}` should use `as _` when not referenced directly."
+			),
+			fixable,
+		);
+	}
+
+	if !emit_edits {
+		return false;
+	}
+
+	let Some(rewritten_use_path) = rewritten_use_path else {
+		return false;
+	};
+
+	if let Some((start, end)) = item_text_range(ctx, item)
+		&& let Some(raw) = ctx.text.get(start..end)
+		&& let Some(rewritten) = rewrite_use_item_with_path(raw, &rewritten_use_path)
+	{
+		edits.push(Edit { start, end, replacement: rewritten, rule: "RUST-STYLE-IMPORT-003" });
+
+		return true;
+	}
+
+	false
+}
+
+fn collect_trait_keep_alive_candidate_symbols(ctx: &FileContext, path: &str) -> HashSet<String> {
+	if path.contains('*') || path.contains(" as ") {
+		return HashSet::new();
+	}
+
+	let mut out = HashSet::new();
+
+	for full_path in imported_full_paths_from_use_path(path) {
+		let Some(symbol) = symbol_from_full_import_path(&full_path) else {
+			continue;
+		};
+
+		if !looks_like_trait_import(&symbol, &full_path)
+			|| symbol_is_referenced_outside_use(ctx, &symbol)
+		{
+			continue;
+		}
+
+		out.insert(symbol);
+	}
+
+	out
+}
+
+fn looks_like_trait_import(symbol: &str, full_path: &str) -> bool {
+	let symbol_is_common_trait = matches!(
+		symbol,
+		"Read"
+			| "Write" | "BufRead"
+			| "Seek" | "AsyncRead"
+			| "AsyncWrite"
+			| "AsyncBufRead"
+			| "AsyncSeek"
+			| "Future"
+			| "Stream"
+			| "Sink" | "Iterator"
+			| "IntoIterator"
+			| "FromIterator"
+			| "ParallelIterator"
+			| "IntoParallelIterator"
+			| "IntoParallelRefIterator"
+			| "Serialize"
+			| "Deserialize"
+			| "Executor"
+	);
+	let symbol_is_trait_named =
+		symbol.ends_with("Ext") || symbol.ends_with("Trait") || symbol_is_common_trait;
+	let path_is_trait_named = full_path.contains("::trait::")
+		|| full_path.contains("::traits::")
+		|| full_path.contains("::prelude::");
+
+	(symbol_is_trait_named || path_is_trait_named)
+		&& symbol.chars().next().is_some_and(char::is_uppercase)
+}
+
+fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
+	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+		if path.syntax().ancestors().any(|node| ast::Use::cast(node).is_some()) {
+			continue;
+		}
+
+		let Some(segment) = path.segment() else {
+			continue;
+		};
+		let Some(name_ref) = segment.name_ref() else {
+			continue;
+		};
+
+		if is_same_ident(name_ref.text().as_str(), symbol) {
+			return true;
+		}
+	}
+
+	false
+}
+
+fn rewrite_use_path_with_trait_as_underscore(
+	path: &str,
+	candidate_symbols: &HashSet<String>,
+) -> Option<String> {
+	if candidate_symbols.is_empty() || path.contains('*') || path.contains(" as ") {
+		return None;
+	}
+
+	if let Some((prefix, symbol)) = simple_import_prefix_symbol(path) {
+		if candidate_symbols.contains(normalize_ident(&symbol)) {
+			return Some(format!("{prefix}::{symbol} as _"));
+		}
+
+		return None;
+	}
+
+	let (prefix, close, mut segments) = parse_braced_path_parts(path)?;
+	let mut changed = false;
+
+	for segment in &mut segments {
+		let Some(rewritten) =
+			rewrite_import_segment_with_trait_as_underscore(segment, candidate_symbols)
+		else {
+			continue;
+		};
+
+		if rewritten != *segment {
+			*segment = rewritten;
+			changed = true;
+		}
+	}
+
+	if !changed {
+		return None;
+	}
+
+	Some(format!("{prefix}{}{}", segments.join(", "), &path[close..=close]))
+}
+
+fn rewrite_import_segment_with_trait_as_underscore(
+	segment: &str,
+	candidate_symbols: &HashSet<String>,
+) -> Option<String> {
+	let trimmed = segment.trim();
+
+	if trimmed.is_empty() || trimmed == "self" || trimmed.contains(" as ") {
+		return None;
+	}
+
+	if let Some((head, rest)) = trimmed.split_once("::{") {
+		if !rest.ends_with('}') {
+			return None;
+		}
+
+		let inner = &rest[..rest.len().saturating_sub(1)];
+		let mut children = split_top_level_csv(inner);
+		let mut changed = false;
+
+		for child in &mut children {
+			let child_trimmed = child.trim();
+
+			if child_trimmed.is_empty()
+				|| child_trimmed == "self"
+				|| child_trimmed.contains(" as ")
+				|| child_trimmed.contains('{')
+				|| child_trimmed.contains('}')
+			{
+				continue;
+			}
+
+			let Some(symbol) = child_trimmed.rsplit("::").next() else {
+				continue;
+			};
+			let normalized = normalize_ident(symbol);
+
+			if matches!(normalized, "" | "self" | "super" | "crate")
+				|| !candidate_symbols.contains(normalized)
+			{
+				continue;
+			}
+
+			*child = format!("{child_trimmed} as _");
+			changed = true;
+		}
+
+		if !changed {
+			return None;
+		}
+
+		return Some(format!("{head}::{{{}}}", children.join(", ")));
+	}
+
+	let symbol = trimmed.rsplit("::").next()?;
+	let normalized = normalize_ident(symbol);
+
+	if matches!(normalized, "" | "self" | "super" | "crate")
+		|| !candidate_symbols.contains(normalized)
+	{
+		return None;
+	}
+
+	Some(format!("{trimmed} as _"))
 }
 
 fn apply_import004_free_fn_macro_rule(
@@ -751,7 +987,9 @@ fn apply_import004_free_fn_macro_rule(
 		let fn_ranges = unqualified_function_call_ranges(ctx, &symbol);
 		let macro_ranges = unqualified_macro_call_ranges(ctx, &symbol);
 		let needs_fn_fix = !fn_ranges.is_empty() && !local_fn_defined;
-		let needs_macro_fix = !macro_ranges.is_empty() && !local_macro_defined;
+		let needs_macro_fix = !macro_ranges.is_empty()
+			&& !local_macro_defined
+			&& !symbol_imported_from_std_like_root(path, &symbol);
 
 		if !(needs_fn_fix || needs_macro_fix) {
 			continue;
@@ -804,6 +1042,16 @@ fn apply_import004_free_fn_macro_rule(
 	}
 
 	false
+}
+
+fn symbol_imported_from_std_like_root(path: &str, symbol: &str) -> bool {
+	imported_full_paths_from_use_path(path).into_iter().any(|full_path| {
+		if symbol_from_full_import_path(&full_path).as_deref() != Some(symbol) {
+			return false;
+		}
+
+		matches!(full_path.split("::").next(), Some("std") | Some("core") | Some("alloc"))
+	})
 }
 
 fn is_local_fn_defined(ctx: &FileContext, symbol: &str) -> bool {

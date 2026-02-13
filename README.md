@@ -139,10 +139,9 @@ Rules are built into the checker.
 
 - `RUST-STYLE-IMPORT-001`: Group imports in this order: standard library, third-party, self/workspace/local-module roots.
 - `RUST-STYLE-IMPORT-002`: Use exactly one blank line between groups; do not use import-group header comments; normalize `use a::{b, b::c}` to `use a::{b::{self, c}}`.
-- `RUST-STYLE-IMPORT-003`: Do not alias imports, except `as _` in keep-alive test modules.
+- `RUST-STYLE-IMPORT-003`: Do not alias imports, except `as _` keep-alive imports. Trait imports used only for method resolution must use `as _`.
 - `RUST-STYLE-IMPORT-004`: Do not import free functions or macros into scope; use qualified paths. If imported symbols are ambiguous, use fully qualified paths.
 - `RUST-STYLE-IMPORT-005`: In `error.rs`, do not add `use` imports.
-- `RUST-STYLE-IMPORT-006`: Do not qualify standard macros with `std::`.
 - `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
 - `RUST-STYLE-IMPORT-007`: Do not use glob imports (`use ...::*` or equivalent). Use explicit imports only.

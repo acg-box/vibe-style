@@ -7,11 +7,9 @@ use clap::{
 		styling::{AnsiColor, Effects},
 	},
 };
+use color_eyre::Result;
 
-use crate::{
-	prelude::Result,
-	style::{self, CargoOptions, RunSummary},
-};
+use crate::style::{self, CargoOptions, RunSummary};
 
 /// Command-line interface for the Rust style checker.
 #[derive(Debug, Parser)]
