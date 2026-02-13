@@ -1882,6 +1882,57 @@ fn collect_import008_candidates(ctx: &FileContext) -> Vec<Import008Candidate> {
 
 		candidates.push(Import008Candidate { line, start, end, symbol, import_path, replacement });
 	}
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+		let Some(path) = macro_call.path() else {
+			continue;
+		};
+
+		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
+			continue;
+		}
+
+		let mut segments = Vec::new();
+
+		if !collect_path_segment_texts(&path, &mut segments) {
+			continue;
+		}
+		if segments.len() < 3 {
+			continue;
+		}
+
+		let module_name = segments[segments.len() - 2].clone();
+		let macro_name = segments[segments.len() - 1].clone();
+
+		if !is_same_ident(&module_name, &macro_name) {
+			continue;
+		}
+
+		let symbol = normalize_ident(&module_name).to_owned();
+
+		if matches!(symbol.as_str(), "" | "self" | "super" | "crate" | "Self") {
+			continue;
+		}
+
+		let root = segments[0].as_str();
+
+		if is_non_importable_root(root) {
+			continue;
+		}
+
+		let import_path = segments[..segments.len() - 1].join("::");
+		let replacement = format!("{module_name}::{macro_name}");
+		let range = path.syntax().text_range();
+		let start = usize::from(range.start());
+		let end = usize::from(range.end());
+
+		if start >= end || !seen_ranges.insert((start, end)) {
+			continue;
+		}
+
+		let line = shared::line_from_offset(&ctx.line_starts, start);
+
+		candidates.push(Import008Candidate { line, start, end, symbol, import_path, replacement });
+	}
 
 	candidates
 }
@@ -2472,6 +2523,38 @@ fn resolve_import008_merge_target_for_pending_path<'a>(
 		}
 	}
 
+	if let Some((parent, module_name)) = pending.rsplit_once("::") {
+		let module_name = module_name.trim();
+		let module_root = parent.trim();
+
+		if is_same_ident(module_root.rsplit("::").next().unwrap_or(module_root).trim(), module_name)
+		{
+			let module_compact = compact_path_for_match(module_root);
+
+			if imported_full_paths_by_symbol.values().any(|full_paths| {
+				full_paths.iter().any(|full_path| {
+					full_path.rsplit_once("::").is_some_and(|(parent_full, _)| {
+						compact_path_for_match(parent_full) == module_compact
+					})
+				})
+			}) {
+				return Some((module_root, "self"));
+			}
+		}
+	}
+
+	let pending_compact = compact_path_for_match(pending);
+
+	if imported_full_paths_by_symbol.values().any(|full_paths| {
+		full_paths.iter().any(|full_path| {
+			full_path.rsplit_once("::").is_some_and(|(parent_full, _)| {
+				compact_path_for_match(parent_full) == pending_compact
+			})
+		})
+	}) {
+		return Some((pending, "self"));
+	}
+
 	let mut best: Option<(&str, &str)> = None;
 
 	for root_full in imported_full_paths_by_symbol.values().filter_map(|paths| {
@@ -2511,6 +2594,14 @@ fn find_use_item_line_importing_full_path(
 			continue;
 		};
 		let compact_path = compact_path_for_match(&path);
+		if let Some((prefix, _, _)) = parse_braced_path_parts(&path) {
+			let prefix_root = compact_path_for_match(prefix.trim_end_matches('{'));
+			let prefix_root = prefix_root.strip_suffix("::").unwrap_or(&prefix_root);
+
+			if prefix_root == target_compact {
+				containing_line.get_or_insert(item.line);
+			}
+		}
 
 		if compact_path == target_compact {
 			return Some(item.line);
@@ -2585,7 +2676,11 @@ fn try_merge_child_into_direct_root_braced_use_path(
 		return Some(use_path.to_owned());
 	}
 
-	segments.push(child_tail.to_owned());
+	if compact_path_for_match(child_tail) == "self" {
+		segments.insert(0, child_tail.to_owned());
+	} else {
+		segments.push(child_tail.to_owned());
+	}
 
 	Some(format!("{}{}{}", prefix, segments.join(", "), &use_path[close..=close]))
 }
@@ -2636,7 +2731,11 @@ fn try_merge_child_into_parent_braced_use_path(
 			break;
 		}
 
-		nested_children.push(child_tail.to_owned());
+		if child_compact == "self" {
+			nested_children.insert(0, child_tail.to_owned());
+		} else {
+			nested_children.push(child_tail.to_owned());
+		}
 
 		*segment = format!("{head}::{{{}}}", nested_children.join(", "));
 		matched_root = true;

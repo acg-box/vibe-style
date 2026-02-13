@@ -26,9 +26,11 @@ vergen-gitcl = { version = "9.1", features = ["cargo"] }
 
 [dependencies]
 # crates.io
-clap               = { version = "4.5", features = ["derive"] }
-color-eyre         = { version = "0.6" }
-directories        = { version = "6.0" }
-tracing            = { version = "0.1" }
-tracing-appender   = { version = "0.2" }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+cargo_metadata = { version = "0.23" }
+clap           = { version = "4.5", features = ["derive"] }
+color-eyre     = { version = "0.6" }
+once_cell      = { version = "1.21" }
+ra_ap_syntax   = { version = "0.0.319" }
+rayon          = { version = "1.11" }
+regex          = { version = "1.12" }
+serde_json     = { version = "1.0" }

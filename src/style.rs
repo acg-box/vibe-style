@@ -1364,6 +1364,132 @@ where
 	}
 
 	#[test]
+	fn import008_shortens_same_name_module_macro_paths() {
+		let original = r#"
+use color_eyre::eyre::{Result};
+
+fn build() -> Result<()> {
+	Err(color_eyre::eyre::eyre!("boom"))
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_macro_module_shorten.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("eyre::eyre!(\"boom\")"));
+		assert!(!rewritten.contains("color_eyre::eyre::eyre!(\"boom\")"));
+
+		let use_tree_start =
+			rewritten.find("use color_eyre::eyre::{").expect("must keep color_eyre::eyre use tree");
+		let use_tree_end = rewritten[use_tree_start..]
+			.find("};")
+			.expect("must keep color_eyre::eyre use tree end");
+		let use_tree = &rewritten[use_tree_start..use_tree_start + use_tree_end + 2];
+
+		assert!(use_tree.contains("self"));
+		assert!(use_tree.contains("Result"));
+		assert!(!rewritten.contains("use color_eyre::eyre;"));
+	}
+
+	#[test]
+	fn import008_fix_keeps_module_import_for_same_name_module_macro() {
+		let original = r#"
+use color_eyre::eyre::{Result};
+
+fn build() -> Result<()> {
+	Err(color_eyre::eyre::eyre!("boom"))
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_macro_module_fix.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("eyre::eyre!(\"boom\")"));
+		assert!(!rewritten.contains("color_eyre::eyre::eyre!(\"boom\")"));
+
+		let use_tree_start =
+			rewritten.find("use color_eyre::eyre::{").expect("must keep color_eyre::eyre use tree");
+		let use_tree_end = rewritten[use_tree_start..]
+			.find("};")
+			.expect("must keep color_eyre::eyre use tree end");
+		let use_tree = &rewritten[use_tree_start..use_tree_start + use_tree_end + 2];
+
+		assert!(use_tree.contains("self"));
+		assert!(use_tree.contains("Result"));
+		assert!(!rewritten.contains("use color_eyre::eyre;"));
+	}
+
+	#[test]
+	fn import008_merges_same_name_module_macro_into_existing_braced_use_tree() {
+		let original = r#"
+use color_eyre::eyre::{Result};
+
+fn build() -> Result<()> {
+	Err(color_eyre::eyre::eyre!("boom"))
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_macro_module_merge.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("eyre::eyre!(\"boom\")"));
+		assert!(!rewritten.contains("color_eyre::eyre::eyre!(\"boom\")"));
+
+		let use_tree_start =
+			rewritten.find("use color_eyre::eyre::{").expect("must keep color_eyre::eyre use tree");
+		let use_tree_end = rewritten[use_tree_start..]
+			.find("};")
+			.expect("must keep color_eyre::eyre use tree end");
+		let use_tree = &rewritten[use_tree_start..use_tree_start + use_tree_end + 2];
+
+		assert!(use_tree.contains("self"));
+		assert!(use_tree.contains("Result"));
+		assert!(!rewritten.contains("use color_eyre::eyre;"));
+	}
+
+	#[test]
 	fn import008_skips_ambiguous_type_symbol_paths() {
 		let text = r#"
 fn left<'e, E>(_exec: E)
