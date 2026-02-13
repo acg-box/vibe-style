@@ -2,50 +2,33 @@
 authors     = ["Xavier Lau <x@acg.box>"]
 build       = "build.rs"
 categories  = []
-default-run = "vstyle"
-description = "AST-based style checker and formatter for deterministic, rule-driven code layout."
+description = "<DESCRIPTION>"
 edition     = "2024"
-homepage    = "https://hack.ink/vibe-style"
+homepage    = "https://hack.ink/<NAME>"
 keywords    = []
 license     = "GPL-3.0"
-name        = "vibe-style"
+name        = "vibe-mono"
 readme      = "README.md"
-repository  = "https://github.com/hack-ink/vibe-style"
+repository  = "https://github.com/hack-ink/<NAME>"
 resolver    = "3"
 version     = "0.1.0"
 
 [package.metadata.docs.rs]
 all-features = true
 
-[package.metadata.binstall]
-bin-dir = "{ name }-{ target }-v{ version }/{ bin }{ binary-ext }"
-pkg-fmt = "tgz"
-pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }-v{ version }.{ archive-format }"
-
-[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
-pkg-fmt = "zip"
-
-[[bin]]
-name = "vstyle"
-path = "src/main.rs"
-
-[[bin]]
-name = "cargo-vstyle"
-path = "src/main.rs"
-
 [profile.final-release]
 inherits = "release"
 lto      = true
 
 [build-dependencies]
+# crates.io
 vergen-gitcl = { version = "9.1", features = ["cargo"] }
 
 [dependencies]
-cargo_metadata = { version = "0.20" }
-clap           = { version = "4.5", features = ["derive"] }
-color-eyre     = { version = "0.6" }
-once_cell      = { version = "1.21" }
-ra_ap_syntax   = { version = "0.0.319" }
-rayon          = { version = "1.11" }
-regex          = { version = "1.12" }
-serde_json     = { version = "1.0" }
+# crates.io
+clap               = { version = "4.5", features = ["derive"] }
+color-eyre         = { version = "0.6" }
+directories        = { version = "6.0" }
+tracing            = { version = "0.1" }
+tracing-appender   = { version = "0.2" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
