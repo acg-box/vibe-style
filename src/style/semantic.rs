@@ -19,6 +19,37 @@ pub(crate) fn apply_semantic_fixes(
 	}
 
 	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
+	let stdout = run_semantic_cargo_check(cargo_options)?;
+	let warning_lines = collect_unused_super_glob_lines(&stdout);
+	let mut applied = 0_usize;
+
+	for (path, lines) in warning_lines {
+		if !tracked.contains(&path) {
+			continue;
+		}
+
+		applied += add_allow_unused_imports_for_super_glob(&path, &lines)?;
+	}
+
+	Ok(applied)
+}
+
+pub(crate) fn collect_compiler_error_files(
+	files: &[PathBuf],
+	cargo_options: &CargoOptions,
+) -> Result<BTreeSet<PathBuf>> {
+	if files.is_empty() {
+		return Ok(BTreeSet::new());
+	}
+
+	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
+	let stdout = run_semantic_cargo_check(cargo_options)?;
+	let all = collect_compiler_error_files_from_output(&stdout);
+
+	Ok(all.into_iter().filter(|path| tracked.contains(path)).collect())
+}
+
+fn run_semantic_cargo_check(cargo_options: &CargoOptions) -> Result<String> {
 	let mut cmd = Command::new("cargo");
 
 	cmd.arg("check");
@@ -47,19 +78,8 @@ pub(crate) fn apply_semantic_fixes(
 
 	let output =
 		cmd.output().map_err(|err| eyre::eyre!("Failed to run semantic cargo check: {err}."))?;
-	let stdout = String::from_utf8(output.stdout)?;
-	let warning_lines = collect_unused_super_glob_lines(&stdout);
-	let mut applied = 0_usize;
 
-	for (path, lines) in warning_lines {
-		if !tracked.contains(&path) {
-			continue;
-		}
-
-		applied += add_allow_unused_imports_for_super_glob(&path, &lines)?;
-	}
-
-	Ok(applied)
+	String::from_utf8(output.stdout).map_err(Into::into)
 }
 
 fn leading_whitespace(line: &str) -> &str {
@@ -131,6 +151,45 @@ fn collect_unused_super_glob_lines(output: &str) -> BTreeMap<PathBuf, BTreeSet<u
 	result
 }
 
+fn collect_compiler_error_files_from_output(output: &str) -> BTreeSet<PathBuf> {
+	let mut result = BTreeSet::new();
+
+	for line in output.lines() {
+		let Ok(value) = serde_json::from_str::<Value>(line) else {
+			continue;
+		};
+
+		if value.get("reason").and_then(Value::as_str) != Some("compiler-message") {
+			continue;
+		}
+
+		let Some(message) = value.get("message") else {
+			continue;
+		};
+
+		if message.get("level").and_then(Value::as_str) != Some("error") {
+			continue;
+		}
+
+		let Some(spans) = message.get("spans").and_then(Value::as_array) else {
+			continue;
+		};
+		let Some(primary) = spans
+			.iter()
+			.find(|span| span.get("is_primary").and_then(Value::as_bool).unwrap_or(false))
+		else {
+			continue;
+		};
+		let Some(file_name) = primary.get("file_name").and_then(Value::as_str) else {
+			continue;
+		};
+
+		result.insert(normalize_path(Path::new(file_name)));
+	}
+
+	result
+}
+
 fn add_allow_unused_imports_for_super_glob(path: &Path, lines: &BTreeSet<usize>) -> Result<usize> {
 	if lines.is_empty() {
 		return Ok(0);
@@ -185,7 +244,9 @@ fn add_allow_unused_imports_for_super_glob(path: &Path, lines: &BTreeSet<usize>)
 mod tests {
 	use std::{
 		collections::BTreeSet,
-		env, process,
+		env,
+		path::Path,
+		process,
 		time::{SystemTime, UNIX_EPOCH},
 	};
 
@@ -213,5 +274,17 @@ mod tests {
 		assert!(rewritten.contains("\t#[allow(unused_imports)]\n\tuse super::*;"));
 
 		let _ = fs::remove_file(path);
+	}
+
+	#[test]
+	fn collects_compiler_error_files() {
+		let output = r#"{"reason":"compiler-message","message":{"level":"warning","message":"unused import","spans":[]}}
+{"reason":"compiler-message","message":{"level":"error","code":{"code":"E0659"},"spans":[{"is_primary":true,"file_name":"src/demo.rs"}]}}
+{"reason":"compiler-message","message":{"level":"error","code":{"code":"E0412"},"spans":[{"is_primary":true,"file_name":"src/other.rs"}]}}"#;
+		let files = collect_compiler_error_files_from_output(output);
+
+		assert_eq!(files.len(), 2);
+		assert!(files.iter().any(|path| path.ends_with(Path::new("src/demo.rs"))));
+		assert!(files.iter().any(|path| path.ends_with(Path::new("src/other.rs"))));
 	}
 }

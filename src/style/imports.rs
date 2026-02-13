@@ -48,6 +48,15 @@ struct UseItemFlags {
 	glob_roots: HashSet<String>,
 }
 
+#[derive(Debug, Clone)]
+struct Import008UseRecoveryCandidate {
+	line: usize,
+	start_line: usize,
+	end_line: usize,
+	symbol: String,
+	import_path: String,
+}
+
 #[derive(Default)]
 struct MixedUseGroup {
 	indices: Vec<usize>,
@@ -762,6 +771,8 @@ fn apply_import008_rules(
 	glob_roots: &HashSet<String>,
 ) -> HashSet<usize> {
 	let import008_candidates = collect_import008_candidates(ctx, has_prelude_glob);
+	let import008_use_recovery_candidates =
+		collect_import008_use_recovery_candidates(ctx, use_runs, imported_full_paths_by_symbol);
 	let mut candidate_paths_by_symbol: HashMap<String, HashSet<String>> = HashMap::new();
 
 	for candidate in &import008_candidates {
@@ -826,15 +837,58 @@ fn apply_import008_rules(
 			pending_import_paths.insert(candidate.import_path);
 		}
 	}
+	for candidate in import008_use_recovery_candidates {
+		if blocked_symbols.contains(&candidate.symbol)
+			|| local_defined_symbols.contains(&candidate.symbol)
+		{
+			continue;
+		}
+
+		shared::push_violation(
+			violations,
+			ctx,
+			candidate.line,
+			"RUST-STYLE-IMPORT-008",
+			"Prefer merging child imports into existing parent module imports.",
+			true,
+		);
+
+		if !emit_edits {
+			continue;
+		}
+
+		if let (Some(start), Some(end)) = (
+			shared::offset_from_line(&ctx.line_starts, candidate.start_line),
+			shared::offset_from_line(&ctx.line_starts, candidate.end_line + 1),
+		) {
+			edits.push(Edit {
+				start,
+				end,
+				replacement: String::new(),
+				rule: "RUST-STYLE-IMPORT-008",
+			});
+			import008_group_skip_lines.insert(candidate.line);
+
+			let target_compact = compact_path_for_match(&candidate.import_path);
+			let already_imported =
+				imported_full_paths_by_symbol.get(&candidate.symbol).is_some_and(|paths| {
+					paths.iter().any(|path| compact_path_for_match(path) == target_compact)
+				});
+
+			if !already_imported {
+				pending_import_paths.insert(candidate.import_path);
+			}
+		}
+	}
 
 	if emit_edits {
-			let (pending_after_merge, merged_lines) = merge_import008_into_existing_module_use_items(
-				ctx,
-				edits,
-				use_runs,
-				&pending_import_paths,
-				imported_full_paths_by_symbol,
-			);
+		let (pending_after_merge, merged_lines) = merge_import008_into_existing_module_use_items(
+			ctx,
+			edits,
+			use_runs,
+			&pending_import_paths,
+			imported_full_paths_by_symbol,
+		);
 
 		import008_group_skip_lines.extend(merged_lines);
 
@@ -847,6 +901,73 @@ fn apply_import008_rules(
 	}
 
 	import008_group_skip_lines
+}
+
+fn collect_import008_use_recovery_candidates(
+	ctx: &FileContext,
+	use_runs: &[Vec<&TopItem>],
+	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
+) -> Vec<Import008UseRecoveryCandidate> {
+	let mut candidates = Vec::new();
+
+	for item in use_runs.iter().flat_map(|run| run.iter().copied()) {
+		let Some(path) = extract_use_path(ctx, item) else {
+			continue;
+		};
+		let Some((prefix, symbol)) = simple_import_prefix_symbol(&path) else {
+			continue;
+		};
+
+		if prefix.contains("::") {
+			continue;
+		}
+		if matches!(prefix.as_str(), "std" | "core" | "alloc" | "crate" | "self" | "super" | "Self")
+		{
+			continue;
+		}
+
+		let root = normalize_ident(&prefix).to_owned();
+		let symbol_normalized = normalize_ident(&symbol).to_owned();
+		let Some(root_full_paths) = imported_full_paths_by_symbol.get(&root) else {
+			continue;
+		};
+		if root_full_paths.len() != 1 {
+			continue;
+		}
+		let Some(root_full) = root_full_paths.iter().next() else {
+			continue;
+		};
+
+		let root_full_compact = compact_path_for_match(root_full);
+		let prefix_compact = compact_path_for_match(&prefix);
+
+		if root_full_compact == prefix_compact {
+			continue;
+		}
+
+		let import_path = format!("{root_full}::{symbol}");
+		let current_compact = compact_path_for_match(&path);
+		let import_path_compact = compact_path_for_match(&import_path);
+
+		if let Some(existing_symbol_paths) = imported_full_paths_by_symbol.get(&symbol_normalized)
+			&& existing_symbol_paths.iter().any(|existing| {
+				let existing_compact = compact_path_for_match(existing);
+
+				existing_compact != current_compact && existing_compact != import_path_compact
+			}) {
+			continue;
+		}
+
+		candidates.push(Import008UseRecoveryCandidate {
+			line: item.line,
+			start_line: item.start_line,
+			end_line: item.end_line,
+			symbol: symbol_normalized,
+			import_path,
+		});
+	}
+
+	candidates
 }
 
 fn push_import_group_order_spacing_violations(
@@ -1458,48 +1579,30 @@ fn merge_import008_into_existing_module_use_items(
 	#[derive(Clone)]
 	struct MergeTarget {
 		anchor_line: usize,
+		root_full: String,
 	}
 
 	let mut remaining = BTreeSet::new();
-	let mut plans: BTreeMap<usize, (String, BTreeSet<String>)> = BTreeMap::new();
+	let mut plans: BTreeMap<usize, BTreeMap<String, BTreeSet<String>>> = BTreeMap::new();
 	let mut touched_lines = HashSet::new();
 	let mut use_items = HashMap::new();
 	let mut merge_targets_by_pending: HashMap<String, MergeTarget> = HashMap::new();
-	let mut successful_merge_lines = HashSet::new();
+	let mut successful_merge_roots: HashSet<(usize, String)> = HashSet::new();
 
 	for item in use_runs.iter().flat_map(|run| run.iter().copied()) {
 		use_items.insert(item.line, item);
 	}
 
 	for pending in pending_import_paths {
-		let Some((root, child_tail)) = pending.split_once("::") else {
+		let Some((root_full, child_tail)) =
+			resolve_import008_merge_target_for_pending_path(pending, imported_full_paths_by_symbol)
+		else {
 			remaining.insert(pending.clone());
 
 			continue;
 		};
-		let child_tail = child_tail.trim();
-
-		if child_tail.is_empty() {
-			remaining.insert(pending.clone());
-
-			continue;
-		}
-		let Some(root_full_paths) = imported_full_paths_by_symbol.get(root) else {
-			remaining.insert(pending.clone());
-
-			continue;
-		};
-		if root_full_paths.len() != 1 {
-			remaining.insert(pending.clone());
-
-			continue;
-		}
-		let Some(root_full) = root_full_paths.iter().next() else {
-			remaining.insert(pending.clone());
-
-			continue;
-		};
-		let Some(anchor_line) = find_exact_use_item_line_for_path(ctx, use_runs, root_full) else {
+		let Some(anchor_line) = find_use_item_line_importing_full_path(ctx, use_runs, root_full)
+		else {
 			remaining.insert(pending.clone());
 
 			continue;
@@ -1507,20 +1610,15 @@ fn merge_import008_into_existing_module_use_items(
 
 		plans
 			.entry(anchor_line)
-			.and_modify(|(_, children)| {
-				children.insert(child_tail.to_owned());
-			})
-			.or_insert_with(|| {
-				let mut children = BTreeSet::new();
-
-				children.insert(child_tail.to_owned());
-
-				(root_full.clone(), children)
-			});
-		merge_targets_by_pending.insert(pending.clone(), MergeTarget { anchor_line });
+			.or_default()
+			.entry(root_full.to_owned())
+			.or_default()
+			.insert(child_tail.to_owned());
+		merge_targets_by_pending
+			.insert(pending.clone(), MergeTarget { anchor_line, root_full: root_full.to_owned() });
 	}
 
-	for (line, (root_full, children)) in plans {
+	for (line, root_plans) in plans {
 		let Some(item) = use_items.get(&line).copied() else {
 			continue;
 		};
@@ -1530,17 +1628,32 @@ fn merge_import008_into_existing_module_use_items(
 		let Some(raw) = ctx.text.get(start..end) else {
 			continue;
 		};
-		let merged_path = format!(
-			"{root_full}::{{self, {}}}",
-			children.into_iter().collect::<Vec<_>>().join(", ")
-		);
+		let Some(use_path) = extract_use_path_from_text(raw) else {
+			continue;
+		};
+		let mut merged_path = use_path;
+		let mut merged_any = false;
 
+		for (root_full, children) in root_plans {
+			let Some(next_path) =
+				merge_children_into_use_path_for_root(&merged_path, &root_full, &children)
+			else {
+				continue;
+			};
+
+			successful_merge_roots.insert((line, root_full));
+			merged_any |= next_path != merged_path;
+			merged_path = next_path;
+		}
+
+		if !merged_any {
+			continue;
+		}
 		if let Some(rewritten) = rewrite_use_item_with_path(raw, &merged_path)
 			&& rewritten != raw
 		{
 			edits.push(Edit { start, end, replacement: rewritten, rule: "RUST-STYLE-IMPORT-008" });
 			touched_lines.insert(line);
-			successful_merge_lines.insert(line);
 		}
 	}
 
@@ -1551,7 +1664,8 @@ fn merge_import008_into_existing_module_use_items(
 			continue;
 		};
 
-		let can_consume = successful_merge_lines.contains(&target.anchor_line);
+		let can_consume =
+			successful_merge_roots.contains(&(target.anchor_line, target.root_full.clone()));
 
 		if !can_consume {
 			remaining.insert(pending.clone());
@@ -1561,24 +1675,228 @@ fn merge_import008_into_existing_module_use_items(
 	(remaining, touched_lines)
 }
 
-fn find_exact_use_item_line_for_path(
+fn resolve_import008_merge_target_for_pending_path<'a>(
+	pending: &'a str,
+	imported_full_paths_by_symbol: &'a HashMap<String, HashSet<String>>,
+) -> Option<(&'a str, &'a str)> {
+	let pending = pending.trim();
+
+	if pending.is_empty() {
+		return None;
+	}
+
+	if let Some((root, child_tail)) = pending.split_once("::")
+		&& let Some(root_full_paths) = imported_full_paths_by_symbol.get(root)
+		&& root_full_paths.len() == 1
+		&& let Some(root_full) = root_full_paths.iter().next()
+	{
+		let child_tail = child_tail.trim();
+
+		if !child_tail.is_empty() {
+			return Some((root_full.as_str(), child_tail));
+		}
+	}
+
+	let mut best: Option<(&str, &str)> = None;
+
+	for root_full in imported_full_paths_by_symbol.values().filter_map(|paths| {
+		if paths.len() == 1 { paths.iter().next().map(String::as_str) } else { None }
+	}) {
+		let prefix = format!("{root_full}::");
+
+		if !pending.starts_with(&prefix) {
+			continue;
+		}
+
+		let child_tail = pending.strip_prefix(&prefix)?.trim();
+
+		if child_tail.is_empty() {
+			continue;
+		}
+
+		match best {
+			Some((current_root, _)) if current_root.len() >= root_full.len() => {},
+			_ => best = Some((root_full, child_tail)),
+		}
+	}
+
+	best
+}
+
+fn find_use_item_line_importing_full_path(
 	ctx: &FileContext,
 	use_runs: &[Vec<&TopItem>],
 	target_path: &str,
 ) -> Option<usize> {
-	let target_compact = target_path.replace(' ', "");
+	let target_compact = compact_path_for_match(target_path);
+	let mut containing_line = None;
 
 	for item in use_runs.iter().flat_map(|run| run.iter().copied()) {
 		let Some(path) = extract_use_path(ctx, item) else {
 			continue;
 		};
 
-		if path.replace(' ', "") == target_compact {
+		let compact_path = compact_path_for_match(&path);
+
+		if compact_path == target_compact {
 			return Some(item.line);
+		}
+		if imported_full_paths_from_use_path(&path)
+			.into_iter()
+			.any(|full_path| compact_path_for_match(&full_path) == target_compact)
+		{
+			containing_line.get_or_insert(item.line);
 		}
 	}
 
-	None
+	containing_line
+}
+
+fn merge_children_into_use_path_for_root(
+	use_path: &str,
+	root_full: &str,
+	children: &BTreeSet<String>,
+) -> Option<String> {
+	let mut current = use_path.to_owned();
+	let mut changed = false;
+
+	for child in children {
+		let next = merge_single_child_into_use_path_for_root(&current, root_full, child)?;
+
+		if next != current {
+			changed = true;
+			current = next;
+		}
+	}
+
+	if changed { Some(current) } else { None }
+}
+
+fn merge_single_child_into_use_path_for_root(
+	use_path: &str,
+	root_full: &str,
+	child_tail: &str,
+) -> Option<String> {
+	let root_compact = compact_path_for_match(root_full);
+
+	if compact_path_for_match(use_path) == root_compact {
+		return Some(format!("{root_full}::{{self, {child_tail}}}"));
+	}
+	if let Some(merged) =
+		try_merge_child_into_direct_root_braced_use_path(use_path, &root_compact, child_tail)
+	{
+		return Some(merged);
+	}
+
+	try_merge_child_into_parent_braced_use_path(use_path, root_full, child_tail)
+}
+
+fn try_merge_child_into_direct_root_braced_use_path(
+	use_path: &str,
+	root_compact: &str,
+	child_tail: &str,
+) -> Option<String> {
+	let (prefix, close, mut segments) = parse_braced_path_parts(use_path)?;
+	let prefix_root = prefix[..prefix.len().saturating_sub(1)].trim();
+	let prefix_root = prefix_root.strip_suffix("::").unwrap_or(prefix_root).trim();
+
+	if compact_path_for_match(prefix_root) != *root_compact {
+		return None;
+	}
+	if segments
+		.iter()
+		.any(|segment| compact_path_for_match(segment) == compact_path_for_match(child_tail))
+	{
+		return Some(use_path.to_owned());
+	}
+
+	segments.push(child_tail.to_owned());
+
+	Some(format!("{}{}{}", prefix, segments.join(", "), &use_path[close..=close]))
+}
+
+fn try_merge_child_into_parent_braced_use_path(
+	use_path: &str,
+	root_full: &str,
+	child_tail: &str,
+) -> Option<String> {
+	let (parent_full, root_head) = root_full.rsplit_once("::")?;
+	let (prefix, close, mut segments) = parse_braced_path_parts(use_path)?;
+	let prefix_root = prefix[..prefix.len().saturating_sub(1)].trim();
+	let prefix_root = prefix_root.strip_suffix("::").unwrap_or(prefix_root).trim();
+
+	if compact_path_for_match(prefix_root) != compact_path_for_match(parent_full) {
+		return None;
+	}
+
+	let root_head_compact = compact_path_for_match(root_head);
+	let child_compact = compact_path_for_match(child_tail);
+	let mut matched_root = false;
+	let mut changed = false;
+
+	for segment in &mut segments {
+		let trimmed = segment.trim();
+
+		if compact_path_for_match(trimmed) == root_head_compact {
+			*segment = format!("{root_head}::{{self, {child_tail}}}");
+			matched_root = true;
+			changed = true;
+
+			break;
+		}
+
+		let Some((head, inner)) = parse_single_level_nested_use_segment(trimmed) else {
+			continue;
+		};
+
+		if compact_path_for_match(head) != root_head_compact {
+			continue;
+		}
+
+		let mut nested_children = split_top_level_csv(inner);
+
+		if nested_children.iter().any(|child| compact_path_for_match(child) == child_compact) {
+			matched_root = true;
+
+			break;
+		}
+
+		nested_children.push(child_tail.to_owned());
+		*segment = format!("{head}::{{{}}}", nested_children.join(", "));
+		matched_root = true;
+		changed = true;
+
+		break;
+	}
+
+	if !matched_root {
+		return None;
+	}
+	if !changed {
+		return Some(use_path.to_owned());
+	}
+
+	Some(format!("{}{}{}", prefix, segments.join(", "), &use_path[close..=close]))
+}
+
+fn parse_single_level_nested_use_segment(segment: &str) -> Option<(&str, &str)> {
+	let (head, rest) = segment.split_once("::{")?;
+
+	if !rest.ends_with('}') {
+		return None;
+	}
+
+	let inner = &rest[..rest.len().saturating_sub(1)];
+
+	if inner.contains('{') || inner.contains('}') {
+		return None;
+	}
+
+	Some((head.trim(), inner))
+}
+
+fn compact_path_for_match(path: &str) -> String {
+	path.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
 
 fn import008_insert_line(ctx: &FileContext) -> usize {

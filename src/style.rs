@@ -1261,6 +1261,117 @@ fn send(tx: mpsc::UnboundedSender<u8>) {
 	}
 
 	#[test]
+	fn import008_merges_children_into_existing_nested_use_tree() {
+		let original = r#"
+use pubfi_extractor::{
+	TextIndex,
+	asset::{self, AssetRegistry},
+	chain_object, mentions,
+	product::{self, ProductRegistry},
+};
+
+fn demo(
+	_i: TextIndex,
+	_m: mentions::Mentions,
+	a: asset::AssetMention,
+	b: chain_object::ChainObjectMention,
+	c: product::ProductMention,
+) {
+	let _ = (a, b, c);
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_merge_nested_use_tree.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+
+		assert!(compact.contains("asset::{"));
+		assert!(compact.contains("AssetRegistry"));
+		assert!(compact.contains("AssetMention"));
+		assert!(compact.contains("chain_object::{self,ChainObjectMention}"), "{rewritten}");
+		assert!(compact.contains("product::{"));
+		assert!(compact.contains("ProductRegistry"));
+		assert!(compact.contains("ProductMention"));
+		assert!(compact.contains("a:AssetMention"));
+		assert!(compact.contains("b:ChainObjectMention"));
+		assert!(compact.contains("c:ProductMention"));
+		assert!(!compact.contains("useasset::AssetMention;"));
+		assert!(!compact.contains("usechain_object::ChainObjectMention;"));
+		assert!(!compact.contains("useproduct::ProductMention;"));
+	}
+
+	#[test]
+	fn import008_recovers_short_child_imports_into_existing_parent_use_tree() {
+		let original = r#"
+use asset::AssetMention;
+use chain_object::ChainObjectMention;
+use product::ProductMention;
+
+use pubfi_extractor::{
+	TextIndex,
+	asset::{self, AssetRegistry},
+	chain_object, mentions,
+	product::{self, ProductRegistry},
+};
+
+fn demo(
+	_i: TextIndex,
+	_m: mentions::Mentions,
+	a: AssetMention,
+	b: ChainObjectMention,
+	c: ProductMention,
+) {
+	let _ = (a, b, c);
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_recover_short_child_use.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+
+		assert!(compact.contains("asset::{"));
+		assert!(compact.contains("AssetRegistry"));
+		assert!(compact.contains("AssetMention"));
+		assert!(compact.contains("chain_object::{self,ChainObjectMention}"), "{rewritten}");
+		assert!(compact.contains("product::{"));
+		assert!(compact.contains("ProductRegistry"));
+		assert!(compact.contains("ProductMention"));
+		assert!(!compact.contains("useasset::AssetMention;"));
+		assert!(!compact.contains("usechain_object::ChainObjectMention;"));
+		assert!(!compact.contains("useproduct::ProductMention;"));
+	}
+
+	#[test]
 	fn import008_skips_cfg_test_module_paths() {
 		let text = r#"
 #[cfg(test)]

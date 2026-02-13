@@ -62,17 +62,17 @@ pub(crate) fn check_module_order(
 			continue;
 		};
 
-		if let Some(last) = order_seen.last().copied() {
-			if order < last {
-				shared::push_violation(
-					violations,
-					ctx,
-					item.line,
-					"RUST-STYLE-MOD-001",
-					"Top-level module item order does not match rust.md order.",
-					mod001_fixable_lines.contains(&item.line),
-				);
-			}
+		if let Some(last) = order_seen.last().copied()
+			&& order < last
+		{
+			shared::push_violation(
+				violations,
+				ctx,
+				item.line,
+				"RUST-STYLE-MOD-001",
+				"Top-level module item order does not match rust.md order.",
+				mod001_fixable_lines.contains(&item.line),
+			);
 		}
 
 		order_seen.push(order);
@@ -938,10 +938,10 @@ fn collect_module_reorder_lines(entries: &[ModuleReorderEntry]) -> ModuleReorder
 	let mut last_bucket = None;
 
 	for entry in entries {
-		if let Some(last) = last_bucket {
-			if entry.bucket < last {
-				out.mod001.push(entry.line);
-			}
+		if let Some(last) = last_bucket
+			&& entry.bucket < last
+		{
+			out.mod001.push(entry.line);
 		}
 
 		last_bucket = Some(entry.bucket);

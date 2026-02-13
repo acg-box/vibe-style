@@ -80,8 +80,8 @@ If these rules conflict with higher-priority instructions (system, developer, or
 
 # 1. Execution Model
 
-Execution and workflow rules are defined in this file.
-Style-rule semantics for the checker are documented in `README.md`.
+Language- or stack-specific execution rules live in `docs/guide/development/languages/`.
+Language- or stack-specific rules must be documented under `docs/guide/development/languages/` and linked from `docs/guide/index.md`.
 
 Run verification commands only when requested or when you need evidence before claiming completion.
 
@@ -95,15 +95,6 @@ Run verification commands only when requested or when you need evidence before c
   - Tests: `cargo make test` for full workspace, or `cargo make test-rust` for Rust-only.
   - SQLx metadata: `scripts/sqlx-prepare.sh`.
   - Full validation: `cargo make checks`.
-
-## 1.2 Cross-Repository Adoption
-
-- Keep style-rule semantics centralized in this repository `README.md`.
-- Do not duplicate style-rule definitions in repository-local language guide files.
-- For downstream repositories, use this checker as the enforcement layer:
-  - Run `curate` in CI for style validation.
-  - Run `tune` for safe automated remediation.
-- Keep repository-specific process and execution constraints in local `AGENTS.md`.
 
 # 2. Implementation Scope
 
@@ -137,8 +128,9 @@ Never modify:
 
 ---
 
-# 5. Style Rules Reference
+# 5. Language-Specific Rules Reference
 
-Rust style-rule semantics live in `README.md` under the Rust style checker section.
+Rust development and style rules live in `docs/guide/development/languages/rust.md`.
 These rules apply **only** when editing Rust code and do **not** override
 the global behavior and language rules in this file.
+Async and runtime safety rules are defined in the language guides.

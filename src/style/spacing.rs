@@ -1,4 +1,7 @@
-use std::collections::{BTreeSet, HashSet};
+use std::{
+	collections::{BTreeSet, HashSet},
+	sync::LazyLock,
+};
 
 use regex::Regex;
 
@@ -18,6 +21,14 @@ struct CodeMaskState {
 	char_escape: bool,
 	raw_hashes: Option<usize>,
 }
+
+static CONTROL_FLOW_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^(if|if\s+let|match|for|while|loop|return|let)\b")
+		.expect("Expected operation to succeed.")
+});
+static STRUCT_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+,?$").expect("Expected operation to succeed.")
+});
 
 struct StatementPair {
 	blank_count: usize,
@@ -177,6 +188,7 @@ fn check_statement_pair_spacing(
 	}
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_statement_pair_spacing_rule(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -289,6 +301,7 @@ fn apply_statement_pair_spacing_rule(
 	);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_spacing_violation_and_edit(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -309,10 +322,11 @@ fn push_spacing_violation_and_edit(
 
 	shared::push_violation(violations, ctx, line, rule, message, can_autofix);
 
-	if emit_edits && can_autofix {
-		if let Some(edit) = replace_between_lines_edit(ctx, start_line, end_line, replacement) {
-			edits.push(edit);
-		}
+	if emit_edits
+		&& can_autofix
+		&& let Some(edit) = replace_between_lines_edit(ctx, start_line, end_line, replacement)
+	{
+		edits.push(edit);
 	}
 }
 
@@ -355,20 +369,21 @@ fn check_return_like_spacing(
 			can_autofix,
 		);
 
-		if emit_edits && can_autofix {
-			if let Some(edit) = replace_between_lines_edit_with_rule(
+		if emit_edits
+			&& can_autofix
+			&& let Some(edit) = replace_between_lines_edit_with_rule(
 				ctx,
 				prev_end + 1,
 				*ret_start,
 				"\n",
 				"RUST-STYLE-SPACE-004",
 			) {
-				edits.push(edit);
-			}
+			edits.push(edit);
 		}
 	}
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recurse_spacing_child_blocks(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -995,16 +1010,16 @@ fn extract_top_level_statements(
 		}
 	}
 
-	if let Some(current_start) = current_start {
-		if fn_end > current_start {
-			let span_lines = lines[current_start..fn_end].to_vec();
+	if let Some(current_start) = current_start
+		&& fn_end > current_start
+	{
+		let span_lines = lines[current_start..fn_end].to_vec();
 
-			statements.push((
-				current_start,
-				fn_end.saturating_sub(1),
-				classify_statement_type(&span_lines),
-			));
-		}
+		statements.push((
+			current_start,
+			fn_end.saturating_sub(1),
+			classify_statement_type(&span_lines),
+		));
 	}
 
 	statements
@@ -1083,8 +1098,8 @@ fn extract_top_level_brace_blocks_in_span(
 	let mut current_start: Option<usize> = None;
 	let mut mask_state = CodeMaskState::default();
 
-	for idx in span_start..=span_end {
-		let code = mask_code_line(&lines[idx], &mut mask_state);
+	for (idx, line) in lines.iter().enumerate().take(span_end + 1).skip(span_start) {
+		let code = mask_code_line(line, &mut mask_state);
 
 		for ch in code.chars() {
 			if ch == '{' {
@@ -1094,12 +1109,12 @@ fn extract_top_level_brace_blocks_in_span(
 					current_start = Some(idx);
 				}
 			} else if ch == '}' {
-				if depth == 1 {
-					if let Some(start) = current_start {
-						blocks.push((start, idx));
+				if depth == 1
+					&& let Some(start) = current_start
+				{
+					blocks.push((start, idx));
 
-						current_start = None;
-					}
+					current_start = None;
 				}
 
 				depth = (depth - 1).max(0);
@@ -1133,18 +1148,12 @@ fn is_data_like_brace_block(lines: &[String], block_start: usize, block_end: usi
 		if line.contains("=>") || line.contains(';') {
 			return false;
 		}
-		if Regex::new(r"^(if|if\s+let|match|for|while|loop|return|let)\b")
-			.expect("Expected operation to succeed.")
-			.is_match(line)
-		{
+		if CONTROL_FLOW_PREFIX_RE.is_match(line) {
 			return false;
 		}
 	}
 	for line in &content {
-		if Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+,?$")
-			.expect("Expected operation to succeed.")
-			.is_match(line)
-		{
+		if STRUCT_FIELD_RE.is_match(line) {
 			continue;
 		}
 		if line.ends_with(',') {

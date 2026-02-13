@@ -860,15 +860,15 @@ fn has_attr_text(mut attrs: impl Iterator<Item = Attr>, needle: &str) -> bool {
 
 fn method_call_in_test_context(call: &MethodCallExpr) -> bool {
 	for node in call.syntax().ancestors() {
-		if let Some(module) = ast::Module::cast(node.clone()) {
-			if has_attr_text(module.attrs(), "cfg(test)") {
-				return true;
-			}
+		if let Some(module) = ast::Module::cast(node.clone())
+			&& has_attr_text(module.attrs(), "cfg(test)")
+		{
+			return true;
 		}
-		if let Some(function) = ast::Fn::cast(node) {
-			if has_attr_text(function.attrs(), "test") {
-				return true;
-			}
+		if let Some(function) = ast::Fn::cast(node)
+			&& has_attr_text(function.attrs(), "test")
+		{
+			return true;
 		}
 	}
 
