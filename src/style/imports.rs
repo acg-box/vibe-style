@@ -828,7 +828,7 @@ fn apply_import002_normalization_rule(
 	item: &TopItem,
 	path: &str,
 ) {
-	let Some(normalized) = normalize_mixed_self_child_use_path(path) else {
+	let Some(normalized) = normalize_mixed_self_child_use_path(ctx, path) else {
 		return;
 	};
 
@@ -886,38 +886,31 @@ fn apply_import003_trait_keep_alive_rule(
 	item: &TopItem,
 	path: &str,
 ) -> bool {
-	let candidate_symbols = collect_trait_keep_alive_candidate_symbols(ctx, path);
-
-	if candidate_symbols.is_empty() {
+	let Some((rewritten_use_path, affected_symbols)) =
+		normalize_trait_keep_alive_use_path(ctx, path)
+	else {
 		return false;
-	}
-
-	let rewritten_use_path = rewrite_use_path_with_trait_as_underscore(path, &candidate_symbols);
-	let fixable = rewritten_use_path.is_some();
-	let mut symbols = candidate_symbols.into_iter().collect::<Vec<_>>();
+	};
+	let mut symbols = affected_symbols.into_iter().collect::<Vec<_>>();
 
 	symbols.sort();
 
 	for symbol in symbols {
-		shared::push_violation(
-			violations,
-			ctx,
-			item.line,
-			"RUST-STYLE-IMPORT-003",
-			&format!(
+		let referenced_directly = symbol_is_referenced_outside_use(ctx, &symbol);
+		let message = if referenced_directly {
+			format!("Trait import `{symbol}` is referenced directly; do not use `as _`.")
+		} else {
+			format!(
 				"Trait keep-alive import `{symbol}` should use `as _` when not referenced directly."
-			),
-			fixable,
-		);
+			)
+		};
+
+		shared::push_violation(violations, ctx, item.line, "RUST-STYLE-IMPORT-003", &message, true);
 	}
 
-	if !emit_edits {
+	if !emit_edits || rewritten_use_path == path {
 		return false;
 	}
-
-	let Some(rewritten_use_path) = rewritten_use_path else {
-		return false;
-	};
 
 	if let Some((start, end)) = item_text_range(ctx, item)
 		&& let Some(raw) = ctx.text.get(start..end)
@@ -929,30 +922,6 @@ fn apply_import003_trait_keep_alive_rule(
 	}
 
 	false
-}
-
-fn collect_trait_keep_alive_candidate_symbols(ctx: &FileContext, path: &str) -> HashSet<String> {
-	if path.contains('*') || path.contains(" as ") {
-		return HashSet::new();
-	}
-
-	let mut out = HashSet::new();
-
-	for full_path in imported_full_paths_from_use_path(path) {
-		let Some(symbol) = symbol_from_full_import_path(&full_path) else {
-			continue;
-		};
-
-		if !looks_like_trait_import(&symbol, &full_path)
-			|| symbol_is_referenced_outside_use(ctx, &symbol)
-		{
-			continue;
-		}
-
-		out.insert(symbol);
-	}
-
-	out
 }
 
 fn looks_like_trait_import(symbol: &str, full_path: &str) -> bool {
@@ -1004,38 +973,151 @@ fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
 		}
 	}
 
+	let derive_symbol_re = Regex::new(&format!(r"\b{}\b", regex::escape(symbol)))
+		.expect("Expected operation to succeed.");
+
+	for attr in ctx.source_file.syntax().descendants().filter_map(ast::Attr::cast) {
+		let text = attr.syntax().text().to_string();
+
+		if !text.contains("derive") {
+			continue;
+		}
+		if derive_symbol_re.is_match(&text) {
+			return true;
+		}
+	}
+
 	false
 }
 
-fn rewrite_use_path_with_trait_as_underscore(
+fn normalize_trait_keep_alive_use_path(
+	ctx: &FileContext,
 	path: &str,
-	candidate_symbols: &HashSet<String>,
-) -> Option<String> {
-	if candidate_symbols.is_empty() || path.contains('*') || path.contains(" as ") {
+) -> Option<(String, HashSet<String>)> {
+	let has_child_module_declarations = has_non_inline_child_modules(ctx);
+
+	if path.contains('*') {
 		return None;
 	}
 
-	if let Some((prefix, symbol)) = simple_import_prefix_symbol(path) {
-		if candidate_symbols.contains(normalize_ident(&symbol)) {
-			return Some(format!("{prefix}::{symbol} as _"));
+	if let Some((rewritten_leaf, affected_symbols, changed, _trait_key)) =
+		normalize_trait_keep_alive_leaf(path.trim(), ctx, "", has_child_module_declarations)
+		&& changed
+	{
+		return Some((rewritten_leaf, affected_symbols));
+	}
+
+	let (prefix, close, segments) = parse_braced_path_parts_allow_alias(path)?;
+	let module_prefix = prefix[..prefix.len().saturating_sub(1)]
+		.trim()
+		.strip_suffix("::")
+		.unwrap_or(prefix[..prefix.len().saturating_sub(1)].trim())
+		.to_owned();
+	let mut rewritten_segments = Vec::new();
+	let mut changed = false;
+	let mut affected_symbols = HashSet::new();
+	let mut seen_trait_keys = HashSet::new();
+
+	for segment in segments {
+		let trimmed = segment.trim();
+
+		if trimmed.is_empty() {
+			continue;
 		}
 
-		return None;
-	}
+		if let Some((head, inner)) = parse_single_level_nested_use_segment(trimmed) {
+			let nested_prefix = if module_prefix.is_empty() {
+				head.to_owned()
+			} else {
+				format!("{module_prefix}::{head}")
+			};
+			let mut rewritten_children = Vec::new();
 
-	let (prefix, close, mut segments) = parse_braced_path_parts(path)?;
-	let mut changed = false;
+			for child in split_top_level_csv(inner) {
+				let child_trimmed = child.trim();
 
-	for segment in &mut segments {
-		let Some(rewritten) =
-			rewrite_import_segment_with_trait_as_underscore(segment, candidate_symbols)
+				if child_trimmed.is_empty() {
+					continue;
+				}
+
+				let Some((rewritten_child, child_symbols, child_changed, trait_key)) =
+					normalize_trait_keep_alive_leaf(
+						child_trimmed,
+						ctx,
+						&nested_prefix,
+						has_child_module_declarations,
+					)
+				else {
+					rewritten_children.push(child_trimmed.to_owned());
+
+					continue;
+				};
+
+				for symbol in child_symbols {
+					affected_symbols.insert(symbol);
+				}
+
+				if child_changed {
+					changed = true;
+				}
+
+				if let Some(key) = trait_key {
+					if seen_trait_keys.insert(key) {
+						rewritten_children.push(rewritten_child);
+					} else {
+						changed = true;
+					}
+				} else {
+					rewritten_children.push(rewritten_child);
+				}
+			}
+
+			if rewritten_children.is_empty() {
+				changed = true;
+
+				continue;
+			}
+
+			let rewritten_segment = format!("{head}::{{{}}}", rewritten_children.join(", "));
+
+			if rewritten_segment != trimmed {
+				changed = true;
+			}
+
+			rewritten_segments.push(rewritten_segment);
+
+			continue;
+		}
+
+		let Some((rewritten_segment, segment_symbols, segment_changed, trait_key)) =
+			normalize_trait_keep_alive_leaf(
+				trimmed,
+				ctx,
+				&module_prefix,
+				has_child_module_declarations,
+			)
 		else {
+			rewritten_segments.push(trimmed.to_owned());
+
 			continue;
 		};
 
-		if rewritten != *segment {
-			*segment = rewritten;
+		for symbol in segment_symbols {
+			affected_symbols.insert(symbol);
+		}
+
+		if segment_changed {
 			changed = true;
+		}
+
+		if let Some(key) = trait_key {
+			if seen_trait_keys.insert(key) {
+				rewritten_segments.push(rewritten_segment);
+			} else {
+				changed = true;
+			}
+		} else {
+			rewritten_segments.push(rewritten_segment);
 		}
 	}
 
@@ -1043,72 +1125,83 @@ fn rewrite_use_path_with_trait_as_underscore(
 		return None;
 	}
 
-	Some(format!("{prefix}{}{}", segments.join(", "), &path[close..=close]))
+	Some((
+		format!("{prefix}{}{}", rewritten_segments.join(", "), &path[close..=close]),
+		affected_symbols,
+	))
 }
 
-fn rewrite_import_segment_with_trait_as_underscore(
-	segment: &str,
-	candidate_symbols: &HashSet<String>,
-) -> Option<String> {
-	let trimmed = segment.trim();
-
-	if trimmed.is_empty() || trimmed == "self" || trimmed.contains(" as ") {
+fn normalize_trait_keep_alive_leaf(
+	leaf: &str,
+	ctx: &FileContext,
+	import_prefix: &str,
+	has_child_module_declarations: bool,
+) -> Option<(String, HashSet<String>, bool, Option<String>)> {
+	if leaf.is_empty() || leaf == "self" || leaf.contains('{') || leaf.contains('}') {
 		return None;
 	}
 
-	if let Some((head, rest)) = trimmed.split_once("::{") {
-		if !rest.ends_with('}') {
-			return None;
-		}
+	let (base, alias) = split_import_leaf_alias(leaf)?;
+	let alias_trimmed = alias.as_deref().map(str::trim);
 
-		let inner = &rest[..rest.len().saturating_sub(1)];
-		let mut children = split_top_level_csv(inner);
-		let mut changed = false;
-
-		for child in &mut children {
-			let child_trimmed = child.trim();
-
-			if child_trimmed.is_empty()
-				|| child_trimmed == "self"
-				|| child_trimmed.contains(" as ")
-				|| child_trimmed.contains('{')
-				|| child_trimmed.contains('}')
-			{
-				continue;
-			}
-
-			let Some(symbol) = child_trimmed.rsplit("::").next() else {
-				continue;
-			};
-			let normalized = normalize_ident(symbol);
-
-			if matches!(normalized, "" | "self" | "super" | "crate")
-				|| !candidate_symbols.contains(normalized)
-			{
-				continue;
-			}
-
-			*child = format!("{child_trimmed} as _");
-			changed = true;
-		}
-
-		if !changed {
-			return None;
-		}
-
-		return Some(format!("{head}::{{{}}}", children.join(", ")));
-	}
-
-	let symbol = trimmed.rsplit("::").next()?;
-	let normalized = normalize_ident(symbol);
-
-	if matches!(normalized, "" | "self" | "super" | "crate")
-		|| !candidate_symbols.contains(normalized)
-	{
+	if alias_trimmed.is_some_and(|alias| alias != "_") {
 		return None;
 	}
 
-	Some(format!("{trimmed} as _"))
+	let full_path =
+		if import_prefix.is_empty() { base.to_owned() } else { format!("{import_prefix}::{base}") };
+	let full_path = full_path.replace(' ', "");
+	let symbol = symbol_from_full_import_path(&full_path)?;
+
+	if !looks_like_trait_import(&symbol, &full_path) {
+		return None;
+	}
+
+	let should_keep_alive =
+		!symbol_is_referenced_outside_use(ctx, &symbol) && !has_child_module_declarations;
+	let rewritten = if should_keep_alive { format!("{base} as _") } else { base.to_owned() };
+	let changed = compact_path_for_match(leaf) != compact_path_for_match(&rewritten);
+	let mut symbols = HashSet::new();
+
+	symbols.insert(symbol.clone());
+
+	Some((
+		rewritten,
+		symbols,
+		changed,
+		Some(format!(
+			"{}|{}",
+			compact_path_for_match(&full_path),
+			if should_keep_alive { "_" } else { "" }
+		)),
+	))
+}
+
+fn split_import_leaf_alias(leaf: &str) -> Option<(&str, Option<String>)> {
+	let trimmed = leaf.trim();
+
+	if trimmed.is_empty() {
+		return None;
+	}
+
+	if let Some((left, right)) = trimmed.rsplit_once(" as ") {
+		let base = left.trim();
+		let alias = right.trim();
+
+		if base.is_empty() || alias.is_empty() {
+			return None;
+		}
+
+		return Some((base, Some(alias.to_owned())));
+	}
+
+	Some((trimmed, None))
+}
+
+fn has_non_inline_child_modules(ctx: &FileContext) -> bool {
+	ctx.top_items
+		.iter()
+		.any(|item| item.kind == TopKind::Mod && item.raw.trim_end().ends_with(';'))
 }
 
 fn apply_import004_free_fn_macro_rule(
@@ -2594,7 +2687,7 @@ fn find_use_item_line_importing_full_path(
 			continue;
 		};
 		let compact_path = compact_path_for_match(&path);
-		if let Some((prefix, _, _)) = parse_braced_path_parts(&path) {
+		if let Some((prefix, _, _)) = parse_braced_path_parts_allow_alias(&path) {
 			let prefix_root = compact_path_for_match(prefix.trim_end_matches('{'));
 			let prefix_root = prefix_root.strip_suffix("::").unwrap_or(&prefix_root);
 
@@ -2662,27 +2755,18 @@ fn try_merge_child_into_direct_root_braced_use_path(
 	root_compact: &str,
 	child_tail: &str,
 ) -> Option<String> {
-	let (prefix, close, mut segments) = parse_braced_path_parts(use_path)?;
+	let (prefix, close, mut segments) = parse_braced_path_parts_allow_alias(use_path)?;
 	let prefix_root = prefix[..prefix.len().saturating_sub(1)].trim();
 	let prefix_root = prefix_root.strip_suffix("::").unwrap_or(prefix_root).trim();
 
 	if compact_path_for_match(prefix_root) != *root_compact {
 		return None;
 	}
-	if segments
-		.iter()
-		.any(|segment| compact_path_for_match(segment) == compact_path_for_match(child_tail))
-	{
-		return Some(use_path.to_owned());
+	if merge_child_tail_into_braced_segments(&mut segments, child_tail) {
+		return Some(format!("{}{}{}", prefix, segments.join(", "), &use_path[close..=close]));
 	}
 
-	if compact_path_for_match(child_tail) == "self" {
-		segments.insert(0, child_tail.to_owned());
-	} else {
-		segments.push(child_tail.to_owned());
-	}
-
-	Some(format!("{}{}{}", prefix, segments.join(", "), &use_path[close..=close]))
+	None
 }
 
 fn try_merge_child_into_parent_braced_use_path(
@@ -2691,7 +2775,7 @@ fn try_merge_child_into_parent_braced_use_path(
 	child_tail: &str,
 ) -> Option<String> {
 	let (parent_full, root_head) = root_full.rsplit_once("::")?;
-	let (prefix, close, mut segments) = parse_braced_path_parts(use_path)?;
+	let (prefix, close, mut segments) = parse_braced_path_parts_allow_alias(use_path)?;
 	let prefix_root = prefix[..prefix.len().saturating_sub(1)].trim();
 	let prefix_root = prefix_root.strip_suffix("::").unwrap_or(prefix_root).trim();
 
@@ -2700,7 +2784,6 @@ fn try_merge_child_into_parent_braced_use_path(
 	}
 
 	let root_head_compact = compact_path_for_match(root_head);
-	let child_compact = compact_path_for_match(child_tail);
 	let mut matched_root = false;
 	let mut changed = false;
 
@@ -2724,17 +2807,13 @@ fn try_merge_child_into_parent_braced_use_path(
 		}
 
 		let mut nested_children = split_top_level_csv(inner);
+		let nested_changed =
+			merge_child_tail_into_braced_segments(&mut nested_children, child_tail);
 
-		if nested_children.iter().any(|child| compact_path_for_match(child) == child_compact) {
+		if !nested_changed {
 			matched_root = true;
 
 			break;
-		}
-
-		if child_compact == "self" {
-			nested_children.insert(0, child_tail.to_owned());
-		} else {
-			nested_children.push(child_tail.to_owned());
 		}
 
 		*segment = format!("{head}::{{{}}}", nested_children.join(", "));
@@ -2768,6 +2847,92 @@ fn parse_single_level_nested_use_segment(segment: &str) -> Option<(&str, &str)> 
 	}
 
 	Some((head.trim(), inner))
+}
+
+fn merge_child_tail_into_braced_segments(segments: &mut Vec<String>, child_tail: &str) -> bool {
+	let child_compact = compact_path_for_match(child_tail);
+
+	for segment in segments.iter_mut() {
+		let trimmed = segment.trim();
+
+		if compact_path_for_match(trimmed) == child_compact {
+			return false;
+		}
+
+		if is_keep_alive_alias_for_child(trimmed, child_tail) {
+			*segment = child_tail.to_owned();
+
+			return true;
+		}
+
+		let Some((head, inner)) = parse_single_level_nested_use_segment(trimmed) else {
+			continue;
+		};
+		let Some((child_head, child_rest)) = child_tail.split_once("::") else {
+			continue;
+		};
+
+		if compact_path_for_match(head) != compact_path_for_match(child_head) {
+			continue;
+		}
+
+		let mut children = split_top_level_csv(inner);
+		let child_rest_compact = compact_path_for_match(child_rest);
+		let mut found_exact = false;
+		let mut replaced_alias = false;
+
+		for child in children.iter_mut() {
+			let child_trimmed = child.trim();
+
+			if compact_path_for_match(child_trimmed) == child_rest_compact {
+				found_exact = true;
+
+				break;
+			}
+			if is_keep_alive_alias_for_child(child_trimmed, child_rest) {
+				*child = child_rest.to_owned();
+				replaced_alias = true;
+
+				break;
+			}
+		}
+
+		if found_exact {
+			return false;
+		}
+		if replaced_alias {
+			*segment = format!("{head}::{{{}}}", children.join(", "));
+
+			return true;
+		}
+
+		if child_rest_compact == "self" {
+			children.insert(0, child_rest.to_owned());
+		} else {
+			children.push(child_rest.to_owned());
+		}
+
+		*segment = format!("{head}::{{{}}}", children.join(", "));
+
+		return true;
+	}
+
+	if child_compact == "self" {
+		segments.insert(0, child_tail.to_owned());
+	} else {
+		segments.push(child_tail.to_owned());
+	}
+
+	true
+}
+
+fn is_keep_alive_alias_for_child(segment: &str, child_tail: &str) -> bool {
+	let Some((base, alias)) = split_import_leaf_alias(segment) else {
+		return false;
+	};
+
+	alias.is_some_and(|value| value == "_")
+		&& compact_path_for_match(base) == compact_path_for_match(child_tail)
 }
 
 fn compact_path_for_match(path: &str) -> String {
@@ -3219,7 +3384,7 @@ fn build_braced_import_rewritten_path(
 	Some((qualified_symbol_path, Some(rewritten_use_path)))
 }
 
-fn parse_braced_path_parts(path: &str) -> Option<(String, usize, Vec<String>)> {
+fn parse_braced_path_parts_allow_alias(path: &str) -> Option<(String, usize, Vec<String>)> {
 	let (open, close) = top_level_brace_range(path)?;
 
 	if !path[close + 1..].trim().is_empty() {
@@ -3230,7 +3395,7 @@ fn parse_braced_path_parts(path: &str) -> Option<(String, usize, Vec<String>)> {
 	let inner = &path[open + 1..close];
 	let segments = split_top_level_csv(inner);
 
-	if segments.is_empty() || segments.iter().any(|segment| segment.contains(" as ")) {
+	if segments.is_empty() {
 		return None;
 	}
 
@@ -3391,10 +3556,28 @@ fn split_top_level_csv(text: &str) -> Vec<String> {
 	out
 }
 
-fn normalize_mixed_self_child_use_path(path: &str) -> Option<String> {
-	let (prefix, close, segments) = parse_braced_path_parts(path)?;
+fn normalize_mixed_self_child_use_path(ctx: &FileContext, path: &str) -> Option<String> {
+	let (prefix, close, segments) = parse_braced_path_parts_allow_alias(path)?;
+	let root = prefix
+		.trim()
+		.trim_start_matches("pub ")
+		.trim()
+		.trim_end_matches('{')
+		.trim()
+		.trim_end_matches("::")
+		.trim()
+		.split("::")
+		.next()
+		.unwrap_or_default();
+	let allow_drop_unused_self = matches!(root, "crate" | "self" | "super");
 	let (groups, parsed_heads) = build_mixed_use_groups(&segments);
-	let rewritten = rewrite_mixed_use_segments(&segments, &groups, &parsed_heads)?;
+	let rewritten = rewrite_mixed_use_segments(
+		ctx,
+		&segments,
+		&groups,
+		&parsed_heads,
+		allow_drop_unused_self,
+	)?;
 	let rewritten_path = format!("{prefix}{}{}", rewritten.join(", "), &path[close..=close]);
 
 	if rewritten_path == path { None } else { Some(rewritten_path) }
@@ -3483,9 +3666,11 @@ fn parse_mixed_nested_group(
 }
 
 fn rewrite_mixed_use_segments(
+	ctx: &FileContext,
 	segments: &[String],
 	groups: &HashMap<String, MixedUseGroup>,
 	parsed_heads: &[Option<String>],
+	allow_drop_unused_self: bool,
 ) -> Option<Vec<String>> {
 	let mut emit = vec![true; segments.len()];
 	let mut merged = false;
@@ -3508,13 +3693,31 @@ fn rewrite_mixed_use_segments(
 		};
 
 		if !can_merge_mixed_group(group, idx) {
+			if allow_drop_unused_self
+				&& group.indices.first().copied() == Some(idx)
+				&& group.has_self
+				&& !symbol_is_referenced_outside_use(ctx, &head)
+				&& let Some(rewritten_segment) =
+					drop_unused_self_from_nested_use_segment(segment, &head)
+			{
+				rewritten.push(rewritten_segment);
+				merged = true;
+
+				continue;
+			}
+
 			rewritten.push(segment.to_owned());
 
 			continue;
 		}
 
 		let children = dedup_mixed_group_children(group);
-		let combined = format!("{head}::{{self, {}}}", children.join(", "));
+		let keep_self = symbol_is_referenced_outside_use(ctx, &head);
+		let combined = if keep_self {
+			format!("{head}::{{self, {}}}", children.join(", "))
+		} else {
+			format!("{head}::{{{}}}", children.join(", "))
+		};
 
 		rewritten.push(combined);
 
@@ -3546,6 +3749,30 @@ fn dedup_mixed_group_children(group: &MixedUseGroup) -> Vec<String> {
 	}
 
 	children
+}
+
+fn drop_unused_self_from_nested_use_segment(segment: &str, head: &str) -> Option<String> {
+	let trimmed = segment.trim();
+	let (nested_head, inner) = parse_single_level_nested_use_segment(trimmed)?;
+
+	if !is_same_ident(nested_head, head) {
+		return None;
+	}
+
+	let mut children = split_top_level_csv(inner);
+	let original_len = children.len();
+
+	children.retain(|child| child.trim() != "self");
+
+	if children.len() == original_len {
+		return None;
+	}
+
+	if children.is_empty() {
+		Some(head.to_owned())
+	} else {
+		Some(format!("{head}::{{{}}}", children.join(", ")))
+	}
 }
 
 fn rewrite_use_item_with_path(raw: &str, new_path: &str) -> Option<String> {

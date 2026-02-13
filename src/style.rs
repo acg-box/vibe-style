@@ -1009,6 +1009,10 @@ use crate::z::Z;
 	fn import_fix_normalizes_mixed_self_child_use_tree() {
 		let original = r#"
 use crate::alpha::{beta, beta::Gamma};
+
+fn sample(value: beta::Gamma) -> beta::Gamma {
+	value
+}
 "#;
 		let ctx = shared::read_file_context_from_text(
 			Path::new("import_self_child.rs"),
@@ -1056,6 +1060,48 @@ use std::{
 					== "Normalize imports like `use a::{b, b::c}` to `use a::{b::{self, c}}`."
 		}));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-002"));
+	}
+
+	#[test]
+	fn import002_fix_normalizes_mixed_self_child_use_tree_with_aliases() {
+		let original = r#"
+use crate::{grpc, grpc::{ReferralCode as ProtoReferralCode, gateway_service_server::GatewayService as GrpcGatewayService}};
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import002_mixed_self_child_with_aliases.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains(
+			"use crate::{grpc::{ReferralCode as ProtoReferralCode, gateway_service_server::GatewayService as GrpcGatewayService}};"
+		));
+		assert!(!rewritten.contains("use crate::{grpc, grpc::"));
+	}
+
+	#[test]
+	fn import002_fix_drops_unused_self_from_nested_use_group() {
+		let original = r#"
+use crate::{grpc::{self, ReferralCode as ProtoReferralCode, VerifyMailCodeRequest}};
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import002_drop_unused_self_in_nested_group.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains(
+			"use crate::{grpc::{ReferralCode as ProtoReferralCode, VerifyMailCodeRequest}};"
+		));
+		assert!(!rewritten.contains("grpc::{self,"));
 	}
 
 	#[test]
@@ -1154,6 +1200,102 @@ fn read_one<R: Read>(mut reader: R) -> usize {
 				&& v.message.contains("Trait keep-alive import `Read` should use `as _`")
 		}));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+	}
+
+	#[test]
+	fn import003_does_not_rewrite_trait_imports_in_parent_module_with_child_decls() {
+		let text = r#"
+mod child;
+
+use serde::Deserialize;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_parent_module_child_decl.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-003"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+	}
+
+	#[test]
+	fn import003_fix_dedupes_plain_and_keep_alive_trait_imports_when_referenced() {
+		let original = r#"
+use serde::{Deserialize, Deserialize as _, Serialize, Serialize as _};
+
+#[derive(Deserialize, Serialize)]
+struct Payload {
+	value: String,
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_dedupe_when_referenced.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("use serde::{Deserialize"));
+		assert!(rewritten.contains("Serialize"));
+		assert!(!rewritten.contains("Deserialize as _"));
+		assert!(!rewritten.contains("Serialize as _"));
+	}
+
+	#[test]
+	fn import003_fix_dedupes_plain_and_keep_alive_trait_imports_when_unreferenced() {
+		let original = r#"
+use std::io::{Read, Read as _};
+
+fn noop() {}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_dedupe_when_unreferenced.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("use std::io::{Read as _};"));
+		assert!(!rewritten.contains("use std::io::{Read, Read as _};"));
+	}
+
+	#[test]
+	fn import008_fix_rewrites_existing_keep_alive_trait_import_to_plain_when_symbol_is_used() {
+		let original = r#"
+use serde::{Deserialize as _};
+
+fn decode<T: serde::Deserialize<'static>>() {}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_trait_keep_alive_upgrade.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("use serde::{Deserialize};"));
+		assert!(!rewritten.contains("Deserialize as _"));
+		assert!(rewritten.contains("fn decode<T: Deserialize<'static>>() {}"));
 	}
 
 	#[test]
