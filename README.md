@@ -75,9 +75,6 @@ After installation, you can run `cargo vstyle ...`.
 # Check style.
 vstyle curate
 
-# Check specific files.
-vstyle curate src/main.rs src/cli.rs
-
 # Apply safe fixes, then re-check.
 vstyle tune
 
@@ -111,7 +108,8 @@ vstyle tune -p api --all-features --no-default-features
   - Exit `0`: even if unresolved violations remain.
   - Exit `1`: unresolved violations remain and `--strict` is used.
 
-By default, `curate` and `tune` scan git-tracked `*.rs` files when no files are passed.
+By default, `curate` and `tune` follow cargo default package selection and scan git-tracked `*.rs`
+files inside that package scope.
 
 ## Configuration
 
@@ -145,6 +143,7 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
 - `RUST-STYLE-IMPORT-007`: Do not use glob imports (`use ...::*` or equivalent). Use explicit imports only.
+- `RUST-STYLE-IMPORT-010`: Do not use `super` imports; rewrite to crate-absolute imports (`use crate::...`) when module depth allows it.
 
 ### Types and generics
 

@@ -34,11 +34,8 @@ struct FileFixOutcome {
 	applied_count: usize,
 }
 
-pub(crate) fn run_check(
-	requested_files: &[PathBuf],
-	cargo_options: &CargoOptions,
-) -> Result<RunSummary> {
-	let files = shared::resolve_files(requested_files, cargo_options)?;
+pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
+	let files = shared::resolve_files(cargo_options)?;
 	let mut violations: Vec<Violation> = Vec::new();
 
 	for batch in files.chunks(FILE_BATCH_SIZE) {
@@ -75,11 +72,8 @@ pub(crate) fn run_check(
 	})
 }
 
-pub(crate) fn run_fix(
-	requested_files: &[PathBuf],
-	cargo_options: &CargoOptions,
-) -> Result<RunSummary> {
-	let files = shared::resolve_files(requested_files, cargo_options)?;
+pub(crate) fn run_fix(cargo_options: &CargoOptions) -> Result<RunSummary> {
+	let files = shared::resolve_files(cargo_options)?;
 	let mut total_applied = 0_usize;
 	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
@@ -169,7 +163,7 @@ pub(crate) fn run_fix(
 		}
 	}
 
-	let checked = run_check(requested_files, cargo_options)?;
+	let checked = run_check(cargo_options)?;
 
 	Ok(RunSummary {
 		file_count: checked.file_count,
@@ -614,6 +608,66 @@ mod tests {
 		assert!(rewritten.contains("use rayon::iter::{"));
 		assert!(rewritten.contains("IntoParallelRefIterator"));
 		assert!(rewritten.contains("ParallelIterator"));
+	}
+
+	#[test]
+	fn import010_fix_rewrites_top_level_super_import_to_crate_absolute() {
+		let original = "use super::shared::Edit;\n\nfn run(edit: Edit) {\n\tlet _ = edit;\n}\n";
+		let ctx = shared::read_file_context_from_text(
+			Path::new("src/style/imports.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("use crate::style::shared::Edit;"));
+		assert!(!rewritten.contains("use super::shared::Edit;"));
+	}
+
+	#[test]
+	fn import010_fix_rewrites_nested_super_chain_to_crate_absolute() {
+		let original = r#"
+mod inner {
+	use super::super::bar;
+
+	fn run(item: bar::Baz) {
+		let _ = item;
+	}
+}
+"#;
+		let ctx =
+			shared::read_file_context_from_text(Path::new("src/style/foo.rs"), original.to_owned())
+				.expect("context")
+				.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("use crate::style::bar;"));
+		assert!(!rewritten.contains("use super::super::bar;"));
+	}
+
+	#[test]
+	fn import010_reports_non_fixable_when_super_depth_exceeds_module_depth() {
+		let text = "use super::shared::Edit;\n";
+		let ctx = shared::read_file_context_from_text(Path::new("src/lib.rs"), text.to_owned())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010" && !v.fixable));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
 	}
 
 	#[test]

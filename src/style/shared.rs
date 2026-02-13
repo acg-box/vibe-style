@@ -14,7 +14,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-pub(crate) const STYLE_RULE_IDS: [&str; 27] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 28] = [
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
 	"RUST-STYLE-MOD-003",
@@ -29,6 +29,7 @@ pub(crate) const STYLE_RULE_IDS: [&str; 27] = [
 	"RUST-STYLE-IMPORT-008",
 	"RUST-STYLE-IMPORT-009",
 	"RUST-STYLE-IMPORT-007",
+	"RUST-STYLE-IMPORT-010",
 	"RUST-STYLE-IMPL-001",
 	"RUST-STYLE-IMPL-003",
 	"RUST-STYLE-GENERICS-001",
@@ -127,11 +128,6 @@ pub(crate) struct CargoOptions {
 	pub(crate) all_features: bool,
 	pub(crate) no_default_features: bool,
 }
-impl CargoOptions {
-	pub(crate) fn has_package_filter(&self) -> bool {
-		self.workspace || !self.packages.is_empty()
-	}
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct TopItem {
@@ -190,28 +186,8 @@ pub(crate) fn push_violation(
 	});
 }
 
-pub(crate) fn resolve_files(
-	requested_files: &[PathBuf],
-	cargo_options: &CargoOptions,
-) -> Result<Vec<PathBuf>> {
-	if !requested_files.is_empty() {
-		let mut files = Vec::new();
-
-		for file in requested_files {
-			if file.extension().is_some_and(|ext| ext == "rs") {
-				files.push(file.clone());
-			}
-		}
-
-		return Ok(files);
-	}
-
+pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>> {
 	let git_files = git_ls_files_rs()?;
-
-	if !cargo_options.has_package_filter() {
-		return Ok(git_files);
-	}
-
 	let mut cmd = MetadataCommand::new();
 
 	cmd.no_deps();
@@ -220,7 +196,7 @@ pub(crate) fn resolve_files(
 	let workspace_member_ids = metadata.workspace_members.iter().cloned().collect::<HashSet<_>>();
 	let workspace_packages = metadata
 		.packages
-		.into_iter()
+		.iter()
 		.filter(|package| workspace_member_ids.contains(&package.id))
 		.collect::<Vec<_>>();
 	let mut selected_roots = HashSet::new();
@@ -235,25 +211,35 @@ pub(crate) fn resolve_files(
 			selected_roots.insert(normalize_path(root));
 		}
 	}
+	if !cargo_options.workspace && cargo_options.packages.is_empty() {
+		let default_packages = if metadata.workspace_default_members.is_available() {
+			metadata.workspace_default_packages()
+		} else if let Some(root_package) = metadata.root_package() {
+			vec![root_package]
+		} else {
+			metadata.workspace_packages()
+		};
+
+		for package in default_packages {
+			let manifest = PathBuf::from(package.manifest_path.as_str());
+			let Some(root) = manifest.parent() else {
+				continue;
+			};
+
+			selected_roots.insert(normalize_path(root));
+		}
+	}
 	if !cargo_options.packages.is_empty() {
 		let mut missing = cargo_options.packages.iter().cloned().collect::<HashSet<_>>();
 
 		for package in &workspace_packages {
 			let package_name = package.name.as_str();
 			let package_name_snake = package_name.replace('-', "_");
-			let target_names =
-				package.targets.iter().map(|target| target.name.as_str()).collect::<Vec<_>>();
 			let mut matched = false;
 
 			for requested in &cargo_options.packages {
 				let requested_snake = requested.replace('-', "_");
-				let hit = requested == package_name
-					|| requested_snake == package_name_snake
-					|| target_names.iter().any(|name| {
-						*name == requested
-							|| name.replace('-', "_") == requested_snake
-							|| requested.replace('-', "_") == name.replace('-', "_")
-					});
+				let hit = requested == package_name || requested_snake == package_name_snake;
 
 				if hit {
 					missing.remove(requested);

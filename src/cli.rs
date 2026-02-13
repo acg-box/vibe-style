@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::process::ExitCode;
 
 use clap::{
 	Args, Parser, Subcommand,
@@ -31,8 +31,8 @@ pub(crate) struct Cli {
 impl Cli {
 	pub(crate) fn run(&self) -> Result<ExitCode> {
 		match &self.command {
-			Command::Curate { files, strict, cargo } => {
-				let summary = style::run_check(files, &cargo.as_options())?;
+			Command::Curate { strict, cargo } => {
+				let summary = style::run_check(&cargo.as_options())?;
 
 				print_summary(&summary, false);
 
@@ -49,8 +49,8 @@ impl Cli {
 					return Ok(ExitCode::FAILURE);
 				}
 			},
-			Command::Tune { files, strict, cargo } => {
-				let summary = style::run_fix(files, &cargo.as_options())?;
+			Command::Tune { strict, cargo } => {
+				let summary = style::run_fix(&cargo.as_options())?;
 
 				print_summary(&summary, true);
 
@@ -82,9 +82,6 @@ enum Command {
 
 		#[command(flatten)]
 		cargo: CargoCliOptions,
-
-		/// Optional Rust files. Defaults to git-tracked `*.rs`.
-		files: Vec<PathBuf>,
 	},
 	/// Tune style issues with safe automatic fixes, then re-check.
 	Tune {
@@ -94,9 +91,6 @@ enum Command {
 
 		#[command(flatten)]
 		cargo: CargoCliOptions,
-
-		/// Optional Rust files. Defaults to git-tracked `*.rs`.
-		files: Vec<PathBuf>,
 	},
 	/// Print implemented rule IDs.
 	Coverage,
@@ -213,5 +207,19 @@ mod tests {
 		assert_eq!(cargo.features, vec!["serde", "tracing"]);
 		assert!(cargo.all_features);
 		assert!(cargo.no_default_features);
+	}
+
+	#[test]
+	fn rejects_curate_positional_paths() {
+		let parsed = Cli::try_parse_from(["app", "curate", "src/main.rs"]);
+
+		assert!(parsed.is_err());
+	}
+
+	#[test]
+	fn rejects_tune_positional_paths() {
+		let parsed = Cli::try_parse_from(["app", "tune", "src/main.rs"]);
+
+		assert!(parsed.is_err());
 	}
 }

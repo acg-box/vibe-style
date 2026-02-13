@@ -83,21 +83,22 @@ pub(crate) fn check_import_rules(
 	let use_runs = collect_non_pub_use_runs(ctx);
 	let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
 	let import010_fixed_lines =
-		apply_import010_no_glob_use_rule(ctx, violations, edits, emit_edits, &use_items);
+		apply_import010_no_super_use_rule(ctx, violations, edits, emit_edits, &use_items);
+	let import007_fixed_lines =
+		apply_import007_no_glob_use_rule(ctx, violations, edits, emit_edits, &use_items);
 
 	if ctx.path.file_name().is_some_and(|name| name == "error.rs") {
 		return;
 	}
 
 	let local_module_roots = collect_local_module_roots(ctx);
-	let import004_fixed_lines = apply_use_item_rules(
-		ctx,
-		violations,
-		edits,
-		emit_edits,
-		&use_items,
-		&import010_fixed_lines,
-	);
+	let mut use_item_skip_lines = HashSet::new();
+
+	use_item_skip_lines.extend(import010_fixed_lines.iter().copied());
+	use_item_skip_lines.extend(import007_fixed_lines.iter().copied());
+
+	let import004_fixed_lines =
+		apply_use_item_rules(ctx, violations, edits, emit_edits, &use_items, &use_item_skip_lines);
 	let imported_symbol_maps = collect_imported_symbol_maps(ctx, &use_items);
 
 	push_import004_ambiguous_symbol_violations(ctx, violations, &imported_symbol_maps);
@@ -110,8 +111,14 @@ pub(crate) fn check_import_rules(
 		local_defined_symbols: &local_defined_symbols,
 		qualified_type_paths_by_symbol: &qualified_type_paths_by_symbol,
 	};
-	let import009_fixed_lines =
-		apply_import009_rules(ctx, violations, edits, emit_edits, &import009_ctx);
+	let import009_fixed_lines = apply_import009_rules(
+		ctx,
+		violations,
+		edits,
+		emit_edits,
+		&import009_ctx,
+		&use_item_skip_lines,
+	);
 	let import008_group_skip_lines = apply_import008_rules(
 		ctx,
 		violations,
@@ -125,6 +132,7 @@ pub(crate) fn check_import_rules(
 	let mut import_group_skip_lines = HashSet::new();
 
 	import_group_skip_lines.extend(import010_fixed_lines);
+	import_group_skip_lines.extend(import007_fixed_lines);
 	import_group_skip_lines.extend(import004_fixed_lines);
 	import_group_skip_lines.extend(import009_fixed_lines);
 	import_group_skip_lines.extend(import008_group_skip_lines);
@@ -145,7 +153,62 @@ pub(crate) fn check_import_rules(
 	);
 }
 
-fn apply_import010_no_glob_use_rule(
+fn apply_import010_no_super_use_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	use_items: &[&TopItem],
+) -> HashSet<usize> {
+	let mut fixed_top_level_lines = HashSet::new();
+	let top_use_lines = use_items.iter().map(|item| item.line).collect::<HashSet<_>>();
+
+	for use_item in ctx.source_file.syntax().descendants().filter_map(ast::Use::cast) {
+		let Some(use_tree) = use_item.use_tree() else {
+			continue;
+		};
+		let use_path = compact_path_for_match(&use_tree.syntax().text().to_string());
+		let Some((super_depth, tail)) = leading_super_depth_and_tail(&use_path) else {
+			continue;
+		};
+		let current_module_path = current_module_path_segments(ctx, &use_item);
+		let fixable = super_depth <= current_module_path.len();
+		let start = usize::from(use_item.syntax().text_range().start());
+		let end = usize::from(use_item.syntax().text_range().end());
+		let line = shared::line_from_offset(&ctx.line_starts, start);
+
+		shared::push_violation(
+			violations,
+			ctx,
+			line,
+			"RUST-STYLE-IMPORT-010",
+			"Do not use `super` imports; use crate-absolute imports.",
+			fixable,
+		);
+
+		if !emit_edits || !fixable {
+			continue;
+		}
+
+		let parent_depth = current_module_path.len() - super_depth;
+		let replacement_path = crate_absolute_use_path(&current_module_path[..parent_depth], tail);
+		let replacement =
+			rewrite_use_item_with_path(&use_item.syntax().text().to_string(), &replacement_path);
+		let Some(replacement) = replacement else {
+			continue;
+		};
+
+		edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-IMPORT-010" });
+
+		if top_use_lines.contains(&line) {
+			fixed_top_level_lines.insert(line);
+		}
+	}
+
+	fixed_top_level_lines
+}
+
+fn apply_import007_no_glob_use_rule(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
@@ -417,6 +480,89 @@ fn find_crate_dir(path: &std::path::Path) -> Option<PathBuf> {
 	None
 }
 
+fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Vec<String> {
+	let mut module_path = file_module_path_segments(&ctx.path);
+	let mut inline_ancestors = use_item
+		.syntax()
+		.ancestors()
+		.filter_map(ast::Module::cast)
+		.filter_map(|module| module.name().map(|name| name.text().to_string()))
+		.collect::<Vec<_>>();
+
+	inline_ancestors.reverse();
+	module_path.extend(inline_ancestors);
+
+	module_path
+}
+
+fn file_module_path_segments(path: &std::path::Path) -> Vec<String> {
+	let Some(crate_dir) = find_crate_dir(path) else {
+		return Vec::new();
+	};
+	let src_dir = crate_dir.join("src");
+	let Ok(relative) = path.strip_prefix(src_dir) else {
+		return Vec::new();
+	};
+	let mut components = relative
+		.iter()
+		.map(|component| component.to_string_lossy().to_string())
+		.collect::<Vec<_>>();
+	let Some(file_name) = components.pop() else {
+		return Vec::new();
+	};
+
+	match file_name.as_str() {
+		"lib.rs" | "main.rs" => Vec::new(),
+		"mod.rs" => components,
+		_ => {
+			let stem = file_name.strip_suffix(".rs").unwrap_or(file_name.as_str());
+
+			components.push(stem.to_owned());
+			components
+		},
+	}
+}
+
+fn leading_super_depth_and_tail(path: &str) -> Option<(usize, &str)> {
+	let mut depth = 0_usize;
+	let mut rest = path;
+
+	loop {
+		if rest == "super" {
+			depth += 1;
+			rest = "";
+			break;
+		}
+
+		let Some(after) = rest.strip_prefix("super::") else {
+			break;
+		};
+		depth += 1;
+		rest = after;
+
+		if !rest.starts_with("super") {
+			break;
+		}
+	}
+
+	if depth == 0 { None } else { Some((depth, rest)) }
+}
+
+fn crate_absolute_use_path(parent_segments: &[String], tail: &str) -> String {
+	let mut path = String::from("crate");
+
+	for segment in parent_segments {
+		path.push_str("::");
+		path.push_str(segment);
+	}
+	if !tail.is_empty() {
+		path.push_str("::");
+		path.push_str(tail);
+	}
+
+	path
+}
+
 fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
 	let current_module = use_item.syntax().ancestors().find_map(ast::Module::cast)?;
 	let current_module_text = current_module.item_list()?.syntax().text().to_string();
@@ -542,12 +688,12 @@ fn apply_use_item_rules(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 	use_items: &[&TopItem],
-	import010_fixed_lines: &HashSet<usize>,
+	skip_lines: &HashSet<usize>,
 ) -> HashSet<usize> {
 	let mut import004_fixed_lines = HashSet::new();
 
 	for item in use_items {
-		if import010_fixed_lines.contains(&item.line) {
+		if skip_lines.contains(&item.line) {
 			continue;
 		}
 
@@ -1187,10 +1333,20 @@ fn apply_import009_rules(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 	import009_ctx: &Import009Context<'_>,
+	skip_lines: &HashSet<usize>,
 ) -> HashSet<usize> {
 	let mut import009_fixed_lines = HashSet::new();
 
 	for (symbol, imported_paths) in &import009_ctx.maps.full_paths_by_symbol {
+		if import009_ctx
+			.maps
+			.symbol_lines
+			.get(symbol)
+			.is_some_and(|lines| lines.iter().any(|line| skip_lines.contains(line)))
+		{
+			continue;
+		}
+
 		if imported_paths.len() != 1 || import009_ctx.local_defined_symbols.contains(symbol) {
 			continue;
 		}
