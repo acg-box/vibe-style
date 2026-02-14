@@ -48,8 +48,10 @@ ASSET="vibe-style-${TARGET}-${VERSION}.tgz"
 curl -fsSLO "https://github.com/hack-ink/vibe-style/releases/download/${VERSION}/${ASSET}"
 tar -xzf "${ASSET}"
 
-sudo install -m 0755 "vibe-style-${TARGET}-${VERSION}/vstyle" /usr/local/bin/vstyle
-sudo install -m 0755 "vibe-style-${TARGET}-${VERSION}/cargo-vstyle" /usr/local/bin/cargo-vstyle
+INSTALL_DIR="$HOME/.cargo/bin"
+mkdir -p "${INSTALL_DIR}"
+install -m 0755 "vibe-style-${TARGET}-${VERSION}/vstyle" "${INSTALL_DIR}/vstyle"
+install -m 0755 "vibe-style-${TARGET}-${VERSION}/cargo-vstyle" "${INSTALL_DIR}/cargo-vstyle"
 ```
 
 #### Windows (PowerShell)
@@ -63,7 +65,7 @@ $Asset = "vibe-style-$Target-$Version.zip"
 Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/$Version/$Asset" -OutFile $Asset
 Expand-Archive -Path $Asset -DestinationPath .
 
-$InstallDir = "$env:USERPROFILE\.local\bin"
+$InstallDir = "$env:USERPROFILE\.cargo\bin"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 Copy-Item "vibe-style-$Target-$Version\vstyle.exe" "$InstallDir\vstyle.exe" -Force
@@ -234,8 +236,14 @@ This repository uses `cargo make` tasks from `Makefile.toml`.
 cargo make fmt
 cargo make fmt-check
 
-# Rust lint.
+# Lint (clippy + vibe-style).
+cargo make lint
+
+# Rust-only clippy.
 cargo make lint-rust
+
+# vibe-style only.
+cargo make lint-vstyle
 
 # Rust tests.
 cargo make test-rust
