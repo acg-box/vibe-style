@@ -25,16 +25,22 @@ use crate::style::{self, CargoOptions, RunSummary};
 	styles = styles(),
 )]
 pub(crate) struct Cli {
+	#[arg(short = 'v', long, global = true)]
+	verbose: bool,
+
 	#[command(subcommand)]
 	command: Command,
 }
 impl Cli {
 	pub(crate) fn run(&self) -> Result<ExitCode> {
+		let verbose = self.verbose;
+
 		match &self.command {
 			Command::Curate { strict, cargo } => {
 				let summary = style::run_check(&cargo.as_options())?;
 
 				print_summary(&summary, false);
+				print_semantic_cache_stats(verbose);
 
 				if summary.violation_count > 0 {
 					if *strict {
@@ -50,9 +56,10 @@ impl Cli {
 				}
 			},
 			Command::Tune { strict, cargo } => {
-				let summary = style::run_fix(&cargo.as_options())?;
+				let summary = style::run_fix(&cargo.as_options(), verbose)?;
 
 				print_summary(&summary, true);
+				print_semantic_cache_stats(verbose);
 
 				if summary.violation_count > 0 {
 					eprintln!(
@@ -142,6 +149,16 @@ fn print_summary(summary: &RunSummary, fix_mode: bool) {
 	if summary.unfixable_count > 0 {
 		println!("{} violation(s) require manual fixes.", summary.unfixable_count);
 	}
+}
+
+fn print_semantic_cache_stats(verbose: bool) {
+	if !verbose {
+		return;
+	}
+
+	let stats = style::semantic_cache_stats();
+
+	println!("Semantic cache: {} hit(s), {} miss(es).", stats.hits, stats.misses);
 }
 
 fn styles() -> Styles {

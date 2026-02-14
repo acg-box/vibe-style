@@ -20,6 +20,7 @@ use std::{
 use color_eyre::Result;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
+use semantic::SemanticCacheStats;
 use shared::{Edit, FileContext, Violation};
 
 const FILE_BATCH_SIZE: usize = 64;
@@ -73,13 +74,15 @@ pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
 	})
 }
 
-pub(crate) fn run_fix(cargo_options: &CargoOptions) -> Result<RunSummary> {
+pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<RunSummary> {
+	semantic::reset_cache_stats();
+
 	let files = shared::resolve_files(cargo_options)?;
 	let outcomes_all = collect_fix_outcomes(&files)?;
 	let changed_files = changed_file_paths(&outcomes_all);
 	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
 	let baseline_error_files =
-		semantic::collect_compiler_error_files(&files, &semantic_cargo_options)?;
+		semantic::collect_compiler_error_files(&files, &semantic_cargo_options, verbose)?;
 	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
 	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
@@ -100,11 +103,11 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions) -> Result<RunSummary> {
 		}
 	}
 
-	total_applied += semantic::apply_semantic_fixes(&files, &semantic_cargo_options)?;
+	total_applied += semantic::apply_semantic_fixes(&files, &semantic_cargo_options, verbose)?;
 
 	if !import_fallbacks.is_empty() || !changed_originals.is_empty() {
 		let post_error_files =
-			semantic::collect_compiler_error_files(&files, &semantic_cargo_options)?;
+			semantic::collect_compiler_error_files(&files, &semantic_cargo_options, verbose)?;
 		let mut handled = BTreeMap::<PathBuf, ()>::new();
 
 		for normalized in post_error_files.difference(&baseline_error_files) {
@@ -134,6 +137,10 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions) -> Result<RunSummary> {
 		applied_fix_count: total_applied,
 		output_lines: checked.output_lines,
 	})
+}
+
+pub(crate) fn semantic_cache_stats() -> SemanticCacheStats {
+	semantic::cache_stats()
 }
 
 pub(crate) fn print_coverage() {

@@ -135,6 +135,9 @@ vstyle tune
 # Same as tune, but fail if violations remain.
 vstyle tune --strict
 
+# Enable verbose output.
+vstyle tune --verbose
+
 # Print implemented rule IDs.
 vstyle coverage
 ```
@@ -181,6 +184,16 @@ Rules are built into the checker.
   - Controls how many semantic missing-import suggestion rounds `vstyle tune` will perform.
   - Default: `2`.
   - Increasing this may fix more missing-import cases but will run additional `cargo check --message-format=json` rounds.
+
+### Semantic cache
+
+- `--verbose` prints semantic cache hit/miss statistics for each command.
+- Cache files are written under `target/vstyle-cache/semantic/` and keyed by:
+  - vstyle version metadata,
+  - `rustc -Vv` output,
+  - `Cargo.lock` hash,
+  - selected cargo options,
+  - tracked `*.rs` file fingerprints.
 
 ## Rule Catalog
 
