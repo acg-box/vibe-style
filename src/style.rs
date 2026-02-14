@@ -264,7 +264,8 @@ mod tests {
 	use std::path::Path;
 
 	use crate::style::{
-		Edit, MAX_FIX_PASSES, collect_violations, fixes, shared, violation_signature,
+		Edit, MAX_FIX_PASSES, apply_fix_passes, collect_violations, fixes, shared,
+		violation_signature,
 	};
 
 	#[test]
@@ -521,6 +522,53 @@ mod tests {
 		assert!(!rewritten.contains("use super::*;"));
 		assert!(rewritten.contains("use super::{"));
 		assert!(rewritten.contains("helper"));
+	}
+
+	#[test]
+	fn import007_super_glob_fix_ignores_symbol_names_only_mentioned_in_strings() {
+		let original = r#"
+pub struct ChunkingConfig {
+	pub max_tokens: u32,
+	pub overlap_tokens: u32,
+}
+pub struct Tokenizer;
+
+pub fn load_tokenizer(_name: &str) -> Result<Tokenizer, String> {
+	Ok(Tokenizer)
+}
+pub fn split_text(_text: &str, _cfg: &ChunkingConfig, _tokenizer: &Tokenizer) -> Vec<String> {
+	Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn splits_into_chunks_with_overlap() {
+		let cfg = ChunkingConfig { max_tokens: 10, overlap_tokens: 2 };
+		let tokenizer = load_tokenizer("demo").expect("Tokenizer loading should succeed.");
+		let chunks = split_text("One. Two. Three. Four.", &cfg, &tokenizer);
+
+		assert!(!chunks.is_empty() || chunks.is_empty());
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import007_super_glob_string_symbol.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (_violations, _edits) = collect_violations(&ctx, true);
+		let (rewritten, _applied_count, _had_import_shortening_edits) =
+			apply_fix_passes(Path::new("import007_super_glob_string_symbol.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert!(rewritten.contains("use crate::{ChunkingConfig,load_tokenizer,split_text};"));
+		assert!(
+			!rewritten.contains("use crate::{ChunkingConfig,Tokenizer,load_tokenizer,split_text};")
+		);
 	}
 
 	#[test]
@@ -1979,6 +2027,90 @@ fn sample(a: A, aa: b::A) {
 
 		assert!(!rewritten.contains("use a::A;"));
 		assert!(rewritten.contains("fn sample(a: a::A, aa: b::A)"));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_when_different_qualified_symbol_path_exists() {
+		let original = r#"
+use qdrant_client::qdrant::Value;
+
+struct Payload {
+	raw: serde_json::Value,
+}
+
+fn build_value() -> Value {
+	Value::from(1_i64)
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_different_qualified_path.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(!rewritten.contains("use qdrant_client::qdrant::Value;"));
+		assert!(!rewritten.contains("fn build_value() -> Value"));
+		assert!(rewritten.contains("fn build_value() -> qdrant_client::qdrant::Value"));
+		assert!(rewritten.contains("qdrant_client::qdrant::Value::from(1_i64)"));
+	}
+
+	#[test]
+	fn import009_removes_redundant_import_when_only_qualified_same_path_usage_remains() {
+		let original = r#"
+use crate::{
+	structured_fields::{StructuredFields, upsert_structured_fields_tx},
+};
+
+fn run_ops() {
+	let _ = StructuredFields::default();
+	crate::structured_fields::upsert_structured_fields_tx();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits) = apply_fix_passes(
+			Path::new("import009_remove_redundant_same_path_import.rs"),
+			original,
+			true,
+		)
+		.expect("apply fix passes");
+
+		assert!(!rewritten.contains("upsert_structured_fields_tx,"));
+		assert!(!rewritten.contains("use crate::structured_fields::upsert_structured_fields_tx"));
+		assert!(rewritten.contains("crate::structured_fields::upsert_structured_fields_tx();"));
+	}
+
+	#[test]
+	fn import004_multi_pass_removes_multiple_free_function_imports_without_leftover_unused_imports()
+	{
+		let original = r#"
+use crate::{
+	structured_fields::{StructuredFields, upsert_structured_fields_tx, validate_structured_fields},
+};
+
+fn run_ops() {
+	let _ = StructuredFields::default();
+	upsert_structured_fields_tx();
+	validate_structured_fields();
+}
+"#;
+
+		let (rewritten, _applied_count, _had_import_shortening_edits) = apply_fix_passes(
+			Path::new("import004_remove_multiple_free_functions.rs"),
+			original,
+			true,
+		)
+		.expect("apply fix passes");
+
+		assert!(rewritten.contains("crate::structured_fields::upsert_structured_fields_tx();"));
+		assert!(rewritten.contains("crate::structured_fields::validate_structured_fields();"));
+		assert!(!rewritten.contains("use crate::structured_fields::upsert_structured_fields_tx"));
+		assert!(!rewritten.contains("use crate::structured_fields::validate_structured_fields"));
+		assert!(!rewritten.contains("upsert_structured_fields_tx,"));
+		assert!(!rewritten.contains("validate_structured_fields,"));
 	}
 
 	#[test]
