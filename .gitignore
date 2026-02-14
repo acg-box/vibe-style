@@ -1,7 +1,8 @@
 # AI
+.agent-logs
 .codex
-.specify
 .worktrees
+.specify
 
 # Editor
 .vscode

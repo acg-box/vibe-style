@@ -7,6 +7,7 @@ mod quality;
 mod semantic;
 mod shared;
 mod spacing;
+mod types;
 
 pub(crate) use shared::{CargoOptions, RunSummary};
 
@@ -240,6 +241,7 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	file::check_serde_option_default(ctx, &mut violations, &mut edits, with_fixes);
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
 	imports::check_import_rules(ctx, &mut violations, &mut edits, with_fixes);
+	types::check_type_alias_renames(ctx, &mut violations);
 	module::check_module_order(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_impl_adjacency(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_impl_rules(ctx, &mut violations, &mut edits, with_fixes);
@@ -3080,5 +3082,45 @@ fn classify(ch: char) -> usize {
 
 		assert!(applied >= 1);
 		assert!(rewritten.contains("let value = 1;\n\n\t\treturn value;"));
+	}
+
+	#[test]
+	fn type001_flags_only_meaningless_aliases() {
+		let original = r#"
+type A = B;
+type JsonValue = JsonValue;
+type A<T> = B<T>;
+type A<'a, T> = B<'a, T>;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("types_rule_hits.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+		let matches =
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-TYPE-001").collect::<Vec<_>>();
+
+		assert_eq!(matches.len(), 4);
+		assert!(matches.iter().all(|v| !v.fixable));
+	}
+
+	#[test]
+	fn type001_skips_specialized_or_non_path_aliases() {
+		let original = r#"
+type Bytes = Vec<u8>;
+type MyResult<T> = Result<T, MyError>;
+type Span = (usize, usize);
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("types_rule_skips.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001"));
 	}
 }

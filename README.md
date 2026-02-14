@@ -204,6 +204,7 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPL-001`: Use `Self` instead of concrete type names in `impl` method signatures.
 - `RUST-STYLE-IMPL-003`: Keep `impl` blocks contiguous and ordered as inherent, standard-library traits, third-party traits, then workspace-member traits.
 - `RUST-STYLE-GENERICS-001`: Move trait bounds to `where`; do not use inline bounds.
+- `RUST-STYLE-TYPE-001`: Do not add type aliases that are only pure renames.
 
 ### Logging and runtime safety
 
