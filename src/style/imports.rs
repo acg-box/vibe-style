@@ -10,7 +10,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-use super::shared::{
+use crate::style::shared::{
 	self, Edit, FileContext, TopItem, TopKind, USE_RE, Violation, WORKSPACE_IMPORT_ROOTS,
 };
 
@@ -66,6 +66,13 @@ struct UseEntry<'a> {
 	origin: usize,
 	order: usize,
 	block: String,
+}
+
+#[derive(Default)]
+struct TraitKeepAliveNormalizationState {
+	affected_symbols: HashSet<String>,
+	changed: bool,
+	seen_trait_keys: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -518,6 +525,7 @@ fn file_module_path_segments(path: &std::path::Path) -> Vec<String> {
 			let stem = file_name.strip_suffix(".rs").unwrap_or(file_name.as_str());
 
 			components.push(stem.to_owned());
+
 			components
 		},
 	}
@@ -531,12 +539,14 @@ fn leading_super_depth_and_tail(path: &str) -> Option<(usize, &str)> {
 		if rest == "super" {
 			depth += 1;
 			rest = "";
+
 			break;
 		}
 
 		let Some(after) = rest.strip_prefix("super::") else {
 			break;
 		};
+
 		depth += 1;
 		rest = after;
 
@@ -555,6 +565,7 @@ fn crate_absolute_use_path(parent_segments: &[String], tail: &str) -> String {
 		path.push_str("::");
 		path.push_str(segment);
 	}
+
 	if !tail.is_empty() {
 		path.push_str("::");
 		path.push_str(tail);
@@ -715,9 +726,11 @@ fn apply_use_item_rules(
 		}
 
 		apply_import002_normalization_rule(ctx, violations, edits, emit_edits, item, &path);
+
 		if apply_import003_trait_keep_alive_rule(ctx, violations, edits, emit_edits, item, &path) {
 			import004_fixed_lines.insert(item.line);
 		}
+
 		push_alias_violation_if_needed(ctx, violations, item, &path);
 
 		if apply_import004_free_fn_macro_rule(ctx, violations, edits, emit_edits, item, &path) {
@@ -1013,113 +1026,12 @@ fn normalize_trait_keep_alive_use_path(
 		.strip_suffix("::")
 		.unwrap_or(prefix[..prefix.len().saturating_sub(1)].trim())
 		.to_owned();
-	let mut rewritten_segments = Vec::new();
-	let mut changed = false;
-	let mut affected_symbols = HashSet::new();
-	let mut seen_trait_keys = HashSet::new();
-
-	for segment in segments {
-		let trimmed = segment.trim();
-
-		if trimmed.is_empty() {
-			continue;
-		}
-
-		if let Some((head, inner)) = parse_single_level_nested_use_segment(trimmed) {
-			let nested_prefix = if module_prefix.is_empty() {
-				head.to_owned()
-			} else {
-				format!("{module_prefix}::{head}")
-			};
-			let mut rewritten_children = Vec::new();
-
-			for child in split_top_level_csv(inner) {
-				let child_trimmed = child.trim();
-
-				if child_trimmed.is_empty() {
-					continue;
-				}
-
-				let Some((rewritten_child, child_symbols, child_changed, trait_key)) =
-					normalize_trait_keep_alive_leaf(
-						child_trimmed,
-						ctx,
-						&nested_prefix,
-						has_child_module_declarations,
-					)
-				else {
-					rewritten_children.push(child_trimmed.to_owned());
-
-					continue;
-				};
-
-				for symbol in child_symbols {
-					affected_symbols.insert(symbol);
-				}
-
-				if child_changed {
-					changed = true;
-				}
-
-				if let Some(key) = trait_key {
-					if seen_trait_keys.insert(key) {
-						rewritten_children.push(rewritten_child);
-					} else {
-						changed = true;
-					}
-				} else {
-					rewritten_children.push(rewritten_child);
-				}
-			}
-
-			if rewritten_children.is_empty() {
-				changed = true;
-
-				continue;
-			}
-
-			let rewritten_segment = format!("{head}::{{{}}}", rewritten_children.join(", "));
-
-			if rewritten_segment != trimmed {
-				changed = true;
-			}
-
-			rewritten_segments.push(rewritten_segment);
-
-			continue;
-		}
-
-		let Some((rewritten_segment, segment_symbols, segment_changed, trait_key)) =
-			normalize_trait_keep_alive_leaf(
-				trimmed,
-				ctx,
-				&module_prefix,
-				has_child_module_declarations,
-			)
-		else {
-			rewritten_segments.push(trimmed.to_owned());
-
-			continue;
-		};
-
-		for symbol in segment_symbols {
-			affected_symbols.insert(symbol);
-		}
-
-		if segment_changed {
-			changed = true;
-		}
-
-		if let Some(key) = trait_key {
-			if seen_trait_keys.insert(key) {
-				rewritten_segments.push(rewritten_segment);
-			} else {
-				changed = true;
-			}
-		} else {
-			rewritten_segments.push(rewritten_segment);
-		}
-	}
+	let (rewritten_segments, changed, affected_symbols) = normalize_trait_keep_alive_segments(
+		segments,
+		ctx,
+		&module_prefix,
+		has_child_module_declarations,
+	);
 
 	if !changed {
 		return None;
@@ -1129,6 +1041,149 @@ fn normalize_trait_keep_alive_use_path(
 		format!("{prefix}{}{}", rewritten_segments.join(", "), &path[close..=close]),
 		affected_symbols,
 	))
+}
+
+fn normalize_trait_keep_alive_segments(
+	segments: Vec<String>,
+	ctx: &FileContext,
+	module_prefix: &str,
+	has_child_module_declarations: bool,
+) -> (Vec<String>, bool, HashSet<String>) {
+	let mut rewritten_segments = Vec::new();
+	let mut state = TraitKeepAliveNormalizationState::default();
+
+	for segment in segments {
+		let trimmed = segment.trim();
+
+		if trimmed.is_empty() {
+			continue;
+		}
+
+		if let Some((head, inner)) = parse_single_level_nested_use_segment(trimmed) {
+			if let Some(rewritten_segment) = normalize_trait_keep_alive_nested_segment(
+				trimmed,
+				head,
+				inner,
+				ctx,
+				module_prefix,
+				has_child_module_declarations,
+				&mut state,
+			) {
+				rewritten_segments.push(rewritten_segment);
+			}
+
+			continue;
+		}
+		if let Some(rewritten_segment) = normalize_trait_keep_alive_leaf_segment(
+			trimmed,
+			ctx,
+			module_prefix,
+			has_child_module_declarations,
+			&mut state,
+		) {
+			rewritten_segments.push(rewritten_segment);
+		}
+	}
+
+	(rewritten_segments, state.changed, state.affected_symbols)
+}
+
+fn normalize_trait_keep_alive_nested_segment(
+	original_segment: &str,
+	head: &str,
+	inner: &str,
+	ctx: &FileContext,
+	module_prefix: &str,
+	has_child_module_declarations: bool,
+	state: &mut TraitKeepAliveNormalizationState,
+) -> Option<String> {
+	let nested_prefix =
+		if module_prefix.is_empty() { head.to_owned() } else { format!("{module_prefix}::{head}") };
+	let mut rewritten_children = Vec::new();
+
+	for child in split_top_level_csv(inner) {
+		let child_trimmed = child.trim();
+
+		if child_trimmed.is_empty() {
+			continue;
+		}
+
+		if let Some((rewritten_child, child_symbols, child_changed, trait_key)) =
+			normalize_trait_keep_alive_leaf(
+				child_trimmed,
+				ctx,
+				&nested_prefix,
+				has_child_module_declarations,
+			) {
+			for symbol in child_symbols {
+				state.affected_symbols.insert(symbol);
+			}
+
+			if child_changed {
+				state.changed = true;
+			}
+
+			if let Some(key) = trait_key {
+				if state.seen_trait_keys.insert(key) {
+					rewritten_children.push(rewritten_child);
+				} else {
+					state.changed = true;
+				}
+			} else {
+				rewritten_children.push(rewritten_child);
+			}
+		} else {
+			rewritten_children.push(child_trimmed.to_owned());
+		}
+	}
+
+	if rewritten_children.is_empty() {
+		state.changed = true;
+
+		return None;
+	}
+
+	let rewritten_segment = format!("{head}::{{{}}}", rewritten_children.join(", "));
+
+	if rewritten_segment != original_segment {
+		state.changed = true;
+	}
+
+	Some(rewritten_segment)
+}
+
+fn normalize_trait_keep_alive_leaf_segment(
+	trimmed: &str,
+	ctx: &FileContext,
+	module_prefix: &str,
+	has_child_module_declarations: bool,
+	state: &mut TraitKeepAliveNormalizationState,
+) -> Option<String> {
+	let Some((rewritten_segment, segment_symbols, segment_changed, trait_key)) =
+		normalize_trait_keep_alive_leaf(trimmed, ctx, module_prefix, has_child_module_declarations)
+	else {
+		return Some(trimmed.to_owned());
+	};
+
+	for symbol in segment_symbols {
+		state.affected_symbols.insert(symbol);
+	}
+
+	if segment_changed {
+		state.changed = true;
+	}
+
+	if let Some(key) = trait_key {
+		if state.seen_trait_keys.insert(key) {
+			return Some(rewritten_segment);
+		}
+
+		state.changed = true;
+
+		return None;
+	}
+
+	Some(rewritten_segment)
 }
 
 fn normalize_trait_keep_alive_leaf(
@@ -1437,7 +1492,6 @@ fn apply_import009_rules(
 		{
 			continue;
 		}
-
 		if imported_paths.len() != 1 || import009_ctx.local_defined_symbols.contains(symbol) {
 			continue;
 		}
@@ -2613,7 +2667,6 @@ fn resolve_import008_merge_target_for_pending_path<'a>(
 			return Some((root_full.as_str(), child_tail));
 		}
 	}
-
 	if let Some((parent, module_name)) = pending.rsplit_once("::") {
 		let module_name = module_name.trim();
 		let module_root = parent.trim();
@@ -2685,6 +2738,7 @@ fn find_use_item_line_importing_full_path(
 			continue;
 		};
 		let compact_path = compact_path_for_match(&path);
+
 		if let Some((prefix, _, _)) = parse_braced_path_parts_allow_alias(&path) {
 			let prefix_root = compact_path_for_match(prefix.trim_end_matches('{'));
 			let prefix_root = prefix_root.strip_suffix("::").unwrap_or(&prefix_root);
@@ -2856,7 +2910,6 @@ fn merge_child_tail_into_braced_segments(segments: &mut Vec<String>, child_tail:
 		if compact_path_for_match(trimmed) == child_compact {
 			return false;
 		}
-
 		if is_keep_alive_alias_for_child(trimmed, child_tail) {
 			*segment = child_tail.to_owned();
 
@@ -2903,7 +2956,6 @@ fn merge_child_tail_into_braced_segments(segments: &mut Vec<String>, child_tail:
 
 			return true;
 		}
-
 		if child_rest_compact == "self" {
 			children.insert(0, child_rest.to_owned());
 		} else {
@@ -3694,6 +3746,7 @@ fn rewrite_mixed_use_segments(
 					drop_unused_self_from_nested_use_segment(segment, &head)
 			{
 				rewritten.push(rewritten_segment);
+
 				merged = true;
 
 				continue;
@@ -3760,7 +3813,6 @@ fn drop_unused_self_from_nested_use_segment(segment: &str, head: &str) -> Option
 	if children.len() == original_len {
 		return None;
 	}
-
 	if children.is_empty() {
 		Some(head.to_owned())
 	} else {

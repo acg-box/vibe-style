@@ -1,6 +1,6 @@
 use color_eyre::{Result, eyre};
 
-use super::shared::Edit;
+use crate::style::shared::Edit;
 
 pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usize> {
 	if edits.is_empty() {

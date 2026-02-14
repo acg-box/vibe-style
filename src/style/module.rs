@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
+use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
 
 #[derive(Clone)]
 struct ModuleReorderEntry {

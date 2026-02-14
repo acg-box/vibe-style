@@ -8,7 +8,7 @@ use std::{
 use color_eyre::{Result, eyre};
 use serde_json::Value;
 
-use super::shared::CargoOptions;
+use crate::style::shared::CargoOptions;
 
 const MAX_IMPORT_SUGGESTION_ROUNDS: usize = 4;
 
@@ -354,7 +354,7 @@ mod tests {
 		time::{SystemTime, UNIX_EPOCH},
 	};
 
-	use super::{
+	use crate::style::semantic::{
 		ImportSuggestion, apply_missing_import_suggestions, collect_missing_import_suggestions, fs,
 		normalize_path,
 	};

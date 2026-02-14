@@ -263,7 +263,9 @@ fn violation_signature(violation: &Violation) -> (usize, &'static str, &str, boo
 mod tests {
 	use std::path::Path;
 
-	use super::{Edit, MAX_FIX_PASSES, collect_violations, fixes, shared, violation_signature};
+	use crate::style::{
+		Edit, MAX_FIX_PASSES, collect_violations, fixes, shared, violation_signature,
+	};
 
 	#[test]
 	fn suffix_rewrite_works() {

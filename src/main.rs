@@ -42,7 +42,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-	use super::normalize_args;
+	use crate::normalize_args;
 
 	#[test]
 	fn cargo_subcommand_arg_shape_is_normalized() {

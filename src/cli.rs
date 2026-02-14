@@ -154,7 +154,7 @@ fn styles() -> Styles {
 
 #[cfg(test)]
 mod tests {
-	use super::{Cli, Command};
+	use crate::cli::{Cli, Command};
 	use clap::Parser;
 
 	#[test]

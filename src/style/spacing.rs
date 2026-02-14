@@ -5,7 +5,7 @@ use std::{
 
 use regex::Regex;
 
-use super::{
+use crate::style::{
 	quality,
 	shared::{self, Edit, FileContext, Violation},
 };

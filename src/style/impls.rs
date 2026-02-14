@@ -6,7 +6,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-use super::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
+use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
 
 pub(crate) fn check_impl_adjacency(
 	ctx: &FileContext,

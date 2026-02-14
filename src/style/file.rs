@@ -5,7 +5,7 @@ use ra_ap_syntax::{
 	ast::{self, HasAttrs},
 };
 
-use super::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
+use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
 
 pub(crate) fn check_mod_rs(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	if ctx.path.file_name().is_some_and(|name| name == "mod.rs") {

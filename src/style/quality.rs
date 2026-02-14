@@ -7,7 +7,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-use super::shared::{self, Edit, FileContext, SNAKE_CASE_RE, Violation};
+use crate::style::shared::{self, Edit, FileContext, SNAKE_CASE_RE, Violation};
 
 const NUMERIC_SUFFIXES: [&str; 14] = [
 	"usize", "isize", "u128", "i128", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8", "f64",
