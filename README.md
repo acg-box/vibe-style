@@ -2,7 +2,7 @@
 
 # vibe-style
 
-AST-based Rust style checker and auto-fixer for deterministic, rule-driven layout.
+Rust style checker with syntax and semantic analysis, plus a safe auto-fixer for deterministic, rule-driven code layout.
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Docs](https://img.shields.io/docsrs/vibe-style)](https://docs.rs/vibe-style)
@@ -27,7 +27,59 @@ The checker implementation is the source of truth for parser- and AST-level edge
 
 ## Installation
 
-### Install from crates.io
+Methods are listed from easiest to most advanced.
+
+### Install prebuilt binaries (curl)
+
+#### Unix (Linux/macOS)
+
+```sh
+VERSION="$(curl -fsSL https://api.github.com/repos/hack-ink/vibe-style/releases/latest | grep -oE '"tag_name": "v[^"]+"' | cut -d'"' -f4)"
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "${OS}:${ARCH}" in
+	Linux:x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
+	Darwin:arm64) TARGET="aarch64-apple-darwin" ;;
+	*) echo "Unsupported platform: ${OS}/${ARCH}" >&2; exit 1 ;;
+esac
+
+ASSET="vibe-style-${TARGET}-${VERSION}.tgz"
+curl -fsSLO "https://github.com/hack-ink/vibe-style/releases/download/${VERSION}/${ASSET}"
+tar -xzf "${ASSET}"
+
+sudo install -m 0755 "vibe-style-${TARGET}-${VERSION}/vstyle" /usr/local/bin/vstyle
+sudo install -m 0755 "vibe-style-${TARGET}-${VERSION}/cargo-vstyle" /usr/local/bin/cargo-vstyle
+```
+
+#### Windows (PowerShell)
+
+```powershell
+$Repo = "hack-ink/vibe-style"
+$Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest").tag_name
+$Target = "x86_64-pc-windows-msvc"
+$Asset = "vibe-style-$Target-$Version.zip"
+
+Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/$Version/$Asset" -OutFile $Asset
+Expand-Archive -Path $Asset -DestinationPath .
+
+$InstallDir = "$env:USERPROFILE\.local\bin"
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+
+Copy-Item "vibe-style-$Target-$Version\vstyle.exe" "$InstallDir\vstyle.exe" -Force
+Copy-Item "vibe-style-$Target-$Version\cargo-vstyle.exe" "$InstallDir\cargo-vstyle.exe" -Force
+setx PATH "$env:PATH;$InstallDir"
+```
+
+Open a new terminal after running `setx`.
+
+Supported prebuilt targets:
+
+- `x86_64-unknown-linux-gnu`
+- `aarch64-apple-darwin`
+- `x86_64-pc-windows-msvc`
+
+### Install from crates.io (requires Rust/Cargo)
 
 ```sh
 # Install both binaries (`vstyle` and `cargo-vstyle`).
@@ -36,7 +88,7 @@ cargo install vibe-style
 
 After installation, you can use both `vstyle ...` and `cargo vstyle ...`.
 
-### Install prebuilt binaries (cargo-binstall)
+### Install prebuilt binaries (cargo-binstall, requires Rust/Cargo)
 
 ```sh
 # Optional: install cargo-binstall once.
