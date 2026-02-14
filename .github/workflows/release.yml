@@ -52,8 +52,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           PKG_NAME="vibe-style-${{ matrix.target.name }}-v${VERSION}"
           mkdir -p "${PKG_NAME}"
-          cp target/${{ matrix.target.name }}/final-release/vibe-style "${PKG_NAME}/vstyle"
-          cp target/${{ matrix.target.name }}/final-release/vibe-style "${PKG_NAME}/cargo-vstyle"
+          cp target/${{ matrix.target.name }}/final-release/vstyle "${PKG_NAME}/vstyle"
+          cp target/${{ matrix.target.name }}/final-release/cargo-vstyle "${PKG_NAME}/cargo-vstyle"
           tar -czf "${PKG_NAME}.tgz" "${PKG_NAME}"
 
       - name: Archive binaries (Windows)
@@ -63,8 +63,8 @@ jobs:
           $version = $env:GITHUB_REF_NAME.Substring(1)
           $pkgName = "vibe-style-${{ matrix.target.name }}-v$version"
           New-Item -ItemType Directory -Path $pkgName | Out-Null
-          Copy-Item "target/${{ matrix.target.name }}/final-release/vibe-style.exe" "$pkgName/vstyle.exe"
-          Copy-Item "target/${{ matrix.target.name }}/final-release/vibe-style.exe" "$pkgName/cargo-vstyle.exe"
+          Copy-Item "target/${{ matrix.target.name }}/final-release/vstyle.exe" "$pkgName/vstyle.exe"
+          Copy-Item "target/${{ matrix.target.name }}/final-release/cargo-vstyle.exe" "$pkgName/cargo-vstyle.exe"
           Compress-Archive -Path $pkgName -DestinationPath "$pkgName.zip"
 
       - name: Archive binaries (Linux)
@@ -73,8 +73,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           PKG_NAME="vibe-style-${{ matrix.target.name }}-v${VERSION}"
           mkdir -p "${PKG_NAME}"
-          cp target/${{ matrix.target.name }}/final-release/vibe-style "${PKG_NAME}/vstyle"
-          cp target/${{ matrix.target.name }}/final-release/vibe-style "${PKG_NAME}/cargo-vstyle"
+          cp target/${{ matrix.target.name }}/final-release/vstyle "${PKG_NAME}/vstyle"
+          cp target/${{ matrix.target.name }}/final-release/cargo-vstyle "${PKG_NAME}/cargo-vstyle"
           tar -czf "${PKG_NAME}.tgz" "${PKG_NAME}"
 
       - name: Upload artifact

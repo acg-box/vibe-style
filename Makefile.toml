@@ -53,6 +53,8 @@ workspace = false
 command = "cargo"
 args = [
 	"run",
+	"--bin",
+	"vstyle",
 	"--",
 	"curate",
 	"--workspace",
@@ -63,6 +65,8 @@ workspace = false
 command = "cargo"
 args = [
 	"run",
+	"--bin",
+	"vstyle",
 	"--",
 	"tune",
 	"--workspace",
