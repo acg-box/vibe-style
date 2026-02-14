@@ -165,6 +165,11 @@ vstyle tune -p api --all-features --no-default-features
 By default, `curate` and `tune` follow cargo default package selection and scan git-tracked `*.rs`
 files inside that package scope.
 
+### CI policy
+
+CI runs `vstyle curate` (read-only verification) to keep feedback fast and deterministic.
+Use `vstyle tune` locally when you want to apply safe automatic fixes (for example, via `cargo make lint-fix`).
+
 ## Configuration
 
 There is currently no user configuration file.
