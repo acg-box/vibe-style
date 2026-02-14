@@ -75,10 +75,75 @@ pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
 
 pub(crate) fn run_fix(cargo_options: &CargoOptions) -> Result<RunSummary> {
 	let files = shared::resolve_files(cargo_options)?;
-	let mut total_applied = 0_usize;
+	let outcomes_all = collect_fix_outcomes(&files)?;
+	let changed_files = changed_file_paths(&outcomes_all);
+	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
+	let baseline_error_files =
+		semantic::collect_compiler_error_files(&files, &semantic_cargo_options)?;
+	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
 	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
-	let baseline_error_files = semantic::collect_compiler_error_files(&files, cargo_options)?;
+
+	for outcome in outcomes_all {
+		if let Some(text) = outcome.rewritten_text {
+			fs::write(&outcome.path, text)?;
+		}
+		if let Some(original_text) = outcome.original_text {
+			changed_originals
+				.insert(normalize_path(&outcome.path), (outcome.path.clone(), original_text));
+		}
+
+		if outcome.had_import_shortening_edits
+			&& let Some(fallback) = outcome.fallback_without_import_shortening
+		{
+			import_fallbacks.insert(normalize_path(&outcome.path), (outcome.path, fallback));
+		}
+	}
+
+	total_applied += semantic::apply_semantic_fixes(&files, &semantic_cargo_options)?;
+
+	if !import_fallbacks.is_empty() || !changed_originals.is_empty() {
+		let post_error_files =
+			semantic::collect_compiler_error_files(&files, &semantic_cargo_options)?;
+		let mut handled = BTreeMap::<PathBuf, ()>::new();
+
+		for normalized in post_error_files.difference(&baseline_error_files) {
+			if let Some((path, fallback)) = import_fallbacks.get(normalized) {
+				fs::write(path, fallback)?;
+
+				handled.insert(normalized.clone(), ());
+			}
+		}
+		for normalized in post_error_files.difference(&baseline_error_files) {
+			if handled.contains_key(normalized) {
+				continue;
+			}
+
+			if let Some((path, original_text)) = changed_originals.get(normalized) {
+				fs::write(path, original_text)?;
+			}
+		}
+	}
+
+	let checked = run_check(cargo_options)?;
+
+	Ok(RunSummary {
+		file_count: checked.file_count,
+		violation_count: checked.violation_count,
+		unfixable_count: checked.unfixable_count,
+		applied_fix_count: total_applied,
+		output_lines: checked.output_lines,
+	})
+}
+
+pub(crate) fn print_coverage() {
+	for rule in shared::STYLE_RULE_IDS {
+		println!("{rule}\timplemented");
+	}
+}
+
+fn collect_fix_outcomes(files: &[PathBuf]) -> Result<Vec<FileFixOutcome>> {
+	let mut outcomes_all = Vec::<FileFixOutcome>::new();
 
 	for batch in files.chunks(FILE_BATCH_SIZE) {
 		let outcomes = batch
@@ -120,65 +185,38 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions) -> Result<RunSummary> {
 			.collect::<Vec<_>>();
 
 		for outcome in outcomes {
-			let outcome = outcome?;
-
-			total_applied += outcome.applied_count;
-
-			if let Some(text) = outcome.rewritten_text {
-				fs::write(&outcome.path, text)?;
-			}
-			if let Some(original_text) = outcome.original_text {
-				changed_originals
-					.insert(normalize_path(&outcome.path), (outcome.path.clone(), original_text));
-			}
-
-			if outcome.had_import_shortening_edits
-				&& let Some(fallback) = outcome.fallback_without_import_shortening
-			{
-				import_fallbacks.insert(normalize_path(&outcome.path), (outcome.path, fallback));
-			}
+			outcomes_all.push(outcome?);
 		}
 	}
 
-	total_applied += semantic::apply_semantic_fixes(&files, cargo_options)?;
-
-	if !import_fallbacks.is_empty() || !changed_originals.is_empty() {
-		let post_error_files = semantic::collect_compiler_error_files(&files, cargo_options)?;
-		let mut handled = BTreeMap::<PathBuf, ()>::new();
-
-		for normalized in post_error_files.difference(&baseline_error_files) {
-			if let Some((path, fallback)) = import_fallbacks.get(normalized) {
-				fs::write(path, fallback)?;
-
-				handled.insert(normalized.clone(), ());
-			}
-		}
-		for normalized in post_error_files.difference(&baseline_error_files) {
-			if handled.contains_key(normalized) {
-				continue;
-			}
-
-			if let Some((path, original_text)) = changed_originals.get(normalized) {
-				fs::write(path, original_text)?;
-			}
-		}
-	}
-
-	let checked = run_check(cargo_options)?;
-
-	Ok(RunSummary {
-		file_count: checked.file_count,
-		violation_count: checked.violation_count,
-		unfixable_count: checked.unfixable_count,
-		applied_fix_count: total_applied,
-		output_lines: checked.output_lines,
-	})
+	Ok(outcomes_all)
 }
 
-pub(crate) fn print_coverage() {
-	for rule in shared::STYLE_RULE_IDS {
-		println!("{rule}\timplemented");
+fn changed_file_paths(outcomes: &[FileFixOutcome]) -> Vec<PathBuf> {
+	outcomes
+		.iter()
+		.filter(|outcome| outcome.rewritten_text.is_some())
+		.map(|outcome| outcome.path.clone())
+		.collect::<Vec<_>>()
+}
+
+fn scoped_semantic_cargo_options(
+	cargo_options: &CargoOptions,
+	changed_files: &[PathBuf],
+) -> Result<CargoOptions> {
+	let mut options = cargo_options.clone();
+
+	if options.workspace
+		&& options.packages.is_empty()
+		&& !changed_files.is_empty()
+		&& let Some(packages) = shared::package_names_for_files(changed_files)?
+		&& packages.len() == 1
+	{
+		options.workspace = false;
+		options.packages = packages;
 	}
+
+	Ok(options)
 }
 
 fn apply_fix_passes(

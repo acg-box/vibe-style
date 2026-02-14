@@ -289,6 +289,67 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 	Ok(files)
 }
 
+pub(crate) fn package_names_for_files(files: &[PathBuf]) -> Result<Option<Vec<String>>> {
+	if files.is_empty() {
+		return Ok(Some(Vec::new()));
+	}
+
+	let cwd =
+		std::env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
+	let mut cmd = MetadataCommand::new();
+
+	cmd.no_deps();
+
+	let metadata = cmd.exec().map_err(|err| eyre::eyre!("Failed to run cargo metadata: {err}."))?;
+	let workspace_member_ids = metadata.workspace_members.iter().cloned().collect::<HashSet<_>>();
+	// Longest root prefix match wins, so nested packages resolve correctly.
+	let mut packages = metadata
+		.packages
+		.into_iter()
+		.filter(|package| workspace_member_ids.contains(&package.id))
+		.filter_map(|package| {
+			let manifest = PathBuf::from(package.manifest_path.as_str());
+			let root = manifest.parent()?.to_path_buf();
+
+			Some((normalize_path(&root), package.name.to_string()))
+		})
+		.collect::<Vec<_>>();
+
+	packages.sort_by(|left, right| {
+		let left_len = left.0.as_os_str().to_string_lossy().len();
+		let right_len = right.0.as_os_str().to_string_lossy().len();
+
+		right_len.cmp(&left_len)
+	});
+
+	let mut selected = HashSet::<String>::new();
+
+	for file in files {
+		let abs = normalize_path(&cwd.join(file));
+		let mut hit = None;
+
+		for (root, name) in &packages {
+			if abs.starts_with(root) {
+				hit = Some(name.clone());
+
+				break;
+			}
+		}
+
+		let Some(name) = hit else {
+			return Ok(None);
+		};
+
+		selected.insert(name);
+	}
+
+	let mut out = selected.into_iter().collect::<Vec<_>>();
+
+	out.sort();
+
+	Ok(Some(out))
+}
+
 pub(crate) fn read_file_context(path: &Path) -> Result<Option<FileContext>> {
 	let text = match fs::read_to_string(path) {
 		Ok(text) => text,
