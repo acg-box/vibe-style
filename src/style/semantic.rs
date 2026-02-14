@@ -3,6 +3,7 @@ use std::{
 	fs,
 	path::{Path, PathBuf},
 	process::Command,
+	sync::OnceLock,
 };
 
 use color_eyre::{Result, eyre};
@@ -10,7 +11,9 @@ use serde_json::Value;
 
 use crate::style::shared::CargoOptions;
 
-const MAX_IMPORT_SUGGESTION_ROUNDS: usize = 4;
+const DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS: usize = 2;
+const MAX_IMPORT_SUGGESTION_ROUNDS_ENV: &str = "VSTYLE_MAX_IMPORT_SUGGESTION_ROUNDS";
+const HARD_MAX_IMPORT_SUGGESTION_ROUNDS: usize = 16;
 
 #[derive(Debug, Clone)]
 struct ImportSuggestion {
@@ -29,7 +32,7 @@ pub(crate) fn apply_semantic_fixes(
 	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
 	let mut applied_total = 0_usize;
 
-	for _ in 0..MAX_IMPORT_SUGGESTION_ROUNDS {
+	for _ in 0..max_import_suggestion_rounds() {
 		let stdout = run_semantic_cargo_check(cargo_options)?;
 		let suggestions = collect_missing_import_suggestions(&stdout);
 		let mut applied_round = 0_usize;
@@ -65,6 +68,44 @@ pub(crate) fn collect_compiler_error_files(
 	let all = collect_compiler_error_files_from_output(&stdout);
 
 	Ok(all.into_iter().filter(|path| tracked.contains(path)).collect())
+}
+
+fn max_import_suggestion_rounds() -> usize {
+	static VALUE: OnceLock<usize> = OnceLock::new();
+
+	*VALUE.get_or_init(|| {
+		let Ok(raw) = std::env::var(MAX_IMPORT_SUGGESTION_ROUNDS_ENV) else {
+			return DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS;
+		};
+		let trimmed = raw.trim();
+		let parsed = match trimmed.parse::<usize>() {
+			Ok(value) => value,
+			Err(err) => {
+				eprintln!(
+					"Invalid {MAX_IMPORT_SUGGESTION_ROUNDS_ENV} value '{trimmed}': {err}. Using default {DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS}."
+				);
+
+				return DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS;
+			},
+		};
+
+		if parsed == 0 {
+			eprintln!(
+				"{MAX_IMPORT_SUGGESTION_ROUNDS_ENV}=0 is not valid. Using default {DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS}."
+			);
+
+			return DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS;
+		}
+		if parsed > HARD_MAX_IMPORT_SUGGESTION_ROUNDS {
+			eprintln!(
+				"{MAX_IMPORT_SUGGESTION_ROUNDS_ENV}={parsed} exceeds the hard cap {HARD_MAX_IMPORT_SUGGESTION_ROUNDS}. Using {HARD_MAX_IMPORT_SUGGESTION_ROUNDS}."
+			);
+
+			return HARD_MAX_IMPORT_SUGGESTION_ROUNDS;
+		}
+
+		parsed
+	})
 }
 
 fn run_semantic_cargo_check(cargo_options: &CargoOptions) -> Result<String> {

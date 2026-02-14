@@ -1,6 +1,9 @@
 use ra_ap_syntax::{
 	AstNode,
-	ast::{self, GenericParam, HasGenericArgs, HasGenericParams, HasName, Type, TypeAlias},
+	ast::{
+		self, GenericArg, GenericParam, HasGenericArgs, HasGenericParams, HasName, Path,
+		PathSegment, Type, TypeAlias,
+	},
 };
 
 use crate::style::shared::{self, FileContext, Violation};
@@ -40,8 +43,8 @@ pub(crate) fn check_type_alias_renames(ctx: &FileContext, violations: &mut Vec<V
 	}
 }
 
-fn is_meaningless_alias(path: &ast::Path, aliases: &[AliasGenericParam]) -> bool {
-	let mut segments = Vec::<ast::PathSegment>::new();
+fn is_meaningless_alias(path: &Path, aliases: &[AliasGenericParam]) -> bool {
+	let mut segments = Vec::<PathSegment>::new();
 
 	if !collect_simple_path_segments(path, &mut segments) {
 		return false;
@@ -59,11 +62,11 @@ fn is_meaningless_alias(path: &ast::Path, aliases: &[AliasGenericParam]) -> bool
 	let Some(last_segment) = segments.last() else {
 		return false;
 	};
-
 	let Some(last_generic_args) = last_segment.generic_arg_list() else {
 		return aliases.is_empty();
 	};
-	let rhs_args = last_generic_args.generic_args().collect::<Vec<ast::GenericArg>>();
+	let rhs_args = last_generic_args.generic_args().collect::<Vec<GenericArg>>();
+
 	if rhs_args.len() != aliases.len() {
 		return false;
 	}
@@ -77,7 +80,7 @@ fn is_meaningless_alias(path: &ast::Path, aliases: &[AliasGenericParam]) -> bool
 	true
 }
 
-fn generic_arg_matches_param(arg: &ast::GenericArg, alias: &AliasGenericParam) -> bool {
+fn generic_arg_matches_param(arg: &GenericArg, alias: &AliasGenericParam) -> bool {
 	match (arg, alias) {
 		(ast::GenericArg::LifetimeArg(lifetime_arg), AliasGenericParam::Lifetime(expected)) => {
 			let Some(lifetime) = lifetime_arg.lifetime() else {
@@ -99,8 +102,7 @@ fn generic_arg_matches_param(arg: &ast::GenericArg, alias: &AliasGenericParam) -
 			let Some(path) = path_type.path() else {
 				return false;
 			};
-
-			let mut segments = Vec::<ast::PathSegment>::new();
+			let mut segments = Vec::<PathSegment>::new();
 
 			if !collect_simple_path_segments(&path, &mut segments) {
 				return false;
@@ -108,6 +110,7 @@ fn generic_arg_matches_param(arg: &ast::GenericArg, alias: &AliasGenericParam) -
 			if segments.len() != 1 {
 				return false;
 			}
+
 			let Some(name_ref) = segments[0].name_ref() else {
 				return false;
 			};
@@ -144,7 +147,7 @@ fn alias_generic_keys(type_alias: &TypeAlias) -> Option<Vec<AliasGenericParam>> 
 	Some(out)
 }
 
-fn collect_simple_path_segments(path: &ast::Path, out: &mut Vec<ast::PathSegment>) -> bool {
+fn collect_simple_path_segments(path: &Path, out: &mut Vec<PathSegment>) -> bool {
 	if let Some(qualifier) = path.qualifier()
 		&& !collect_simple_path_segments(&qualifier, out)
 	{
@@ -164,5 +167,6 @@ fn collect_simple_path_segments(path: &ast::Path, out: &mut Vec<ast::PathSegment
 	}
 
 	out.push(segment);
+
 	true
 }

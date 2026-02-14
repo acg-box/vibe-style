@@ -170,6 +170,13 @@ files inside that package scope.
 There is currently no user configuration file.
 Rules are built into the checker.
 
+### Environment variables
+
+- `VSTYLE_MAX_IMPORT_SUGGESTION_ROUNDS`
+  - Controls how many semantic missing-import suggestion rounds `vstyle tune` will perform.
+  - Default: `2`.
+  - Increasing this may fix more missing-import cases but will run additional `cargo check --message-format=json` rounds.
+
 ## Rule Catalog
 
 ### File structure
