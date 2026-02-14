@@ -5,7 +5,7 @@ use std::{
 };
 
 use ra_ap_syntax::{
-	AstNode, Edition, SourceFile,
+	AstNode, Edition, SyntaxNode,
 	ast::{self, HasAttrs, HasName, HasVisibility, Item, Module, Use},
 };
 use regex::Regex;
@@ -173,7 +173,7 @@ fn apply_import010_no_super_use_rule(
 	let mut fixed_top_level_lines = HashSet::new();
 	let top_use_lines = use_items.iter().map(|item| item.line).collect::<HashSet<_>>();
 
-	for use_item in ctx.source_file.syntax().descendants().filter_map(ast::Use::cast) {
+	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
 		let Some(use_tree) = use_item.use_tree() else {
 			continue;
 		};
@@ -228,7 +228,7 @@ fn apply_import007_no_glob_use_rule(
 	let mut fixed_top_level_lines = HashSet::new();
 	let top_use_lines = use_items.iter().map(|item| item.line).collect::<HashSet<_>>();
 
-	for use_item in ctx.source_file.syntax().descendants().filter_map(ast::Use::cast) {
+	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
 		let Some(use_tree) = use_item.use_tree() else {
 			continue;
 		};
@@ -398,11 +398,11 @@ fn exported_symbols_from_named_module(
 	let Ok(text) = fs::read_to_string(root_file) else {
 		return BTreeSet::new();
 	};
-	let parsed = SourceFile::parse(&text, Edition::CURRENT).tree();
+	let parsed = ra_ap_syntax::SourceFile::parse(&text, Edition::CURRENT).tree();
 	let Some(module) = parsed
 		.syntax()
 		.children()
-		.filter_map(ast::Module::cast)
+		.filter_map(Module::cast)
 		.find(|item| item.name().is_some_and(|name| name.text() == module_name))
 	else {
 		return BTreeSet::new();
@@ -410,7 +410,7 @@ fn exported_symbols_from_named_module(
 
 	if let Some(item_list) = module.item_list() {
 		return exported_symbols_from_use_items(
-			item_list.syntax().children().filter_map(ast::Item::cast),
+			item_list.syntax().children().filter_map(Item::cast),
 		);
 	}
 
@@ -432,9 +432,10 @@ fn exported_symbols_from_named_module(
 			let Ok(module_text) = fs::read_to_string(&candidate) else {
 				continue;
 			};
-			let module_parsed = SourceFile::parse(&module_text, Edition::CURRENT).tree();
+			let module_parsed =
+				ra_ap_syntax::SourceFile::parse(&module_text, Edition::CURRENT).tree();
 			let exported = exported_symbols_from_use_items(
-				module_parsed.syntax().children().filter_map(ast::Item::cast),
+				module_parsed.syntax().children().filter_map(Item::cast),
 			);
 
 			if !exported.is_empty() {
@@ -450,7 +451,7 @@ fn exported_symbols_from_use_items(items: impl Iterator<Item = Item>) -> BTreeSe
 	let mut symbols = BTreeSet::new();
 
 	for item in items {
-		let ast::Item::Use(use_item) = item else {
+		let Item::Use(use_item) = item else {
 			continue;
 		};
 
@@ -491,7 +492,7 @@ fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Vec<String
 	let mut inline_ancestors = use_item
 		.syntax()
 		.ancestors()
-		.filter_map(ast::Module::cast)
+		.filter_map(Module::cast)
 		.filter_map(|module| module.name().map(|name| name.text().to_string()))
 		.collect::<Vec<_>>();
 
@@ -574,7 +575,7 @@ fn crate_absolute_use_path(parent_segments: &[String], tail: &str) -> String {
 }
 
 fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
-	let current_module = use_item.syntax().ancestors().find_map(ast::Module::cast)?;
+	let current_module = use_item.syntax().ancestors().find_map(Module::cast)?;
 	let current_module_item_list = current_module.item_list()?;
 	let current_module_name = current_module.name().map(|name| name.text().to_string());
 	let already_imported =
@@ -582,8 +583,7 @@ fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>>
 	let used_symbols = collect_used_symbols_from_syntax(current_module_item_list.syntax());
 	let mut symbols = BTreeSet::new();
 
-	if let Some(parent_module) =
-		current_module.syntax().ancestors().skip(1).find_map(ast::Module::cast)
+	if let Some(parent_module) = current_module.syntax().ancestors().skip(1).find_map(Module::cast)
 	{
 		if let Some(item_list) = parent_module.item_list() {
 			collect_scope_symbols_from_items(
@@ -624,8 +624,8 @@ fn imported_symbols_from_current_module_use_items(
 		return out;
 	};
 
-	for item in item_list.syntax().children().filter_map(ast::Item::cast) {
-		let ast::Item::Use(use_item) = item else {
+	for item in item_list.syntax().children().filter_map(Item::cast) {
+		let Item::Use(use_item) = item else {
 			continue;
 		};
 
@@ -687,11 +687,11 @@ fn item_name_text(item: &Item) -> Option<String> {
 	}
 }
 
-fn collect_used_symbols_from_syntax(syntax: &ra_ap_syntax::SyntaxNode) -> HashSet<String> {
+fn collect_used_symbols_from_syntax(syntax: &SyntaxNode) -> HashSet<String> {
 	let mut used = HashSet::new();
 
 	for name_ref in syntax.descendants().filter_map(ast::NameRef::cast) {
-		let in_use_tree = name_ref.syntax().ancestors().any(|node| ast::Use::can_cast(node.kind()));
+		let in_use_tree = name_ref.syntax().ancestors().any(|node| Use::can_cast(node.kind()));
 
 		if in_use_tree {
 			continue;
@@ -800,6 +800,7 @@ fn apply_import009_std_fmt_result_rule(
 	) else {
 		return false;
 	};
+
 	edits.push(edit);
 
 	true
@@ -853,6 +854,7 @@ fn apply_import009_non_importable_root_use_rule(
 	let Some(edit) = build_use_item_rewrite_edit(ctx, item, None, "RUST-STYLE-IMPORT-009") else {
 		return false;
 	};
+
 	edits.push(edit);
 
 	true
@@ -995,7 +997,7 @@ fn looks_like_trait_import(symbol: &str, full_path: &str) -> bool {
 
 fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
 	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
-		if path.syntax().ancestors().any(|node| ast::Use::cast(node).is_some()) {
+		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
 			continue;
 		}
 
@@ -1125,6 +1127,7 @@ fn normalize_trait_keep_alive_nested_segment(
 	let nested_prefix =
 		if module_prefix.is_empty() { head.to_owned() } else { format!("{module_prefix}::{head}") };
 	let mut rewritten_children = Vec::new();
+	let mut changed = false;
 
 	for child in split_top_level_csv(inner) {
 		let child_trimmed = child.trim();
@@ -1145,14 +1148,14 @@ fn normalize_trait_keep_alive_nested_segment(
 			}
 
 			if child_changed {
-				state.changed = true;
+				changed = true;
 			}
 
 			if let Some(key) = trait_key {
 				if state.seen_trait_keys.insert(key) {
 					rewritten_children.push(rewritten_child);
 				} else {
-					state.changed = true;
+					changed = true;
 				}
 			} else {
 				rewritten_children.push(rewritten_child);
@@ -1167,12 +1170,13 @@ fn normalize_trait_keep_alive_nested_segment(
 
 		return None;
 	}
+	if !changed {
+		return Some(original_segment.to_owned());
+	}
+
+	state.changed = true;
 
 	let rewritten_segment = format!("{head}::{{{}}}", rewritten_children.join(", "));
-
-	if rewritten_segment != original_segment {
-		state.changed = true;
-	}
 
 	Some(rewritten_segment)
 }
@@ -1329,6 +1333,7 @@ fn apply_import004_free_fn_macro_rule(
 					rewritten_use_path.as_deref(),
 					"RUST-STYLE-IMPORT-004",
 				);
+
 				if use_item_edit.is_none() {
 					fixable = false;
 				}
@@ -1364,8 +1369,10 @@ fn apply_import004_free_fn_macro_rule(
 				rule: "RUST-STYLE-IMPORT-004",
 			});
 		}
+
 		if let Some(edit) = use_item_edit {
 			edits.push(edit);
+
 			fixed = true;
 		}
 
@@ -1547,11 +1554,13 @@ fn apply_import009_rules(
 				"RUST-STYLE-IMPORT-009",
 			) else {
 				planned_use_item_edits.clear();
+
 				break;
 			};
 
 			planned_use_item_edits.push((item.line, edit));
 		}
+
 		if planned_use_item_edits.is_empty() {
 			continue;
 		}
@@ -2158,7 +2167,7 @@ fn collect_qualified_value_paths_by_symbol(ctx: &FileContext) -> HashMap<String,
 		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
 			continue;
 		}
-		if path.syntax().ancestors().any(|node| ast::Use::cast(node).is_some()) {
+		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
 			continue;
 		}
 		if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
@@ -2329,7 +2338,7 @@ fn unqualified_value_path_rewrites(
 		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
 			continue;
 		}
-		if path.syntax().ancestors().any(|node| ast::Use::cast(node).is_some()) {
+		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
 			continue;
 		}
 		if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
@@ -2378,7 +2387,7 @@ fn use_item_imports_symbol_path(path: &str, symbol: &str, import_path: &str) -> 
 }
 
 fn is_inside_cfg_test_module(path: &ast::Path) -> bool {
-	path.syntax().ancestors().filter_map(ast::Module::cast).any(|module| {
+	path.syntax().ancestors().filter_map(Module::cast).any(|module| {
 		module
 			.attrs()
 			.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg(test)"))
@@ -3066,6 +3075,17 @@ fn is_keep_alive_alias_for_child(segment: &str, child_tail: &str) -> bool {
 
 fn compact_path_for_match(path: &str) -> String {
 	path.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
+fn normalize_use_path_for_equivalence(path: &str) -> String {
+	let mut normalized = compact_path_for_match(path);
+
+	// Treat trailing commas in braced `use` groups as formatting-only.
+	while normalized.contains(",}") {
+		normalized = normalized.replace(",}", "}");
+	}
+
+	normalized
 }
 
 fn import008_insert_line(ctx: &FileContext) -> usize {
@@ -3901,6 +3921,16 @@ fn drop_unused_self_from_nested_use_segment(segment: &str, head: &str) -> Option
 
 fn rewrite_use_item_with_path(raw: &str, new_path: &str) -> Option<String> {
 	let (start, end) = find_use_path_range(raw)?;
+	let original_path = raw.get(start..end)?;
+
+	// Do not rewrite `use` paths when the change is formatting-only. This avoids
+	// collapsing already-correct multi-line imports into a single line.
+	if normalize_use_path_for_equivalence(original_path)
+		== normalize_use_path_for_equivalence(new_path)
+	{
+		return None;
+	}
+
 	let mut out = String::new();
 
 	out.push_str(&raw[..start]);

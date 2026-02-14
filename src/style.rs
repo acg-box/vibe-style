@@ -1089,13 +1089,13 @@ fn sample(value: beta::Gamma) -> beta::Gamma {
 	#[test]
 	fn import_fix_does_not_rewrite_already_grouped_multiline_use_tree() {
 		let original = r#"
-use std::{
-	future::{self, Future, Ready},
-	pin::Pin,
-	rc::Rc,
-	task::{Context, Poll},
-};
-"#;
+	use std::{
+		future::{self, Future, Ready},
+		pin::Pin,
+		rc::Rc,
+		task::{Context, Poll},
+	};
+	"#;
 		let ctx = shared::read_file_context_from_text(
 			Path::new("import_already_grouped_multiline.rs"),
 			original.to_owned(),
@@ -1113,10 +1113,37 @@ use std::{
 	}
 
 	#[test]
+	fn import_fix_does_not_collapse_multiline_braced_use_tree_when_semantics_are_unchanged() {
+		let original = r#"
+	use qdrant_client::{
+		Qdrant, QdrantError,
+		qdrant::{
+			CreateCollectionBuilder, Distance, Modifier, SparseVectorParamsBuilder,
+			SparseVectorsConfigBuilder, VectorParamsBuilder, VectorsConfigBuilder,
+		},
+	};
+	"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import_multiline_braced_third_party.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let edits_debug = format!("{edits:?}");
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-003"));
+		assert_eq!(applied, 0, "Expected no edits.\nEdits: {edits_debug}\nRewritten:\n{rewritten}");
+		assert_eq!(rewritten, original);
+	}
+
+	#[test]
 	fn import002_fix_normalizes_mixed_self_child_use_tree_with_aliases() {
 		let original = r#"
-use crate::{grpc, grpc::{ReferralCode as ProtoReferralCode, gateway_service_server::GatewayService as GrpcGatewayService}};
-"#;
+	use crate::{grpc, grpc::{ReferralCode as ProtoReferralCode, gateway_service_server::GatewayService as GrpcGatewayService}};
+	"#;
 		let ctx = shared::read_file_context_from_text(
 			Path::new("import002_mixed_self_child_with_aliases.rs"),
 			original.to_owned(),
@@ -2097,7 +2124,6 @@ fn run_ops() {
 	validate_structured_fields();
 }
 "#;
-
 		let (rewritten, _applied_count, _had_import_shortening_edits) = apply_fix_passes(
 			Path::new("import004_remove_multiple_free_functions.rs"),
 			original,

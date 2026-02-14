@@ -1,9 +1,11 @@
 use std::path::Path;
 
-use ast::{ArgList, Attr, Expr, MacroCall, MethodCallExpr};
 use ra_ap_syntax::{
 	AstNode,
-	ast::{self, HasArgList, HasAttrs, HasModuleItem, HasName},
+	ast::{
+		self, ArgList, Attr, Expr, HasArgList, HasAttrs, HasModuleItem, HasName, MacroCall,
+		MethodCallExpr,
+	},
 };
 use regex::Regex;
 
@@ -28,7 +30,7 @@ struct ArgSplitState {
 }
 
 pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Violation>) {
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		let Some(path_text) = macro_path_text(&macro_call) else {
 			continue;
 		};
@@ -119,8 +121,7 @@ pub(crate) fn check_expect_unwrap(
 		return;
 	}
 
-	for method_call in ctx.source_file.syntax().descendants().filter_map(ast::MethodCallExpr::cast)
-	{
+	for method_call in ctx.source_file.syntax().descendants().filter_map(MethodCallExpr::cast) {
 		if method_call_in_test_context(&method_call) {
 			continue;
 		}
