@@ -6,13 +6,15 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths-ignore:
       - '**/*.md'
       - '.gitignore'
       - 'docs/**'
   pull_request:
-    branches: [main]
+    branches:
+      - main
     paths-ignore:
       - '**/*.md'
       - '.gitignore'
@@ -50,11 +52,37 @@ jobs:
         with:
           tool: cargo-make
 
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
       - name: Run lint
-        run: cargo make lint-rust
+        run: cargo make lint
 
       - name: Run Rust format checks
         run: cargo make fmt-rust-check
+
+      - name: Run tests
+        run: cargo make test-rust
+
+  toml:
+    name: TOML checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch latest code
+        uses: actions/checkout@v6
+
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+          rustflags: ''
+
+      - name: Install cargo-make
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
 
       - name: Install taplo
         uses: taiki-e/install-action@v2
@@ -63,11 +91,3 @@ jobs:
 
       - name: Run TOML format checks
         run: cargo make fmt-toml-check
-
-      - name: Install nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-
-      - name: Run tests
-        run: cargo make test-rust
