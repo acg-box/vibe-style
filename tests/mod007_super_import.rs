@@ -73,6 +73,7 @@ mod tests {
 
 	let status =
 		Command::new("git").current_dir(&temp_dir).args(["init"]).output().expect("git init");
+
 	assert!(status.status.success());
 
 	let status = Command::new("git")
@@ -80,6 +81,7 @@ mod tests {
 		.args(["add", "Cargo.toml", "src/lib.rs", "src/used.rs", "src/unused.rs"])
 		.output()
 		.expect("git add");
+
 	assert!(status.status.success());
 
 	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
@@ -87,6 +89,7 @@ mod tests {
 		.arg("tune")
 		.output()
 		.expect("run vstyle");
+
 	assert!(output.status.success());
 
 	let used_after = fs::read_to_string(temp_dir.join("src/used.rs")).expect("read used source");
@@ -101,9 +104,12 @@ mod tests {
 		!used_after.contains("use super::*;"),
 		"used super glob should be expanded (IMPORT-007) rather than left as a glob in src/used.rs"
 	);
+
 	let has_helper_use = used_after.lines().any(|line| {
 		let trimmed = line.trim_start();
+
 		trimmed.starts_with("use ") && trimmed.contains("helper")
 	});
+
 	assert!(has_helper_use, "expected helper to be explicitly imported after tune");
 }

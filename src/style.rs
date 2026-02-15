@@ -708,7 +708,7 @@ mod tests {
 			.join(format!("vstyle-prelude-braced-{}-{now}", std::process::id()));
 		let src_dir = root.join("src");
 		let sample_path = src_dir.join("sample.rs");
-		let original = "use crate::{prelude::*, style::RunSummary};\n\nfn run(summary: RunSummary) -> Result<()> {\n\tlet _ = summary;\n\tOk(())\n}\n";
+		let original = "use crate::{\n\tprelude::*,\n\tstyle::RunSummary,\n};\n\nfn run(summary: RunSummary) -> Result<()> {\n\tlet _ = summary;\n\tOk(())\n}\n";
 
 		std::fs::create_dir_all(&src_dir).expect("Create temp src directory.");
 		std::fs::write(
@@ -728,9 +728,12 @@ mod tests {
 		let (_violations, edits) = collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("Apply edits.");
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
 
-		assert!(rewritten.contains("use crate::{prelude::{Result},style::RunSummary};"));
-		assert!(!rewritten.contains("prelude::*"));
+		assert!(compact.contains("usecrate::{"));
+		assert!(compact.contains("prelude::{Result}"));
+		assert!(compact.contains("style::RunSummary"));
+		assert!(!compact.contains("prelude::*"));
 	}
 
 	#[test]
@@ -2256,6 +2259,18 @@ where
 		.expect("has ctx");
 		let (violations, edits) = collect_violations(&ctx, true);
 
+		eprintln!(
+			"use_items={:?}",
+			ctx.top_items
+				.iter()
+				.filter(|item| item.kind == shared::TopKind::Use)
+				.map(|item| (item.raw.clone(), item.use_path.clone()))
+				.collect::<Vec<_>>()
+		);
+		eprintln!(
+			"violations={:?}",
+			violations.iter().map(|v| (v.rule, v.message.clone(), v.fixable)).collect::<Vec<_>>()
+		);
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
 

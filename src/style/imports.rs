@@ -11,7 +11,7 @@ use ra_ap_syntax::{
 use regex::Regex;
 
 use crate::style::shared::{
-	self, Edit, FileContext, TopItem, TopKind, USE_RE, Violation, WORKSPACE_IMPORT_ROOTS,
+	self, Edit, FileContext, TopItem, TopKind, Violation, WORKSPACE_IMPORT_ROOTS,
 };
 
 type Import009Plan<'a> = (
@@ -3113,12 +3113,6 @@ fn is_cfg_test_attrs(attrs: &[String]) -> bool {
 	attrs.iter().any(|attr| attr.replace(' ', "").contains("#[cfg(test)]"))
 }
 
-fn extract_use_path_from_line(line: &str) -> Option<String> {
-	USE_RE
-		.captures(line)
-		.and_then(|caps| caps.get(2).map(|capture| capture.as_str().trim().to_owned()))
-}
-
 fn extract_use_path_from_text(text: &str) -> Option<String> {
 	find_use_path_range(text)
 		.and_then(|(start, end)| text.get(start..end).map(|s| s.trim().to_owned()))
@@ -3152,8 +3146,8 @@ fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
 }
 
 fn extract_use_path(ctx: &FileContext, item: &TopItem) -> Option<String> {
-	extract_use_path_from_text(&item.raw).or_else(|| {
-		ctx.lines.get(item.line.saturating_sub(1)).and_then(|line| extract_use_path_from_line(line))
+	item.use_path.clone().or_else(|| extract_use_path_from_text(&item.raw)).or_else(|| {
+		ctx.lines.get(item.line.saturating_sub(1)).and_then(|line| extract_use_path_from_text(line))
 	})
 }
 

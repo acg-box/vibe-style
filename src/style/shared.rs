@@ -50,9 +50,6 @@ pub(crate) const STYLE_RULE_IDS: [&str; 33] = [
 	"RUST-STYLE-TEST-002",
 ];
 
-pub(crate) static USE_RE: Lazy<Regex> = Lazy::new(|| {
-	Regex::new(r"^\s*(pub\s+)?use\s+(.+);\s*$").expect("Expected operation to succeed.")
-});
 pub(crate) static SNAKE_CASE_RE: Lazy<Regex> =
 	Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").expect("Expected operation to succeed."));
 pub(crate) static WORKSPACE_IMPORT_ROOTS: Lazy<HashSet<String>> = Lazy::new(|| {
@@ -145,6 +142,8 @@ pub(crate) struct TopItem {
 	pub(crate) is_async: bool,
 	pub(crate) attrs: Vec<String>,
 	pub(crate) impl_target: Option<String>,
+	/// Precomputed `use` tree text for top-level `use` items, with all whitespace removed.
+	pub(crate) use_path: Option<String>,
 	pub(crate) raw: String,
 }
 
@@ -537,6 +536,11 @@ fn collect_top_items(source_file: &SourceFile, line_starts: &[usize]) -> Vec<Top
 		} else {
 			None
 		};
+		let use_path = if let ast::Item::Use(use_item) = &item {
+			extract_use_path_from_item_text(&use_item.syntax().text().to_string())
+		} else {
+			None
+		};
 		let raw = item.syntax().text().to_string();
 		let (start_line, end_line) = text_range_to_lines(line_starts, item.syntax().text_range());
 
@@ -550,11 +554,44 @@ fn collect_top_items(source_file: &SourceFile, line_starts: &[usize]) -> Vec<Top
 			is_async,
 			attrs,
 			impl_target,
+			use_path,
 			raw,
 		});
 	}
 
 	items
+}
+
+fn extract_use_path_from_item_text(text: &str) -> Option<String> {
+	find_use_path_range(text)
+		.and_then(|(start, end)| text.get(start..end).map(|s| s.trim().to_owned()))
+}
+
+fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
+	for (idx, _) in text.match_indices("use") {
+		let prev = text[..idx].chars().next_back();
+		let next = text.get(idx + 3..).and_then(|tail| tail.chars().next());
+		let is_prev_boundary = prev.is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'));
+		let is_next_whitespace = next.is_some_and(char::is_whitespace);
+
+		if !is_prev_boundary || !is_next_whitespace {
+			continue;
+		}
+
+		let mut start = idx + 3;
+		let bytes = text.as_bytes();
+
+		while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+			start += 1;
+		}
+
+		let tail = text.get(start..)?;
+		let semi = tail.find(';')?;
+
+		return Some((start, start + semi));
+	}
+
+	None
 }
 
 fn classify_top_kind(item: &Item) -> TopKind {

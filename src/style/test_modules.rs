@@ -1,11 +1,11 @@
-use crate::style::{
-	imports,
-	shared::{self, Edit, FileContext},
-};
-
 use ra_ap_syntax::{
 	AstNode,
 	ast::{self, HasAttrs, HasModuleItem, HasName, Module},
+};
+
+use crate::style::{
+	imports,
+	shared::{self, Edit, FileContext},
 };
 
 pub(crate) fn check_test_module_super_glob(
@@ -21,6 +21,7 @@ pub(crate) fn check_test_module_super_glob(
 		let Some(name) = module.name() else {
 			continue;
 		};
+
 		if name.text() != "tests" {
 			continue;
 		}
@@ -39,6 +40,7 @@ pub(crate) fn check_test_module_super_glob(
 			let Some(use_tree) = use_item.use_tree() else {
 				continue;
 			};
+
 			if use_tree.syntax().text().to_string().trim() != "super::*" {
 				continue;
 			}
@@ -48,6 +50,7 @@ pub(crate) fn check_test_module_super_glob(
 			let Some(used) = imports::exported_symbols_from_super_scope(&use_item) else {
 				continue;
 			};
+
 			if !used.is_empty() {
 				continue;
 			}
