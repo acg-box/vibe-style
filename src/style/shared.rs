@@ -53,9 +53,9 @@ pub(crate) const STYLE_RULE_IDS: [&str; 33] = [
 pub(crate) static SNAKE_CASE_RE: Lazy<Regex> =
 	Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").expect("Expected operation to succeed."));
 pub(crate) static WORKSPACE_IMPORT_ROOTS: Lazy<HashSet<String>> = Lazy::new(|| {
-	let mut roots = HashSet::new();
-
 	let pkg_name = env!("CARGO_PKG_NAME");
+
+	let mut roots = HashSet::new();
 	roots.insert(pkg_name.to_owned());
 	roots.insert(pkg_name.replace('-', "_"));
 
@@ -434,10 +434,10 @@ pub(crate) fn extract_impl_target_name(ty_text: &str) -> Option<String> {
 }
 
 pub(crate) fn strip_string_and_line_comment(line: &str, mut in_str: bool) -> (String, bool) {
+	let chars = line.chars().collect::<Vec<_>>();
 	let mut out = String::with_capacity(line.len());
 	let mut escape = false;
 	let mut idx = 0;
-	let chars = line.chars().collect::<Vec<_>>();
 
 	while idx < chars.len() {
 		let ch = chars[idx];
@@ -578,8 +578,8 @@ fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
 			continue;
 		}
 
-		let mut start = idx + 3;
 		let bytes = text.as_bytes();
+		let mut start = idx + 3;
 
 		while start < bytes.len() && bytes[start].is_ascii_whitespace() {
 			start += 1;

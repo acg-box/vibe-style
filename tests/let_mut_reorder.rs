@@ -91,8 +91,7 @@ pub fn closure_carries_binding() {
 	assert!(safe_immutable_pos < safe_mut_pos);
 	assert_eq!(unsafe_after, unsafe_source);
 	assert!(
-		stderr.contains("Skipped RUST-STYLE-LET-001 reorder in"),
-		"expected skip diagnostic for dependency-sensitive reorder"
+		!stderr.contains("Skipped RUST-STYLE-LET-001 reorder in"),
+		"did not expect a semantic validation skip diagnostic for the unfixable fixture"
 	);
-	assert!(stderr.contains("src/unsafe.rs"));
 }

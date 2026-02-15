@@ -211,8 +211,8 @@ fn apply_import010_no_super_use_rule(
 	emit_edits: bool,
 	use_items: &[&TopItem],
 ) -> HashSet<usize> {
-	let mut fixed_top_level_lines = HashSet::new();
 	let top_use_lines = use_items.iter().map(|item| item.line).collect::<HashSet<_>>();
+	let mut fixed_top_level_lines = HashSet::new();
 
 	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
 		let Some(use_tree) = use_item.use_tree() else {
@@ -266,8 +266,8 @@ fn apply_import007_no_glob_use_rule(
 	emit_edits: bool,
 	use_items: &[&TopItem],
 ) -> HashSet<usize> {
-	let mut fixed_top_level_lines = HashSet::new();
 	let top_use_lines = use_items.iter().map(|item| item.line).collect::<HashSet<_>>();
+	let mut fixed_top_level_lines = HashSet::new();
 
 	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
 		let Some(use_tree) = use_item.use_tree() else {
@@ -3015,8 +3015,8 @@ fn merge_child_tail_into_braced_segments(segments: &mut Vec<String>, child_tail:
 			continue;
 		}
 
-		let mut children = split_top_level_csv(inner);
 		let child_rest_compact = compact_path_for_match(child_rest);
+		let mut children = split_top_level_csv(inner);
 		let mut found_exact = false;
 		let mut replaced_alias = false;
 
@@ -3129,8 +3129,8 @@ fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
 			continue;
 		}
 
-		let mut start = idx + 3;
 		let bytes = text.as_bytes();
+		let mut start = idx + 3;
 
 		while start < bytes.len() && bytes[start].is_ascii_whitespace() {
 			start += 1;
@@ -3665,11 +3665,11 @@ fn collect_local_module_roots(ctx: &FileContext) -> HashSet<String> {
 }
 
 fn split_top_level_csv(text: &str) -> Vec<String> {
+	let chars = text.char_indices().collect::<Vec<_>>();
 	let mut out = Vec::new();
 	let mut start = 0_usize;
 	let mut depth_brace = 0_i32;
 	let mut depth_angle = 0_i32;
-	let chars = text.char_indices().collect::<Vec<_>>();
 
 	for (idx, ch) in &chars {
 		match ch {

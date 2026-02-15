@@ -15,7 +15,7 @@ mod types;
 pub(crate) use shared::{CargoOptions, RunSummary};
 
 use std::{
-	collections::BTreeMap,
+	collections::{BTreeMap, BTreeSet},
 	fs,
 	path::{Path, PathBuf},
 };
@@ -37,7 +37,25 @@ struct FileFixOutcome {
 	fallback_without_import_shortening: Option<String>,
 	had_import_shortening_edits: bool,
 	had_let_mut_reorder_edits: bool,
+	had_type_alias_rename_edits: bool,
 	applied_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct TypeAliasRenamePlan {
+	renames: BTreeMap<String, String>,
+	definition_edits: BTreeMap<PathBuf, Vec<Edit>>,
+}
+
+struct SemanticValidationFallbacks<'a> {
+	files: &'a [PathBuf],
+	semantic_cargo_options: &'a CargoOptions,
+	baseline_error_files: &'a BTreeSet<PathBuf>,
+	verbose: bool,
+	import_fallbacks: &'a BTreeMap<PathBuf, (PathBuf, String)>,
+	changed_originals: &'a BTreeMap<PathBuf, (PathBuf, String)>,
+	let_mut_reorder_files: &'a BTreeMap<PathBuf, ()>,
+	type_alias_rename_files: &'a BTreeMap<PathBuf, ()>,
 }
 
 pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
@@ -82,7 +100,8 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 	semantic::reset_cache_stats();
 
 	let files = shared::resolve_files(cargo_options)?;
-	let outcomes_all = collect_fix_outcomes(&files)?;
+	let type_alias_plan = collect_type_alias_rename_plan(&files)?;
+	let outcomes_all = collect_fix_outcomes(&files, &type_alias_plan)?;
 	let changed_files = changed_file_paths(&outcomes_all);
 	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
 	let baseline_error_files =
@@ -91,6 +110,7 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut let_mut_reorder_files: BTreeMap<PathBuf, ()> = BTreeMap::new();
+	let mut type_alias_rename_files: BTreeMap<PathBuf, ()> = BTreeMap::new();
 
 	for outcome in outcomes_all {
 		if let Some(text) = outcome.rewritten_text {
@@ -115,54 +135,23 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 		if outcome.had_let_mut_reorder_edits && !outcome.had_import_shortening_edits {
 			let_mut_reorder_files.insert(normalize_path(&outcome.path), ());
 		}
+		if outcome.had_type_alias_rename_edits {
+			type_alias_rename_files.insert(normalize_path(&outcome.path), ());
+		}
 	}
 
 	total_applied += semantic::apply_semantic_fixes(&files, &semantic_cargo_options, verbose)?;
 
-	if !import_fallbacks.is_empty() || !changed_originals.is_empty() {
-		let post_error_files =
-			semantic::collect_compiler_error_files(&files, &semantic_cargo_options, verbose)?;
-		let mut handled = BTreeMap::<PathBuf, ()>::new();
-
-		for normalized in post_error_files.difference(&baseline_error_files) {
-			if let Some((path, fallback)) = import_fallbacks.get(normalized) {
-				if let Some((_, original_text)) = changed_originals.get(normalized)
-					&& let_mut_reorder_files.contains_key(normalized)
-				{
-					fs::write(path, original_text)?;
-
-					handled.insert(normalized.clone(), ());
-
-					eprintln!(
-						"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
-						path.display()
-					);
-
-					continue;
-				}
-
-				fs::write(path, fallback)?;
-
-				handled.insert(normalized.clone(), ());
-			}
-		}
-		for normalized in post_error_files.difference(&baseline_error_files) {
-			if handled.contains_key(normalized) {
-				continue;
-			}
-
-			if let Some((path, original_text)) = changed_originals.get(normalized) {
-				fs::write(path, original_text)?;
-
-				if let_mut_reorder_files.contains_key(normalized) {
-					eprintln!(
-						"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
-						path.display()
-					);
-				}
-			}
-		}
-	}
+	handle_semantic_validation_fallbacks(SemanticValidationFallbacks {
+		files: &files,
+		semantic_cargo_options: &semantic_cargo_options,
+		baseline_error_files: &baseline_error_files,
+		verbose,
+		import_fallbacks: &import_fallbacks,
+		changed_originals: &changed_originals,
+		let_mut_reorder_files: &let_mut_reorder_files,
+		type_alias_rename_files: &type_alias_rename_files,
+	})?;
 
 	let checked = run_check(cargo_options)?;
 
@@ -185,7 +174,138 @@ pub(crate) fn print_coverage() {
 	}
 }
 
-fn collect_fix_outcomes(files: &[PathBuf]) -> Result<Vec<FileFixOutcome>> {
+fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) -> Result<()> {
+	if ctx.import_fallbacks.is_empty() && ctx.changed_originals.is_empty() {
+		return Ok(());
+	}
+
+	let post_error_files =
+		semantic::collect_compiler_error_files(ctx.files, ctx.semantic_cargo_options, ctx.verbose)?;
+	let new_errors =
+		post_error_files.difference(ctx.baseline_error_files).cloned().collect::<Vec<_>>();
+	let mut handled = BTreeMap::<PathBuf, ()>::new();
+
+	if !ctx.type_alias_rename_files.is_empty()
+		&& new_errors.iter().any(|path| ctx.type_alias_rename_files.contains_key(path))
+	{
+		for normalized in ctx.type_alias_rename_files.keys() {
+			if let Some((path, original_text)) = ctx.changed_originals.get(normalized) {
+				fs::write(path, original_text)?;
+
+				handled.insert(normalized.clone(), ());
+
+				eprintln!(
+					"Skipped RUST-STYLE-TYPE-001 rename in {} due to failed semantic validation.",
+					path.display()
+				);
+			}
+		}
+	}
+
+	for normalized in post_error_files.difference(ctx.baseline_error_files) {
+		if handled.contains_key(normalized) {
+			continue;
+		}
+
+		if let Some((path, fallback)) = ctx.import_fallbacks.get(normalized) {
+			if let Some((_, original_text)) = ctx.changed_originals.get(normalized)
+				&& ctx.let_mut_reorder_files.contains_key(normalized)
+			{
+				fs::write(path, original_text)?;
+
+				handled.insert(normalized.clone(), ());
+
+				eprintln!(
+					"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
+					path.display()
+				);
+
+				continue;
+			}
+
+			fs::write(path, fallback)?;
+
+			handled.insert(normalized.clone(), ());
+		}
+	}
+	for normalized in post_error_files.difference(ctx.baseline_error_files) {
+		if handled.contains_key(normalized) {
+			continue;
+		}
+
+		if let Some((path, original_text)) = ctx.changed_originals.get(normalized) {
+			fs::write(path, original_text)?;
+
+			if ctx.let_mut_reorder_files.contains_key(normalized) {
+				eprintln!(
+					"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
+					path.display()
+				);
+			}
+		}
+	}
+
+	Ok(())
+}
+
+fn collect_type_alias_rename_plan(files: &[PathBuf]) -> Result<TypeAliasRenamePlan> {
+	let mut plan = TypeAliasRenamePlan::default();
+
+	for file in files {
+		let Some(ctx) = shared::read_file_context(file)? else {
+			continue;
+		};
+		let fixes = types::collect_type_alias_rename_fixes(&ctx);
+
+		for fix in fixes {
+			if let Some(existing) = plan.renames.get(&fix.alias) {
+				if existing != &fix.target {
+					continue;
+				}
+			} else {
+				plan.renames.insert(fix.alias.clone(), fix.target);
+			}
+
+			plan.definition_edits.entry(file.clone()).or_default().extend(fix.definition_edits);
+		}
+	}
+
+	Ok(plan)
+}
+
+fn apply_type_alias_rename_plan(
+	path: &Path,
+	initial_text: &str,
+	plan: &TypeAliasRenamePlan,
+) -> Result<(String, usize, bool)> {
+	if plan.renames.is_empty() && plan.definition_edits.is_empty() {
+		return Ok((initial_text.to_owned(), 0, false));
+	}
+
+	let mut text = initial_text.to_owned();
+	let Some(ctx) = shared::read_file_context_from_text(path, text.clone())? else {
+		return Ok((text, 0, false));
+	};
+	let mut edits = Vec::<Edit>::new();
+
+	if let Some(def_edits) = plan.definition_edits.get(path) {
+		edits.extend(def_edits.iter().cloned());
+	}
+
+	let skip_ranges = edits.iter().map(|edit| (edit.start, edit.end)).collect::<Vec<_>>();
+	let usage_edits = types::build_type_alias_usage_rename_edits(&ctx, &plan.renames, &skip_ranges);
+
+	edits.extend(usage_edits);
+
+	let applied = fixes::apply_edits(&mut text, edits)?;
+
+	Ok((text, applied, applied > 0))
+}
+
+fn collect_fix_outcomes(
+	files: &[PathBuf],
+	type_alias_plan: &TypeAliasRenamePlan,
+) -> Result<Vec<FileFixOutcome>> {
 	let mut outcomes_all = Vec::<FileFixOutcome>::new();
 
 	for batch in files.chunks(FILE_BATCH_SIZE) {
@@ -202,15 +322,21 @@ fn collect_fix_outcomes(files: &[PathBuf]) -> Result<Vec<FileFixOutcome>> {
 							fallback_without_import_shortening: None,
 							had_import_shortening_edits: false,
 							had_let_mut_reorder_edits: false,
+							had_type_alias_rename_edits: false,
 							applied_count: 0,
 						});
 					},
 				};
-				let (text, applied_count, had_import_shortening_edits, had_let_mut_reorder_edits) =
-					apply_fix_passes(file, &original_text, true)?;
+				let (base_text, type_alias_applied, had_type_alias_rename_edits) =
+					apply_type_alias_rename_plan(file, &original_text, type_alias_plan)?;
+				let (text, pass_applied, had_import_shortening_edits, had_let_mut_reorder_edits) =
+					apply_fix_passes(file, &base_text, true)?;
+				let applied_count = type_alias_applied + pass_applied;
 				let fallback_without_import_shortening = if had_import_shortening_edits {
+					let (fallback_base, _fallback_type_applied, _fallback_type_edits) =
+						apply_type_alias_rename_plan(file, &original_text, type_alias_plan)?;
 					let (fallback, _fallback_applied, _fallback_import_edits, _) =
-						apply_fix_passes(file, &original_text, false)?;
+						apply_fix_passes(file, &fallback_base, false)?;
 
 					(text != fallback).then_some(fallback)
 				} else {
@@ -224,6 +350,7 @@ fn collect_fix_outcomes(files: &[PathBuf]) -> Result<Vec<FileFixOutcome>> {
 					fallback_without_import_shortening,
 					had_import_shortening_edits,
 					had_let_mut_reorder_edits,
+					had_type_alias_rename_edits,
 					applied_count,
 				})
 			})
@@ -3216,10 +3343,11 @@ type A<'a, T> = B<'a, T>;
 	#[test]
 	fn type001_skips_specialized_or_non_path_aliases() {
 		let original = r#"
-type Bytes = Vec<u8>;
-type MyResult<T> = Result<T, MyError>;
-type Span = (usize, usize);
-"#;
+	type Bytes = Vec<u8>;
+	type MyResult<T> = Result<T, MyError>;
+	type MyResultWithDefault<T, E = Error> = std::result::Result<T, E>;
+	type Span = (usize, usize);
+	"#;
 		let ctx = shared::read_file_context_from_text(
 			Path::new("types_rule_skips.rs"),
 			original.to_owned(),

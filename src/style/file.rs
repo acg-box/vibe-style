@@ -213,8 +213,8 @@ fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
 			continue;
 		}
 
-		let mut start = idx + 3;
 		let bytes = text.as_bytes();
+		let mut start = idx + 3;
 
 		while start < bytes.len() && bytes[start].is_ascii_whitespace() {
 			start += 1;

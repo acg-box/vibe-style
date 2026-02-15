@@ -1,16 +1,28 @@
+use std::collections::BTreeMap;
+
 use ra_ap_syntax::{
-	AstNode,
+	AstNode, SyntaxKind,
 	ast::{
-		self, GenericArg, GenericParam, HasGenericArgs, HasGenericParams, HasName, Path,
-		PathSegment, Type, TypeAlias,
+		self, GenericArg, GenericParam, HasGenericArgs, HasGenericParams, HasName, HasVisibility,
+		Path, PathSegment, Type, TypeAlias, Use,
 	},
 };
 
-use crate::style::shared::{self, FileContext, Violation};
+use crate::style::shared::{self, Edit, FileContext, Violation};
+
+const RULE_ID: &str = "RUST-STYLE-TYPE-001";
+const MESSAGE: &str = "Do not use type aliases that only rename another type.";
 
 enum AliasGenericParam {
 	Lifetime(String),
 	Type(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TypeAliasRenameFix {
+	pub(crate) alias: String,
+	pub(crate) target: String,
+	pub(crate) definition_edits: Vec<Edit>,
 }
 
 pub(crate) fn check_type_alias_renames(ctx: &FileContext, violations: &mut Vec<Violation>) {
@@ -31,16 +43,65 @@ pub(crate) fn check_type_alias_renames(ctx: &FileContext, violations: &mut Vec<V
 
 		let start = usize::from(path_type.syntax().text_range().start());
 		let line = shared::line_from_offset(&ctx.line_starts, start);
+		let fixable = type_alias_autofix_plan(ctx, &type_alias, &rhs_path, &aliases).is_some();
 
-		shared::push_violation(
-			violations,
-			ctx,
-			line,
-			"RUST-STYLE-TYPE-001",
-			"Do not use type aliases that only rename another type.",
-			false,
-		);
+		shared::push_violation(violations, ctx, line, RULE_ID, MESSAGE, fixable);
 	}
+}
+
+pub(crate) fn collect_type_alias_rename_fixes(ctx: &FileContext) -> Vec<TypeAliasRenameFix> {
+	let mut out = Vec::new();
+
+	for type_alias in ctx.source_file.syntax().descendants().filter_map(TypeAlias::cast) {
+		let Some(Type::PathType(path_type)) = type_alias.ty() else {
+			continue;
+		};
+		let Some(aliases) = alias_generic_keys(&type_alias) else {
+			continue;
+		};
+		let Some(rhs_path) = path_type.path() else {
+			continue;
+		};
+		let Some(plan) = type_alias_autofix_plan(ctx, &type_alias, &rhs_path, &aliases) else {
+			continue;
+		};
+
+		out.push(plan);
+	}
+
+	out
+}
+
+pub(crate) fn build_type_alias_usage_rename_edits(
+	ctx: &FileContext,
+	renames: &BTreeMap<String, String>,
+	skip_ranges: &[(usize, usize)],
+) -> Vec<Edit> {
+	if renames.is_empty() {
+		return Vec::new();
+	}
+
+	let mut edits = Vec::new();
+
+	for segment in ctx.source_file.syntax().descendants().filter_map(PathSegment::cast) {
+		let Some(name_ref) = segment.name_ref() else {
+			continue;
+		};
+		let Some(replacement) = renames.get(name_ref.text().as_str()) else {
+			continue;
+		};
+		let range = name_ref.syntax().text_range();
+		let start = usize::from(range.start());
+		let end = usize::from(range.end());
+
+		if skip_ranges.iter().any(|(skip_start, skip_end)| start < *skip_end && end > *skip_start) {
+			continue;
+		}
+
+		edits.push(Edit { start, end, replacement: replacement.clone(), rule: RULE_ID });
+	}
+
+	edits
 }
 
 fn is_meaningless_alias(path: &Path, aliases: &[AliasGenericParam]) -> bool {
@@ -78,6 +139,128 @@ fn is_meaningless_alias(path: &Path, aliases: &[AliasGenericParam]) -> bool {
 	}
 
 	true
+}
+
+fn type_alias_autofix_plan(
+	ctx: &FileContext,
+	type_alias: &TypeAlias,
+	rhs_path: &Path,
+	aliases: &[AliasGenericParam],
+) -> Option<TypeAliasRenameFix> {
+	if !is_meaningless_alias(rhs_path, aliases) {
+		return None;
+	}
+
+	// Only automatically rewrite public aliases, since replacing the name affects callers.
+	type_alias.visibility()?;
+
+	let alias_name = type_alias.name()?.text().to_string();
+	let mut rhs_segments = Vec::<PathSegment>::new();
+
+	if !collect_simple_path_segments(rhs_path, &mut rhs_segments) || rhs_segments.is_empty() {
+		return None;
+	}
+
+	let target_segment = rhs_segments.last()?;
+	let target_name = target_segment.name_ref()?.text().to_string();
+	let alias_start = usize::from(type_alias.syntax().text_range().start());
+	let alias_end = usize::from(type_alias.syntax().text_range().end());
+	let mut definition_edits = Vec::new();
+
+	if rhs_segments.len() >= 2 {
+		let rhs_text = rhs_path.syntax().text().to_string();
+
+		definition_edits.push(Edit {
+			start: alias_start,
+			end: alias_end,
+			replacement: format!("pub use {rhs_text};"),
+			rule: RULE_ID,
+		});
+	} else {
+		let (use_start, use_end, use_path, use_is_pub) =
+			find_simple_sibling_use_importing_ident(ctx, type_alias, target_name.as_str())?;
+
+		if use_is_pub {
+			// The target is already exported; remove the alias and rewrite callers.
+			definition_edits.push(Edit {
+				start: alias_start,
+				end: alias_end,
+				replacement: String::new(),
+				rule: RULE_ID,
+			});
+		} else {
+			definition_edits.push(Edit {
+				start: alias_start,
+				end: alias_end,
+				replacement: format!("pub use {use_path};"),
+				rule: RULE_ID,
+			});
+			definition_edits.push(Edit {
+				start: use_start,
+				end: use_end,
+				replacement: String::new(),
+				rule: RULE_ID,
+			});
+		}
+	}
+
+	Some(TypeAliasRenameFix { alias: alias_name, target: target_name, definition_edits })
+}
+
+fn simple_use_path_text(text: &str) -> Option<String> {
+	let text = text.trim();
+	let start = text.find("use")?;
+	let after = text.get(start + 3..)?;
+	let bytes = after.as_bytes();
+	let mut idx = 0_usize;
+
+	while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+		idx += 1;
+	}
+
+	let tail = after.get(idx..)?;
+	let semi = tail.find(';')?;
+	let use_path = tail[..semi].trim();
+
+	if use_path.is_empty()
+		|| use_path.contains('{')
+		|| use_path.contains('}')
+		|| use_path.contains('*')
+		|| use_path.contains(" as ")
+	{
+		return None;
+	}
+
+	Some(use_path.to_string())
+}
+
+fn find_simple_sibling_use_importing_ident(
+	ctx: &FileContext,
+	type_alias: &TypeAlias,
+	ident: &str,
+) -> Option<(usize, usize, String, bool)> {
+	let parent = type_alias.syntax().parent()?;
+
+	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
+		if use_item.syntax().parent() != Some(parent.clone()) {
+			continue;
+		}
+
+		let path_text = simple_use_path_text(&use_item.syntax().text().to_string())?;
+		let last = path_text.rsplit("::").next().unwrap_or(path_text.as_str()).trim();
+
+		if last != ident {
+			continue;
+		}
+
+		let start = usize::from(use_item.syntax().text_range().start());
+		let end = usize::from(use_item.syntax().text_range().end());
+		let is_pub = use_item.visibility().is_some();
+
+		return Some((start, end, path_text, is_pub));
+	}
+
+	None
 }
 
 fn generic_arg_matches_param(arg: &GenericArg, alias: &AliasGenericParam) -> bool {
@@ -130,6 +313,16 @@ fn alias_generic_keys(type_alias: &TypeAlias) -> Option<Vec<AliasGenericParam>> 
 	for param in generic_params.generic_params() {
 		match param {
 			GenericParam::TypeParam(type_param) => {
+				// A default generic parameter (for example `E = Error`) changes the alias API
+				// surface, so it is not considered a pure rename.
+				if type_param
+					.syntax()
+					.children_with_tokens()
+					.any(|token| token.kind() == SyntaxKind::EQ)
+				{
+					return None;
+				}
+
 				let name = type_param.name()?;
 
 				out.push(AliasGenericParam::Type(name.text().to_string()));

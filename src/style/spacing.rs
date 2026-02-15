@@ -741,9 +741,9 @@ fn consume_string_or_char_start(
 }
 
 fn strip_turbofish(text: &str) -> String {
+	let chars = text.chars().collect::<Vec<_>>();
 	let mut out = String::with_capacity(text.len());
 	let mut idx = 0;
-	let chars = text.chars().collect::<Vec<_>>();
 
 	while idx < chars.len() {
 		if idx + 2 < chars.len()

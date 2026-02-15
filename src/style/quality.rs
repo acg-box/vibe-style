@@ -535,10 +535,10 @@ fn report_expect_non_sentence_message(
 }
 
 fn split_top_level_args(args: &str) -> Vec<String> {
+	let chars = args.char_indices().collect::<Vec<_>>();
 	let mut parts = Vec::new();
 	let mut start = 0_usize;
 	let mut state = ArgSplitState::default();
-	let chars = args.char_indices().collect::<Vec<_>>();
 	let mut idx = 0_usize;
 
 	while idx < chars.len() {
