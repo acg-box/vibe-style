@@ -82,7 +82,6 @@ pub fn build_error() -> MyError {
 	assert!(!main_after.contains("type MyError"));
 	assert!(main_after.contains("pub use std::io::Error;"));
 	assert!(!main_after.contains("MyError"));
-
 	assert!(!user_after.contains("MyError"));
 	assert!(user_after.contains("crate::Error") || user_after.contains("use crate::Error;"));
 }
