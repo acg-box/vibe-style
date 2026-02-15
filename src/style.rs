@@ -9,6 +9,7 @@ mod quality;
 mod semantic;
 mod shared;
 mod spacing;
+mod test_modules;
 mod types;
 
 pub(crate) use shared::{CargoOptions, RunSummary};
@@ -327,6 +328,7 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	file::check_serde_option_default(ctx, &mut violations, &mut edits, with_fixes);
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
 	bindings::check_let_mut_reorder(ctx, &mut violations, &mut edits, with_fixes);
+	test_modules::check_test_module_super_glob(ctx, &mut edits, with_fixes);
 	imports::check_import_rules(ctx, &mut violations, &mut edits, with_fixes);
 	generics::check_unnecessary_turbofish(ctx, &mut violations, &mut edits, with_fixes);
 	generics::check_turbofish_canonicalization(ctx, &mut violations, &mut edits, with_fixes);
@@ -606,6 +608,7 @@ mod tests {
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-007"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-007"));
 
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
@@ -656,10 +659,8 @@ mod tests {
 			apply_fix_passes(Path::new("import007_super_glob_string_symbol.rs"), original, true)
 				.expect("apply fix passes");
 
-		assert!(rewritten.contains("use crate::{ChunkingConfig,load_tokenizer,split_text};"));
-		assert!(
-			!rewritten.contains("use crate::{ChunkingConfig,Tokenizer,load_tokenizer,split_text};")
-		);
+		assert!(!rewritten.contains("use super::*;"));
+		assert!(!rewritten.contains("use super::{"));
 	}
 
 	#[test]

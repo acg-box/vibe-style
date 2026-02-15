@@ -163,6 +163,47 @@ pub(crate) fn check_import_rules(
 	);
 }
 
+pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
+	let current_module = use_item.syntax().ancestors().find_map(Module::cast)?;
+	let current_module_item_list = current_module.item_list()?;
+	let current_module_name = current_module.name().map(|name| name.text().to_string());
+	let already_imported =
+		imported_symbols_from_current_module_use_items(&current_module, use_item);
+	let used_symbols = collect_used_symbols_from_syntax(current_module_item_list.syntax());
+	let mut symbols = BTreeSet::new();
+
+	if let Some(parent_module) = current_module.syntax().ancestors().skip(1).find_map(Module::cast)
+	{
+		if let Some(item_list) = parent_module.item_list() {
+			collect_scope_symbols_from_items(
+				item_list.syntax().children().filter_map(Item::cast),
+				&mut symbols,
+			);
+		}
+	} else if let Some(source_file) =
+		current_module.syntax().ancestors().find_map(ast::SourceFile::cast)
+	{
+		collect_scope_symbols_from_items(
+			source_file.syntax().children().filter_map(Item::cast),
+			&mut symbols,
+		);
+	}
+
+	if symbols.is_empty() {
+		return None;
+	}
+
+	let used = symbols
+		.into_iter()
+		.filter(|symbol| current_module_name.as_deref() != Some(symbol.as_str()))
+		.filter(|symbol| !matches!(symbol.as_str(), "tests" | "_test"))
+		.filter(|symbol| !already_imported.contains(symbol))
+		.filter(|symbol| used_symbols.contains(symbol))
+		.collect::<BTreeSet<_>>();
+
+	Some(used)
+}
+
 fn apply_import010_no_super_use_rule(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -572,47 +613,6 @@ fn crate_absolute_use_path(parent_segments: &[String], tail: &str) -> String {
 	}
 
 	path
-}
-
-fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
-	let current_module = use_item.syntax().ancestors().find_map(Module::cast)?;
-	let current_module_item_list = current_module.item_list()?;
-	let current_module_name = current_module.name().map(|name| name.text().to_string());
-	let already_imported =
-		imported_symbols_from_current_module_use_items(&current_module, use_item);
-	let used_symbols = collect_used_symbols_from_syntax(current_module_item_list.syntax());
-	let mut symbols = BTreeSet::new();
-
-	if let Some(parent_module) = current_module.syntax().ancestors().skip(1).find_map(Module::cast)
-	{
-		if let Some(item_list) = parent_module.item_list() {
-			collect_scope_symbols_from_items(
-				item_list.syntax().children().filter_map(Item::cast),
-				&mut symbols,
-			);
-		}
-	} else if let Some(source_file) =
-		current_module.syntax().ancestors().find_map(ast::SourceFile::cast)
-	{
-		collect_scope_symbols_from_items(
-			source_file.syntax().children().filter_map(Item::cast),
-			&mut symbols,
-		);
-	}
-
-	if symbols.is_empty() {
-		return None;
-	}
-
-	let used = symbols
-		.into_iter()
-		.filter(|symbol| current_module_name.as_deref() != Some(symbol.as_str()))
-		.filter(|symbol| !matches!(symbol.as_str(), "tests" | "_test"))
-		.filter(|symbol| !already_imported.contains(symbol))
-		.filter(|symbol| used_symbols.contains(symbol))
-		.collect::<BTreeSet<_>>();
-
-	if used.is_empty() { None } else { Some(used) }
 }
 
 fn imported_symbols_from_current_module_use_items(

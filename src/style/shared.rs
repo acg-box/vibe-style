@@ -14,11 +14,12 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-pub(crate) const STYLE_RULE_IDS: [&str; 32] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 33] = [
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
 	"RUST-STYLE-MOD-003",
 	"RUST-STYLE-MOD-005",
+	"RUST-STYLE-MOD-007",
 	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-SERDE-001",
 	"RUST-STYLE-IMPORT-001",
