@@ -89,6 +89,9 @@ pub(crate) fn check_import_rules(
 	emit_edits: bool,
 ) {
 	let use_runs = collect_non_pub_use_runs(ctx);
+
+	apply_pub_use_same_root_spacing_rule(ctx, violations, edits, emit_edits);
+
 	let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
 	let import010_fixed_lines =
 		apply_import010_no_super_use_rule(ctx, violations, edits, emit_edits, &use_items);
@@ -3954,6 +3957,97 @@ fn collect_non_pub_use_runs(ctx: &FileContext) -> Vec<Vec<&TopItem>> {
 	}
 
 	runs
+}
+
+fn collect_pub_use_runs(ctx: &FileContext) -> Vec<Vec<&TopItem>> {
+	let mut runs = Vec::new();
+	let mut current = Vec::new();
+
+	for item in &ctx.top_items {
+		if item.kind == TopKind::Use && item.is_pub {
+			current.push(item);
+
+			continue;
+		}
+		if !current.is_empty() {
+			runs.push(std::mem::take(&mut current));
+		}
+	}
+
+	if !current.is_empty() {
+		runs.push(current);
+	}
+
+	runs
+}
+
+fn apply_pub_use_same_root_spacing_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	let pub_use_runs = collect_pub_use_runs(ctx);
+
+	for run in pub_use_runs {
+		for pair in run.windows(2) {
+			let prev = pair[0];
+			let curr = pair[1];
+			let between = separator_lines(ctx, prev, curr);
+
+			if between.is_empty() || !between.iter().all(|line| line.trim().is_empty()) {
+				continue;
+			}
+
+			let Some(prev_path) = extract_use_path(ctx, prev) else {
+				continue;
+			};
+			let Some(curr_path) = extract_use_path(ctx, curr) else {
+				continue;
+			};
+			let prev_root =
+				prev_path.split_once("::").map(|(root, _)| root).unwrap_or(prev_path.as_str());
+			let curr_root =
+				curr_path.split_once("::").map(|(root, _)| root).unwrap_or(curr_path.as_str());
+
+			if prev_root != curr_root {
+				continue;
+			}
+
+			shared::push_violation(
+				violations,
+				ctx,
+				curr.line,
+				"RUST-STYLE-IMPORT-002",
+				"Do not place blank lines inside a pub use group.",
+				true,
+			);
+
+			if !emit_edits {
+				continue;
+			}
+
+			let Some((prev_start, prev_end)) = item_text_range(ctx, prev) else {
+				continue;
+			};
+			let Some((curr_start, _curr_end)) = item_text_range(ctx, curr) else {
+				continue;
+			};
+
+			if curr_start <= prev_end || prev_start >= prev_end {
+				continue;
+			}
+
+			// `item_text_range` ends at the start of the line following the item, so removing the
+			// in-between range collapses multiple blank lines into a single newline separator.
+			edits.push(Edit {
+				start: prev_end,
+				end: curr_start,
+				replacement: String::new(),
+				rule: "RUST-STYLE-IMPORT-002",
+			});
+		}
+	}
 }
 
 fn separator_lines<'a>(ctx: &'a FileContext, prev: &TopItem, curr: &TopItem) -> &'a [String] {

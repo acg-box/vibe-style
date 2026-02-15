@@ -1142,6 +1142,40 @@ use crate::z::Z;
 	}
 
 	#[test]
+	fn pub_use_group_fix_removes_blank_lines_for_same_root() {
+		let original = r#"
+pub use tokenizers::Tokenizer;
+
+pub use tokenizers::Error;
+
+use unicode_segmentation::UnicodeSegmentation;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("pub_use_group_fix.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-002" && v.fixable));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert_eq!(
+			rewritten,
+			r#"
+pub use tokenizers::Tokenizer;
+pub use tokenizers::Error;
+
+use unicode_segmentation::UnicodeSegmentation;
+"#
+		);
+	}
+
+	#[test]
 	fn import_group_fix_does_not_rewrite_unknown_separator_comments() {
 		let original = r#"
 use crate::z::Z;
