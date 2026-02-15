@@ -2746,6 +2746,29 @@ fn sample() {
 	}
 
 	#[test]
+	fn space003_does_not_split_method_chain_after_struct_literal() {
+		let text = r#"
+fn sample() {
+	let retry = Backoff {
+		start_ms: args.retry_backoff_ms,
+		cap_ms: args.retry_backoff_ms.saturating_mul(20).max(args.retry_backoff_ms),
+		factor: 2,
+		jitter_ratio: 0.2,
+	}
+	.retry_policy(args.retry_max);
+}
+"#;
+		let ctx = shared::read_file_context_from_text(Path::new("space_chain.rs"), text.to_owned())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
+			&& v.message == "Insert exactly one blank line between different statement types."));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SPACE-003"));
+	}
+
+	#[test]
 	fn space003_fix_preserves_attributes_and_removes_only_blank_lines() {
 		let original = r#"
 fn sample() {

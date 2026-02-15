@@ -957,6 +957,30 @@ fn extract_top_level_statements(
 	fn_start: usize,
 	fn_end: usize,
 ) -> Vec<(usize, usize, String)> {
+	fn next_significant_line_starts_with_dot(
+		lines: &[String],
+		mut mask_state: CodeMaskState,
+		from_idx: usize,
+		fn_end: usize,
+	) -> bool {
+		for line in lines.iter().take(fn_end).skip(from_idx + 1) {
+			let code = mask_code_line(line, &mut mask_state);
+			let stripped = code.trim();
+
+			if stripped.is_empty() {
+				continue;
+			}
+			// Attributes apply to the next statement. Treat them as a hard boundary.
+			if stripped.starts_with('#') {
+				return false;
+			}
+
+			return stripped.starts_with('.');
+		}
+
+		false
+	}
+
 	let mut statements = Vec::new();
 	let mut brace_depth = 1_i32;
 	let mut paren_depth = 0_i32;
@@ -999,7 +1023,9 @@ fn extract_top_level_statements(
 			&& paren_depth == 0
 			&& bracket_depth == 0
 			&& !stripped_code.is_empty()
-			&& (stripped_code.ends_with(';') || stripped_code.ends_with('}'));
+			&& (stripped_code.ends_with(';')
+				|| (stripped_code.ends_with('}')
+					&& !next_significant_line_starts_with_dot(lines, mask_state, idx, fn_end)));
 
 		if statement_closed {
 			let span_lines = lines[current_start_value..=idx].to_vec();
