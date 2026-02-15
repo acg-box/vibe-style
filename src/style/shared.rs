@@ -14,7 +14,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-pub(crate) const STYLE_RULE_IDS: [&str; 30] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 31] = [
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
 	"RUST-STYLE-MOD-003",
@@ -34,6 +34,7 @@ pub(crate) const STYLE_RULE_IDS: [&str; 30] = [
 	"RUST-STYLE-IMPL-003",
 	"RUST-STYLE-GENERICS-001",
 	"RUST-STYLE-GENERICS-002",
+	"RUST-STYLE-GENERICS-003",
 	"RUST-STYLE-TYPE-001",
 	"RUST-STYLE-LOG-002",
 	"RUST-STYLE-RUNTIME-001",

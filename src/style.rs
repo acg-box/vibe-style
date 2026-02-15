@@ -288,6 +288,7 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
 	imports::check_import_rules(ctx, &mut violations, &mut edits, with_fixes);
 	generics::check_unnecessary_turbofish(ctx, &mut violations, &mut edits, with_fixes);
+	generics::check_turbofish_canonicalization(ctx, &mut violations, &mut edits, with_fixes);
 	types::check_type_alias_renames(ctx, &mut violations);
 	module::check_module_order(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_impl_adjacency(ctx, &mut violations, &mut edits, with_fixes);
@@ -3283,5 +3284,110 @@ fn sample(iter: impl Iterator<Item = u8>) {
 		let (violations, _edits) = collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-002"));
+	}
+
+	#[test]
+	fn generics003_fixes_canonical_constructor_turbofish() {
+		let original = r#"
+fn sample() {
+	let _ = <Vec<u8>>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics003_vec_constructor.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let matches =
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-003").collect::<Vec<_>>();
+
+		assert_eq!(matches.len(), 1);
+		assert!(matches.iter().all(|v| v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-003"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert_eq!(
+			rewritten,
+			r#"
+fn sample() {
+	let _ = Vec::<u8>::new();
+}
+"#
+		);
+	}
+
+	#[test]
+	fn generics003_fixes_canonical_collection_turbofish() {
+		let original = r#"
+fn sample() {
+	let _ = <std::collections::HashMap<u8, u8>>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics003_hashmap_constructor.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let matches =
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-003").collect::<Vec<_>>();
+
+		assert_eq!(matches.len(), 1);
+		assert!(matches.iter().all(|v| v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-003"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(rewritten.contains("let _ = std::collections::HashMap::<u8, u8>::new();"));
+	}
+
+	#[test]
+	fn generics003_skips_disambiguated_trait_path() {
+		let original = r#"
+trait Trait {
+	type Assoc;
+}
+
+fn sample() {
+	let _ = <T as Trait>::Assoc;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics003_disambiguated_skip.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-003"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-003"));
+	}
+
+	#[test]
+	fn generics003_skips_non_path_type_anchor() {
+		let original = r#"
+fn sample() {
+	let _ = <(u8, u8)>::something;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics003_non_path_anchor_skip.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-003"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-003"));
 	}
 }

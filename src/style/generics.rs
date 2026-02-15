@@ -2,14 +2,16 @@ use ra_ap_syntax::{
 	AstNode,
 	ast::{
 		self, Expr, GenericArgList, HasGenericArgs, LetStmt, MethodCallExpr, Path, PathExpr,
-		PathSegment, Type,
+		PathSegment, Type, TypeAnchor,
 	},
 };
 
 use crate::style::shared::{self, Edit, FileContext, Violation};
 
-const RULE_ID: &str = "RUST-STYLE-GENERICS-002";
+const RULE_ID_UNNECESSARY_TURBOFISH: &str = "RUST-STYLE-GENERICS-002";
+const RULE_ID_TURBOFISH_CANONICAL: &str = "RUST-STYLE-GENERICS-003";
 const MESSAGE: &str = "Remove unnecessary turbofish; type is already explicit in the let binding.";
+const CANONICAL_MESSAGE: &str = "Canonicalize turbofish path to `Type::<Args>::Assoc` form.";
 
 #[derive(Debug)]
 struct ExplicitTypeInfo {
@@ -41,7 +43,9 @@ pub(crate) fn check_unnecessary_turbofish(
 			ast::Expr::MethodCallExpr(method_call) => {
 				if let Some(range) = method_call_turbofish_range(&method_call, &explicit_type_text)
 				{
-					push_fixable_violation(ctx, violations, edits, emit_edits, range, let_line);
+					push_unnecessary_turbofish_violation(
+						ctx, violations, edits, emit_edits, range, let_line,
+					);
 				}
 			},
 			ast::Expr::CallExpr(call_expr) => {
@@ -56,7 +60,9 @@ pub(crate) fn check_unnecessary_turbofish(
 				};
 
 				if let Some(range) = associated_turbofish_range(&path_expr, &type_info) {
-					push_fixable_violation(ctx, violations, edits, emit_edits, range, let_line);
+					push_unnecessary_turbofish_violation(
+						ctx, violations, edits, emit_edits, range, let_line,
+					);
 				}
 			},
 			_ => {},
@@ -64,7 +70,71 @@ pub(crate) fn check_unnecessary_turbofish(
 	}
 }
 
-fn push_fixable_violation(
+pub(crate) fn check_turbofish_canonicalization(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	for path_expr in ctx.source_file.syntax().descendants().filter_map(PathExpr::cast) {
+		let Some(path) = path_expr.path() else {
+			continue;
+		};
+
+		for segment in path.syntax().descendants().filter_map(PathSegment::cast) {
+			let Some(type_anchor) = segment.type_anchor() else {
+				continue;
+			};
+
+			if type_anchor.as_token().is_some() {
+				continue;
+			}
+
+			let Some(canonical_type) = canonicalize_type_anchor(&type_anchor) else {
+				continue;
+			};
+			let Some(l_angle_token) = type_anchor.l_angle_token() else {
+				continue;
+			};
+			let Some(r_angle_token) = type_anchor.r_angle_token() else {
+				continue;
+			};
+			let start = usize::from(l_angle_token.text_range().start());
+			let end_offset = usize::from(r_angle_token.text_range().end());
+			let suffix = ctx.text.get(end_offset..).unwrap_or("");
+
+			if !suffix.starts_with("::") {
+				continue;
+			}
+
+			let end = end_offset.saturating_add(2);
+			let line = shared::line_from_offset(&ctx.line_starts, start);
+
+			shared::push_violation(
+				violations,
+				ctx,
+				line,
+				RULE_ID_TURBOFISH_CANONICAL,
+				CANONICAL_MESSAGE,
+				true,
+			);
+
+			if !emit_edits {
+				continue;
+			}
+			if end > start {
+				edits.push(Edit {
+					start,
+					end,
+					replacement: format!("{canonical_type}::"),
+					rule: RULE_ID_TURBOFISH_CANONICAL,
+				});
+			}
+		}
+	}
+}
+
+fn push_unnecessary_turbofish_violation(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
@@ -72,7 +142,7 @@ fn push_fixable_violation(
 	range: (usize, usize),
 	line: usize,
 ) {
-	shared::push_violation(violations, ctx, line, RULE_ID, MESSAGE, true);
+	shared::push_violation(violations, ctx, line, RULE_ID_UNNECESSARY_TURBOFISH, MESSAGE, true);
 
 	if !emit_edits {
 		return;
@@ -81,7 +151,12 @@ fn push_fixable_violation(
 	let (start, end) = range;
 
 	if end > start {
-		edits.push(Edit { start, end, replacement: String::new(), rule: RULE_ID });
+		edits.push(Edit {
+			start,
+			end,
+			replacement: String::new(),
+			rule: RULE_ID_UNNECESSARY_TURBOFISH,
+		});
 	}
 }
 
@@ -216,6 +291,52 @@ fn collect_simple_path_segments(path: &Path, out: &mut Vec<PathSegment>) -> bool
 	out.push(segment);
 
 	true
+}
+
+fn canonicalize_type_anchor(type_anchor: &TypeAnchor) -> Option<String> {
+	let anchor_type = type_anchor.ty()?;
+	let ast::Type::PathType(path_type) = anchor_type else {
+		return None;
+	};
+	let path = path_type.path()?;
+	let mut segments = Vec::<PathSegment>::new();
+
+	if !collect_simple_path_segments(&path, &mut segments) {
+		return None;
+	}
+
+	let mut generic_segments = Vec::<usize>::new();
+
+	for (idx, segment) in segments.iter().enumerate() {
+		if segment.generic_arg_list().is_some() {
+			generic_segments.push(idx);
+		}
+	}
+
+	if generic_segments.len() != 1 {
+		return None;
+	}
+
+	let owner_idx = generic_segments[0];
+	let mut rebuilt = String::new();
+
+	for (idx, segment) in segments.iter().enumerate() {
+		if idx > 0 {
+			rebuilt.push_str("::");
+		}
+		if idx == owner_idx {
+			let name = segment.name_ref()?;
+			let generic_args = segment.generic_arg_list()?;
+
+			rebuilt.push_str(name.text().as_ref());
+			rebuilt.push_str("::");
+			rebuilt.push_str(&generic_args.syntax().text().to_string());
+		} else {
+			rebuilt.push_str(&segment.syntax().text().to_string());
+		}
+	}
+
+	Some(rebuilt)
 }
 
 fn strip_whitespace(value: &str) -> String {
