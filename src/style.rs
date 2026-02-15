@@ -1,5 +1,6 @@
 mod file;
 mod fixes;
+mod generics;
 mod impls;
 mod imports;
 mod module;
@@ -286,6 +287,7 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	file::check_serde_option_default(ctx, &mut violations, &mut edits, with_fixes);
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
 	imports::check_import_rules(ctx, &mut violations, &mut edits, with_fixes);
+	generics::check_unnecessary_turbofish(ctx, &mut violations, &mut edits, with_fixes);
 	types::check_type_alias_renames(ctx, &mut violations);
 	module::check_module_order(ctx, &mut violations, &mut edits, with_fixes);
 	impls::check_impl_adjacency(ctx, &mut violations, &mut edits, with_fixes);
@@ -3167,5 +3169,119 @@ type Span = (usize, usize);
 		let (violations, _edits) = collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001"));
+	}
+
+	#[test]
+	fn generics002_fixes_typed_collect_turbofish() {
+		let original = r#"
+fn sample() {
+	let values = vec![0_u8, 1];
+	let iter = values.into_iter();
+	let v: Vec<u8> = iter.collect::<Vec<u8>>();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics002_collect.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let matches =
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-002").collect::<Vec<_>>();
+
+		assert_eq!(matches.len(), 1);
+		assert!(matches.iter().all(|v| v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-002"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert_eq!(
+			rewritten,
+			r#"
+fn sample() {
+	let values = vec![0_u8, 1];
+	let iter = values.into_iter();
+	let v: Vec<u8> = iter.collect();
+}
+"#
+		);
+	}
+
+	#[test]
+	fn generics002_fixes_typed_constructor_turbofish() {
+		let original = r#"
+use std::collections::HashMap;
+
+fn sample() {
+	let m: HashMap<u8, u8> = HashMap::<u8, u8>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics002_constructor.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let matches =
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-002").collect::<Vec<_>>();
+
+		assert_eq!(matches.len(), 1);
+		assert!(matches.iter().all(|v| v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-002"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert_eq!(
+			rewritten,
+			r#"
+use std::collections::HashMap;
+
+fn sample() {
+	let m: HashMap<u8, u8> = HashMap::new();
+}
+"#
+		);
+	}
+
+	#[test]
+	fn generics002_skips_untyped_collect_turbofish() {
+		let original = r#"
+fn sample(iter: impl Iterator<Item = Vec<u8>>) {
+	let v = iter.collect::<Vec<u8>>();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics002_untyped_skip.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-002"));
+	}
+
+	#[test]
+	fn generics002_skips_inferred_collect_wildcard() {
+		let original = r#"
+fn sample(iter: impl Iterator<Item = u8>) {
+	let v: Vec<u8> = iter.collect::<Vec<_>>();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("generics002_wildcard_skip.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-002"));
 	}
 }
