@@ -301,5 +301,6 @@ fn allows_literal_overlap(rule: &str) -> bool {
 			| "RUST-STYLE-MOD-005"
 			| "RUST-STYLE-SERDE-001"
 			| "RUST-STYLE-RUNTIME-002"
+			| "RUST-STYLE-LET-001"
 	)
 }

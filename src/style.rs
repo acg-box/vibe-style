@@ -1,3 +1,4 @@
+mod bindings;
 mod file;
 mod fixes;
 mod generics;
@@ -34,6 +35,7 @@ struct FileFixOutcome {
 	rewritten_text: Option<String>,
 	fallback_without_import_shortening: Option<String>,
 	had_import_shortening_edits: bool,
+	had_let_mut_reorder_edits: bool,
 	applied_count: usize,
 }
 
@@ -87,6 +89,7 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
 	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
+	let mut let_mut_reorder_files: BTreeMap<PathBuf, ()> = BTreeMap::new();
 
 	for outcome in outcomes_all {
 		if let Some(text) = outcome.rewritten_text {
@@ -100,7 +103,16 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 		if outcome.had_import_shortening_edits
 			&& let Some(fallback) = outcome.fallback_without_import_shortening
 		{
-			import_fallbacks.insert(normalize_path(&outcome.path), (outcome.path, fallback));
+			let normalized = normalize_path(&outcome.path);
+
+			import_fallbacks.insert(normalized.clone(), (outcome.path.clone(), fallback));
+
+			if outcome.had_let_mut_reorder_edits {
+				let_mut_reorder_files.insert(normalized, ());
+			}
+		}
+		if outcome.had_let_mut_reorder_edits && !outcome.had_import_shortening_edits {
+			let_mut_reorder_files.insert(normalize_path(&outcome.path), ());
 		}
 	}
 
@@ -113,6 +125,21 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 
 		for normalized in post_error_files.difference(&baseline_error_files) {
 			if let Some((path, fallback)) = import_fallbacks.get(normalized) {
+				if let Some((_, original_text)) = changed_originals.get(normalized)
+					&& let_mut_reorder_files.contains_key(normalized)
+				{
+					fs::write(path, original_text)?;
+
+					handled.insert(normalized.clone(), ());
+
+					eprintln!(
+						"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
+						path.display()
+					);
+
+					continue;
+				}
+
 				fs::write(path, fallback)?;
 
 				handled.insert(normalized.clone(), ());
@@ -125,6 +152,13 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 
 			if let Some((path, original_text)) = changed_originals.get(normalized) {
 				fs::write(path, original_text)?;
+
+				if let_mut_reorder_files.contains_key(normalized) {
+					eprintln!(
+						"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
+						path.display()
+					);
+				}
 			}
 		}
 	}
@@ -166,14 +200,15 @@ fn collect_fix_outcomes(files: &[PathBuf]) -> Result<Vec<FileFixOutcome>> {
 							rewritten_text: None,
 							fallback_without_import_shortening: None,
 							had_import_shortening_edits: false,
+							had_let_mut_reorder_edits: false,
 							applied_count: 0,
 						});
 					},
 				};
-				let (text, applied_count, had_import_shortening_edits) =
+				let (text, applied_count, had_import_shortening_edits, had_let_mut_reorder_edits) =
 					apply_fix_passes(file, &original_text, true)?;
 				let fallback_without_import_shortening = if had_import_shortening_edits {
-					let (fallback, _fallback_applied, _fallback_import_edits) =
+					let (fallback, _fallback_applied, _fallback_import_edits, _) =
 						apply_fix_passes(file, &original_text, false)?;
 
 					(text != fallback).then_some(fallback)
@@ -187,6 +222,7 @@ fn collect_fix_outcomes(files: &[PathBuf]) -> Result<Vec<FileFixOutcome>> {
 					rewritten_text: if applied_count > 0 { Some(text) } else { None },
 					fallback_without_import_shortening,
 					had_import_shortening_edits,
+					had_let_mut_reorder_edits,
 					applied_count,
 				})
 			})
@@ -231,11 +267,12 @@ fn apply_fix_passes(
 	path: &Path,
 	initial_text: &str,
 	with_import_shortening: bool,
-) -> Result<(String, usize, bool)> {
+) -> Result<(String, usize, bool, bool)> {
 	let mut text = initial_text.to_owned();
 	let mut pass = 0_usize;
 	let mut applied_count = 0_usize;
 	let mut had_import_shortening_edits = false;
+	let mut had_let_mut_reorder_edits = false;
 
 	while pass < MAX_FIX_PASSES {
 		pass += 1;
@@ -252,6 +289,9 @@ fn apply_fix_passes(
 		} else {
 			edits.retain(|edit| !is_import_shortening_rule(edit.rule));
 		}
+		if edits.iter().any(|edit| edit.rule == "RUST-STYLE-LET-001") {
+			had_let_mut_reorder_edits = true;
+		}
 		if edits.is_empty() {
 			break;
 		}
@@ -265,7 +305,7 @@ fn apply_fix_passes(
 		applied_count += applied;
 	}
 
-	Ok((text, applied_count, had_import_shortening_edits))
+	Ok((text, applied_count, had_import_shortening_edits, had_let_mut_reorder_edits))
 }
 
 fn is_import_shortening_rule(rule: &str) -> bool {
@@ -286,6 +326,7 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	file::check_mod_rs(ctx, &mut violations);
 	file::check_serde_option_default(ctx, &mut violations, &mut edits, with_fixes);
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
+	bindings::check_let_mut_reorder(ctx, &mut violations, &mut edits, with_fixes);
 	imports::check_import_rules(ctx, &mut violations, &mut edits, with_fixes);
 	generics::check_unnecessary_turbofish(ctx, &mut violations, &mut edits, with_fixes);
 	generics::check_turbofish_canonicalization(ctx, &mut violations, &mut edits, with_fixes);
@@ -611,7 +652,7 @@ mod tests {
 		.expect("context")
 		.expect("has ctx");
 		let (_violations, _edits) = collect_violations(&ctx, true);
-		let (rewritten, _applied_count, _had_import_shortening_edits) =
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
 			apply_fix_passes(Path::new("import007_super_glob_string_symbol.rs"), original, true)
 				.expect("apply fix passes");
 
@@ -2148,12 +2189,13 @@ fn run_ops() {
 	crate::structured_fields::upsert_structured_fields_tx();
 }
 "#;
-		let (rewritten, _applied_count, _had_import_shortening_edits) = apply_fix_passes(
-			Path::new("import009_remove_redundant_same_path_import.rs"),
-			original,
-			true,
-		)
-		.expect("apply fix passes");
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_remove_redundant_same_path_import.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(!rewritten.contains("upsert_structured_fields_tx,"));
 		assert!(!rewritten.contains("use crate::structured_fields::upsert_structured_fields_tx"));
@@ -2174,12 +2216,13 @@ fn run_ops() {
 	validate_structured_fields();
 }
 "#;
-		let (rewritten, _applied_count, _had_import_shortening_edits) = apply_fix_passes(
-			Path::new("import004_remove_multiple_free_functions.rs"),
-			original,
-			true,
-		)
-		.expect("apply fix passes");
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import004_remove_multiple_free_functions.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(rewritten.contains("crate::structured_fields::upsert_structured_fields_tx();"));
 		assert!(rewritten.contains("crate::structured_fields::validate_structured_fields();"));
