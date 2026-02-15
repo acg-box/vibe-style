@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
 	ast::{self, BlockExpr, HasName, LetStmt, Path},
@@ -127,6 +129,75 @@ fn let_stmt_references_unqualified_ident(let_stmt: &LetStmt, name: &str) -> bool
 		.any(|token| token.parent_ancestors().any(|node| node.kind() == SyntaxKind::TOKEN_TREE))
 }
 
+fn let_stmt_borrowed_unqualified_idents(let_stmt: &LetStmt) -> BTreeSet<String> {
+	let mut out = BTreeSet::<String>::new();
+
+	for ref_expr in let_stmt.syntax().descendants().filter_map(ast::RefExpr::cast) {
+		let Some(ast::Expr::PathExpr(path_expr)) = ref_expr.expr() else {
+			continue;
+		};
+		let Some(path) = path_expr.path() else {
+			continue;
+		};
+
+		if path.qualifier().is_some() {
+			continue;
+		}
+
+		let Some(segment) = path.segment() else {
+			continue;
+		};
+		let Some(name_ref) = segment.name_ref() else {
+			continue;
+		};
+
+		out.insert(name_ref.text().to_string());
+	}
+
+	out
+}
+
+fn let_stmt_by_value_unqualified_idents(let_stmt: &LetStmt) -> BTreeSet<String> {
+	let mut out = BTreeSet::<String>::new();
+
+	for path_expr in let_stmt.syntax().descendants().filter_map(ast::PathExpr::cast) {
+		let Some(path) = path_expr.path() else {
+			continue;
+		};
+
+		if path.qualifier().is_some() {
+			continue;
+		}
+
+		let Some(segment) = path.segment() else {
+			continue;
+		};
+		let Some(name_ref) = segment.name_ref() else {
+			continue;
+		};
+
+		out.insert(name_ref.text().to_string());
+	}
+	// Remove idents that are explicitly borrowed via `&ident` or `&mut ident`.
+	for borrowed in let_stmt_borrowed_unqualified_idents(let_stmt) {
+		out.remove(&borrowed);
+	}
+	// If a name is only mentioned inside a macro token tree, treat it as a by-value use since we
+	// cannot reliably model borrow/move semantics there.
+	for token in let_stmt
+		.syntax()
+		.descendants_with_tokens()
+		.filter_map(|element| element.into_token())
+		.filter(|token| token.kind() == SyntaxKind::IDENT)
+	{
+		if token.parent_ancestors().any(|node| node.kind() == SyntaxKind::TOKEN_TREE) {
+			out.insert(token.text().to_string());
+		}
+	}
+
+	out
+}
+
 fn run_is_reorderable_without_binding_errors(run: &[LetStmtInfo]) -> bool {
 	if run.len() <= 1 {
 		return false;
@@ -134,6 +205,8 @@ fn run_is_reorderable_without_binding_errors(run: &[LetStmtInfo]) -> bool {
 
 	let mut seen_mut = false;
 	let mut mut_bindings: Vec<String> = Vec::new();
+	let mut mut_borrowed_idents = BTreeSet::<String>::new();
+	let mut mut_by_value_idents = BTreeSet::<String>::new();
 
 	for stmt in run {
 		if stmt.is_mut {
@@ -141,6 +214,17 @@ fn run_is_reorderable_without_binding_errors(run: &[LetStmtInfo]) -> bool {
 
 			if let Some(name) = let_stmt_mut_ident_name(&stmt.stmt) {
 				mut_bindings.push(name);
+			}
+
+			for borrowed in let_stmt_borrowed_unqualified_idents(&stmt.stmt) {
+				if borrowed != "self" {
+					mut_borrowed_idents.insert(borrowed);
+				}
+			}
+			for by_value in let_stmt_by_value_unqualified_idents(&stmt.stmt) {
+				if by_value != "self" {
+					mut_by_value_idents.insert(by_value);
+				}
 			}
 
 			continue;
@@ -151,6 +235,19 @@ fn run_is_reorderable_without_binding_errors(run: &[LetStmtInfo]) -> bool {
 		// If an immutable let depends on a previous `let mut`, reordering would either produce
 		// an unbound identifier or change bindings in ways the tool cannot safely validate.
 		if mut_bindings.iter().any(|name| let_stmt_references_unqualified_ident(&stmt.stmt, name)) {
+			return false;
+		}
+
+		let borrowed = let_stmt_borrowed_unqualified_idents(&stmt.stmt);
+		let by_value = let_stmt_by_value_unqualified_idents(&stmt.stmt);
+
+		// If a previous mutable binding borrows some name (e.g. `&scored`) and a later immutable
+		// binding uses that same name by value (e.g. `consume(scored)`), swapping the two lets can
+		// change move/borrow ordering and fail to compile.
+		if by_value.iter().any(|name| name != "self" && mut_borrowed_idents.contains(name)) {
+			return false;
+		}
+		if borrowed.iter().any(|name| name != "self" && mut_by_value_idents.contains(name)) {
 			return false;
 		}
 	}
@@ -293,6 +390,43 @@ fn demo(opt: Option<u8>) -> usize {
 		assert!(
 			!violations.iter().any(|v| v.rule == super::RULE_ID),
 			"did not expect {} violation for let-else dependency case",
+			super::RULE_ID
+		);
+		assert!(edits.iter().all(|e| e.rule != super::RULE_ID));
+	}
+
+	#[test]
+	fn move_after_borrow_dependency_is_treated_as_compliant() {
+		let text = r#"
+fn consume(v: Vec<u8>) -> Vec<u8> {
+	v
+}
+
+fn borrow_len(v: &Vec<u8>) -> usize {
+	v.len()
+}
+
+fn demo(scored: Vec<u8>) -> usize {
+	let mut trace_len = borrow_len(&scored);
+	let results = consume(scored);
+
+	trace_len += results.len();
+
+	trace_len
+}
+"#;
+		let ctx =
+			shared::read_file_context_from_text(Path::new("move_after_borrow.rs"), text.to_owned())
+				.expect("context")
+				.expect("has ctx");
+		let mut violations = Vec::new();
+		let mut edits = Vec::new();
+
+		bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, true);
+
+		assert!(
+			!violations.iter().any(|v| v.rule == super::RULE_ID),
+			"did not expect {} violation for borrow/move dependency case",
 			super::RULE_ID
 		);
 		assert!(edits.iter().all(|e| e.rule != super::RULE_ID));
