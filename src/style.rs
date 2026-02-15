@@ -28,6 +28,7 @@ use shared::{Edit, FileContext, Violation};
 
 const FILE_BATCH_SIZE: usize = 64;
 const MAX_FIX_PASSES: usize = 8;
+const MAX_TUNE_ROUNDS: usize = 4;
 
 #[derive(Debug)]
 struct FileFixOutcome {
@@ -99,13 +100,81 @@ pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
 pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<RunSummary> {
 	semantic::reset_cache_stats();
 
-	let files = shared::resolve_files(cargo_options)?;
-	let type_alias_plan = collect_type_alias_rename_plan(&files)?;
-	let outcomes_all = collect_fix_outcomes(&files, &type_alias_plan)?;
+	let mut total_applied = 0_usize;
+	let mut checked = run_check(cargo_options)?;
+	let mut previous_fixable_count =
+		checked.violation_count.saturating_sub(checked.unfixable_count);
+	let mut non_decreasing_rounds = 0_usize;
+
+	for _ in 0..MAX_TUNE_ROUNDS {
+		let files = shared::resolve_files(cargo_options)?;
+		let applied_this_round = run_fix_round(&files, cargo_options, verbose)?;
+
+		total_applied += applied_this_round;
+		checked = run_check(cargo_options)?;
+
+		let fixable_count = checked.violation_count.saturating_sub(checked.unfixable_count);
+		let (should_stop, next_non_decreasing_rounds) = should_stop_tune_round(
+			applied_this_round,
+			fixable_count,
+			previous_fixable_count,
+			non_decreasing_rounds,
+		);
+
+		if should_stop {
+			break;
+		}
+
+		non_decreasing_rounds = next_non_decreasing_rounds;
+		previous_fixable_count = fixable_count;
+	}
+
+	Ok(RunSummary {
+		file_count: checked.file_count,
+		violation_count: checked.violation_count,
+		unfixable_count: checked.unfixable_count,
+		applied_fix_count: total_applied,
+		output_lines: checked.output_lines,
+	})
+}
+
+pub(crate) fn semantic_cache_stats() -> SemanticCacheStats {
+	semantic::cache_stats()
+}
+
+pub(crate) fn print_coverage() {
+	for rule in shared::STYLE_RULE_IDS {
+		println!("{rule}\timplemented");
+	}
+}
+
+fn should_stop_tune_round(
+	applied_this_round: usize,
+	fixable_count: usize,
+	previous_fixable_count: usize,
+	non_decreasing_rounds: usize,
+) -> (bool, usize) {
+	if applied_this_round == 0 || fixable_count == 0 {
+		return (true, non_decreasing_rounds);
+	}
+
+	let next_non_decreasing_rounds =
+		if fixable_count < previous_fixable_count { 0 } else { non_decreasing_rounds + 1 };
+
+	if next_non_decreasing_rounds >= 2 {
+		return (true, next_non_decreasing_rounds);
+	}
+
+	(false, next_non_decreasing_rounds)
+}
+
+fn run_fix_round(files: &[PathBuf], cargo_options: &CargoOptions, verbose: bool) -> Result<usize> {
+	let type_alias_plan = collect_type_alias_rename_plan(files)?;
+	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan)?;
 	let changed_files = changed_file_paths(&outcomes_all);
 	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
 	let baseline_error_files =
-		semantic::collect_compiler_error_files(&files, &semantic_cargo_options, verbose)?;
+		semantic::collect_compiler_error_files(files, &semantic_cargo_options, verbose)?;
 	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
 	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
@@ -140,10 +209,10 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 		}
 	}
 
-	total_applied += semantic::apply_semantic_fixes(&files, &semantic_cargo_options, verbose)?;
+	total_applied += semantic::apply_semantic_fixes(files, &semantic_cargo_options, verbose)?;
 
 	handle_semantic_validation_fallbacks(SemanticValidationFallbacks {
-		files: &files,
+		files,
 		semantic_cargo_options: &semantic_cargo_options,
 		baseline_error_files: &baseline_error_files,
 		verbose,
@@ -153,25 +222,7 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 		type_alias_rename_files: &type_alias_rename_files,
 	})?;
 
-	let checked = run_check(cargo_options)?;
-
-	Ok(RunSummary {
-		file_count: checked.file_count,
-		violation_count: checked.violation_count,
-		unfixable_count: checked.unfixable_count,
-		applied_fix_count: total_applied,
-		output_lines: checked.output_lines,
-	})
-}
-
-pub(crate) fn semantic_cache_stats() -> SemanticCacheStats {
-	semantic::cache_stats()
-}
-
-pub(crate) fn print_coverage() {
-	for rule in shared::STYLE_RULE_IDS {
-		println!("{rule}\timplemented");
-	}
+	Ok(total_applied)
 }
 
 fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) -> Result<()> {
@@ -3652,5 +3703,50 @@ fn sample() {
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-003"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-003"));
+	}
+
+	#[test]
+	fn should_stop_tune_round_stops_when_no_fixes_applied() {
+		let (should_stop, non_decreasing_rounds) =
+			crate::style::should_stop_tune_round(0, 10, 12, 1);
+
+		assert!(should_stop);
+		assert_eq!(non_decreasing_rounds, 1);
+	}
+
+	#[test]
+	fn should_stop_tune_round_stops_when_no_fixable_violations() {
+		let (should_stop, non_decreasing_rounds) =
+			crate::style::should_stop_tune_round(2, 0, 12, 1);
+
+		assert!(should_stop);
+		assert_eq!(non_decreasing_rounds, 1);
+	}
+
+	#[test]
+	fn should_stop_tune_round_resets_streak_when_fixable_count_decreases() {
+		let (should_stop, non_decreasing_rounds) =
+			crate::style::should_stop_tune_round(2, 8, 12, 2);
+
+		assert!(!should_stop);
+		assert_eq!(non_decreasing_rounds, 0);
+	}
+
+	#[test]
+	fn should_stop_tune_round_continues_on_first_non_decreasing_round() {
+		let (should_stop, non_decreasing_rounds) =
+			crate::style::should_stop_tune_round(2, 12, 12, 0);
+
+		assert!(!should_stop);
+		assert_eq!(non_decreasing_rounds, 1);
+	}
+
+	#[test]
+	fn should_stop_tune_round_stops_on_second_consecutive_non_decreasing_round() {
+		let (should_stop, non_decreasing_rounds) =
+			crate::style::should_stop_tune_round(2, 12, 12, 1);
+
+		assert!(should_stop);
+		assert_eq!(non_decreasing_rounds, 2);
 	}
 }
