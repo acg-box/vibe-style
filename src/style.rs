@@ -1094,7 +1094,7 @@ fn sample() {
 	let a = 0usize;
 	let b = 80000.0;
 }
-"#;
+	"#;
 		let ctx = shared::read_file_context_from_text(Path::new("num_fix.rs"), original.to_owned())
 			.expect("context")
 			.expect("has ctx");
@@ -1105,6 +1105,25 @@ fn sample() {
 		assert!(applied >= 2);
 		assert!(rewritten.contains("0_usize"));
 		assert!(rewritten.contains("80_000.0"));
+	}
+
+	#[test]
+	fn numeric_fix_applies_inside_macro_token_trees() {
+		let original = r#"
+fn sample() {
+	let v = vec![0.0f32; 4];
+}
+"#;
+		let ctx =
+			shared::read_file_context_from_text(Path::new("num_macro_fix.rs"), original.to_owned())
+				.expect("context")
+				.expect("has ctx");
+		let (_violations, edits) = collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(rewritten.contains("vec![0.0_f32; 4]"));
 	}
 
 	#[test]

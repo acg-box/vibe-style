@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use ra_ap_syntax::{
-	AstNode,
+	AstNode, SyntaxKind,
 	ast::{
 		self, ArgList, Attr, Expr, HasArgList, HasAttrs, HasModuleItem, HasName, MacroCall,
 		MethodCallExpr,
@@ -145,6 +145,11 @@ pub(crate) fn check_numeric_literals(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
+	// Literals inside macros are stored in token trees and are not represented as `ast::Literal`.
+	// We still want to enforce numeric literal formatting for common cases (for example
+	// `vec![0.0f32; n]`).
+	check_numeric_literal_tokens(ctx, violations, edits, emit_edits);
+
 	for literal in ctx.source_file.syntax().descendants().filter_map(ast::Literal::cast) {
 		let literal_text = literal.syntax().text().to_string();
 
@@ -317,6 +322,96 @@ pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation
 				"`#[cfg(test)] mod _test` is reserved for keep-alive imports and must not contain behavior tests.",
 				false,
 			);
+		}
+	}
+}
+
+fn check_numeric_literal_tokens(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	let mut seen = std::collections::HashSet::<(usize, usize)>::new();
+
+	for token in ctx
+		.source_file
+		.syntax()
+		.descendants_with_tokens()
+		.filter_map(|element| element.into_token())
+		.filter(|token| {
+			matches!(token.kind(), SyntaxKind::INT_NUMBER | SyntaxKind::FLOAT_NUMBER)
+				&& token.parent_ancestors().any(|node| node.kind() == SyntaxKind::TOKEN_TREE)
+		}) {
+		let literal_text = token.text().to_string();
+
+		if literal_text.is_empty() || !literal_text.as_bytes()[0].is_ascii_digit() {
+			continue;
+		}
+
+		let range = token.text_range();
+		let start = usize::from(range.start());
+		let end = usize::from(range.end());
+
+		if start >= end || !seen.insert((start, end)) {
+			continue;
+		}
+
+		let line = shared::line_from_offset(&ctx.line_starts, start);
+
+		if let Some(suffix_start) = numeric_suffix_start(&literal_text) {
+			let body = &literal_text[..suffix_start];
+
+			if is_decimal_body(body) && !body.ends_with('_') {
+				shared::push_violation(
+					violations,
+					ctx,
+					line,
+					"RUST-STYLE-NUM-001",
+					"Numeric suffixes must be separated by an underscore (for example 10_f32).",
+					true,
+				);
+
+				if emit_edits {
+					edits.push(Edit {
+						start: start + suffix_start,
+						end: start + suffix_start,
+						replacement: "_".to_owned(),
+						rule: "RUST-STYLE-NUM-001",
+					});
+				}
+			}
+		}
+
+		let Some(int_end) = decimal_integer_part_end(&literal_text) else {
+			continue;
+		};
+		let int_part = &literal_text[..int_end];
+		let digits_only = int_part.chars().all(|ch| ch.is_ascii_digit());
+
+		if !digits_only {
+			continue;
+		}
+		if int_part.len() < 4 || int_part.starts_with('0') {
+			continue;
+		}
+
+		shared::push_violation(
+			violations,
+			ctx,
+			line,
+			"RUST-STYLE-NUM-002",
+			"Integers with more than three digits must use underscore separators.",
+			true,
+		);
+
+		if emit_edits {
+			edits.push(Edit {
+				start,
+				end: start + int_end,
+				replacement: add_numeric_grouping(int_part),
+				rule: "RUST-STYLE-NUM-002",
+			});
 		}
 	}
 }
