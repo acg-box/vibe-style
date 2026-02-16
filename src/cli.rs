@@ -108,7 +108,7 @@ struct CargoCliOptions {
 	/// Check all packages in the workspace.
 	#[arg(long)]
 	workspace: bool,
-	/// Check only the specified package(s), like cargo/clippy -p.
+	/// Check only the specified package(s).
 	#[arg(short = 'p', long = "package")]
 	packages: Vec<String>,
 	/// Space- or comma-separated feature list.

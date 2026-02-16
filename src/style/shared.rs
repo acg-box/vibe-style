@@ -15,21 +15,21 @@ use ra_ap_syntax::{
 use regex::Regex;
 
 pub(crate) const STYLE_RULE_IDS: [&str; 33] = [
+	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
 	"RUST-STYLE-MOD-003",
 	"RUST-STYLE-MOD-005",
 	"RUST-STYLE-MOD-007",
-	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-SERDE-001",
 	"RUST-STYLE-IMPORT-001",
 	"RUST-STYLE-IMPORT-002",
 	"RUST-STYLE-IMPORT-003",
 	"RUST-STYLE-IMPORT-004",
 	"RUST-STYLE-IMPORT-005",
+	"RUST-STYLE-IMPORT-007",
 	"RUST-STYLE-IMPORT-008",
 	"RUST-STYLE-IMPORT-009",
-	"RUST-STYLE-IMPORT-007",
 	"RUST-STYLE-IMPORT-010",
 	"RUST-STYLE-IMPL-001",
 	"RUST-STYLE-IMPL-003",
@@ -37,12 +37,12 @@ pub(crate) const STYLE_RULE_IDS: [&str; 33] = [
 	"RUST-STYLE-GENERICS-002",
 	"RUST-STYLE-GENERICS-003",
 	"RUST-STYLE-TYPE-001",
+	"RUST-STYLE-LET-001",
 	"RUST-STYLE-LOG-002",
 	"RUST-STYLE-RUNTIME-001",
 	"RUST-STYLE-RUNTIME-002",
 	"RUST-STYLE-NUM-001",
 	"RUST-STYLE-NUM-002",
-	"RUST-STYLE-LET-001",
 	"RUST-STYLE-READ-002",
 	"RUST-STYLE-SPACE-003",
 	"RUST-STYLE-SPACE-004",
@@ -51,7 +51,7 @@ pub(crate) const STYLE_RULE_IDS: [&str; 33] = [
 ];
 
 pub(crate) static SNAKE_CASE_RE: Lazy<Regex> =
-	Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").expect("Expected operation to succeed."));
+	Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").expect("Compile snake_case validation regex."));
 pub(crate) static WORKSPACE_IMPORT_ROOTS: Lazy<HashSet<String>> = Lazy::new(|| {
 	let pkg_name = env!("CARGO_PKG_NAME");
 
@@ -138,7 +138,10 @@ pub(crate) struct TopItem {
 	pub(crate) line: usize,
 	pub(crate) start_line: usize,
 	pub(crate) end_line: usize,
+	pub(crate) start_offset: usize,
+	pub(crate) end_offset: usize,
 	pub(crate) is_pub: bool,
+	pub(crate) visibility: String,
 	pub(crate) is_async: bool,
 	pub(crate) attrs: Vec<String>,
 	pub(crate) impl_target: Option<String>,
@@ -527,6 +530,7 @@ fn collect_top_items(source_file: &SourceFile, line_starts: &[usize]) -> Vec<Top
 		let kind = classify_top_kind(&item);
 		let name = item_name(&item);
 		let is_pub = item_visibility_is_pub(&item);
+		let visibility = item_visibility_key(&item);
 		let is_async = matches!(&item, ast::Item::Fn(func) if func.async_token().is_some());
 		let attrs = item.attrs().map(|attr| attr.syntax().text().to_string()).collect::<Vec<_>>();
 		let impl_target = if let ast::Item::Impl(impl_item) = &item {
@@ -542,7 +546,8 @@ fn collect_top_items(source_file: &SourceFile, line_starts: &[usize]) -> Vec<Top
 			None
 		};
 		let raw = item.syntax().text().to_string();
-		let (start_line, end_line) = text_range_to_lines(line_starts, item.syntax().text_range());
+		let text_range = item.syntax().text_range();
+		let (start_line, end_line) = text_range_to_lines(line_starts, text_range);
 
 		items.push(TopItem {
 			kind,
@@ -550,7 +555,10 @@ fn collect_top_items(source_file: &SourceFile, line_starts: &[usize]) -> Vec<Top
 			line: start_line,
 			start_line,
 			end_line,
+			start_offset: usize::from(text_range.start()),
+			end_offset: usize::from(text_range.end()),
 			is_pub,
+			visibility,
 			is_async,
 			attrs,
 			impl_target,
@@ -599,6 +607,7 @@ fn classify_top_kind(item: &Item) -> TopKind {
 		ast::Item::Module(_) => TopKind::Mod,
 		ast::Item::Use(_) => TopKind::Use,
 		ast::Item::MacroRules(_) => TopKind::MacroRules,
+		ast::Item::MacroCall(_) => TopKind::MacroRules,
 		ast::Item::TypeAlias(_) => TopKind::Type,
 		ast::Item::Const(_) => TopKind::Const,
 		ast::Item::Static(_) => TopKind::Static,
@@ -626,17 +635,92 @@ fn item_name(item: &Item) -> Option<String> {
 }
 
 fn item_visibility_is_pub(item: &Item) -> bool {
+	item_visibility_text(item).is_some()
+}
+
+fn item_visibility_key(item: &Item) -> String {
+	item_visibility_text(item)
+		.map(|text| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>())
+		.unwrap_or_default()
+}
+
+fn item_visibility_text(item: &Item) -> Option<String> {
 	match item {
-		ast::Item::Module(node) => node.visibility().is_some(),
-		ast::Item::Use(node) => node.visibility().is_some(),
-		ast::Item::TypeAlias(node) => node.visibility().is_some(),
-		ast::Item::Const(node) => node.visibility().is_some(),
-		ast::Item::Static(node) => node.visibility().is_some(),
-		ast::Item::Trait(node) => node.visibility().is_some(),
-		ast::Item::Enum(node) => node.visibility().is_some(),
-		ast::Item::Struct(node) => node.visibility().is_some(),
-		ast::Item::Fn(node) => node.visibility().is_some(),
-		ast::Item::Impl(node) => node.visibility().is_some(),
-		_ => false,
+		ast::Item::Module(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Use(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::TypeAlias(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Const(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Static(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Trait(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Enum(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Struct(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Fn(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		ast::Item::Impl(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		_ => None,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::{HashMap, HashSet};
+
+	use crate::style::shared::STYLE_RULE_IDS;
+
+	#[test]
+	fn style_rule_ids_are_unique() {
+		let mut seen = HashSet::new();
+
+		for rule in STYLE_RULE_IDS {
+			assert!(seen.insert(rule), "Duplicate style rule id: {rule}.");
+		}
+	}
+
+	#[test]
+	fn style_rule_ids_are_contiguous_per_prefix_and_sorted() {
+		let mut prefix_max = HashMap::<String, usize>::new();
+		let mut finished_prefixes = HashSet::<String>::new();
+		let mut current_prefix = String::new();
+
+		for rule in STYLE_RULE_IDS {
+			let without_head =
+				rule.strip_prefix("RUST-STYLE-").expect("Rule IDs must start with `RUST-STYLE-`.");
+			let (prefix, serial) = without_head
+				.rsplit_once('-')
+				.expect("Rule IDs must end with a three-digit serial.");
+			let serial = serial.parse::<usize>().expect("Rule serial must be numeric.");
+			let prefix = prefix.to_string();
+
+			if prefix != current_prefix {
+				if !current_prefix.is_empty() {
+					finished_prefixes.insert(current_prefix.clone());
+				}
+
+				assert!(
+					!finished_prefixes.contains(&prefix),
+					"Rule prefix `{prefix}` must be in a single contiguous run.",
+				);
+
+				current_prefix = prefix.clone();
+			}
+
+			let max = prefix_max.entry(prefix.clone()).or_insert(0);
+
+			assert!(
+				serial > *max,
+				"Rule IDs for prefix `{prefix}` must be strictly increasing (found {serial:03} after {max:03}).",
+			);
+
+			*max = serial;
+		}
 	}
 }

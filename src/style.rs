@@ -48,6 +48,12 @@ struct TypeAliasRenamePlan {
 	definition_edits: BTreeMap<PathBuf, Vec<Edit>>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct FixRoundSummary {
+	applied_count: usize,
+	requires_follow_up_round: bool,
+}
+
 struct SemanticValidationFallbacks<'a> {
 	files: &'a [PathBuf],
 	semantic_cargo_options: &'a CargoOptions,
@@ -107,18 +113,29 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 	let mut non_decreasing_rounds = 0_usize;
 
 	for _ in 0..MAX_TUNE_ROUNDS {
-		let files = shared::resolve_files(cargo_options)?;
-		let applied_this_round = run_fix_round(&files, cargo_options, verbose)?;
+		let fix_round_scopes = resolve_fix_round_scopes(cargo_options)?;
+		let mut applied_this_round = 0_usize;
+		let mut requires_follow_up_round = false;
+
+		for (scope_files, scope_options) in fix_round_scopes {
+			let scope_summary = run_fix_round(&scope_files, &scope_options, verbose)?;
+
+			applied_this_round += scope_summary.applied_count;
+			requires_follow_up_round |= scope_summary.requires_follow_up_round;
+		}
 
 		total_applied += applied_this_round;
 		checked = run_check(cargo_options)?;
 
 		let fixable_count = checked.violation_count.saturating_sub(checked.unfixable_count);
+		let needs_follow_up_round =
+			requires_follow_up_round || fixable_count < previous_fixable_count;
 		let (should_stop, next_non_decreasing_rounds) = should_stop_tune_round(
 			applied_this_round,
 			fixable_count,
 			previous_fixable_count,
 			non_decreasing_rounds,
+			needs_follow_up_round,
 		);
 
 		if should_stop {
@@ -153,8 +170,12 @@ fn should_stop_tune_round(
 	fixable_count: usize,
 	previous_fixable_count: usize,
 	non_decreasing_rounds: usize,
+	requires_follow_up_round: bool,
 ) -> (bool, usize) {
 	if applied_this_round == 0 || fixable_count == 0 {
+		return (true, non_decreasing_rounds);
+	}
+	if !requires_follow_up_round {
 		return (true, non_decreasing_rounds);
 	}
 
@@ -168,7 +189,48 @@ fn should_stop_tune_round(
 	(false, next_non_decreasing_rounds)
 }
 
-fn run_fix_round(files: &[PathBuf], cargo_options: &CargoOptions, verbose: bool) -> Result<usize> {
+fn resolve_fix_round_scopes(
+	cargo_options: &CargoOptions,
+) -> Result<Vec<(Vec<PathBuf>, CargoOptions)>> {
+	let files = shared::resolve_files(cargo_options)?;
+
+	if !cargo_options.workspace || !cargo_options.packages.is_empty() {
+		return Ok(vec![(files, cargo_options.clone())]);
+	}
+
+	let Some(packages) = shared::package_names_for_files(&files)? else {
+		return Ok(vec![(files, cargo_options.clone())]);
+	};
+	let mut scopes = Vec::new();
+
+	for package in packages {
+		let mut scoped_options = cargo_options.clone();
+
+		scoped_options.workspace = false;
+		scoped_options.packages = vec![package];
+
+		let scoped_files = shared::resolve_files(&scoped_options)?;
+
+		if scoped_files.is_empty() {
+			continue;
+		}
+
+		scopes.push((scoped_files, scoped_options));
+	}
+
+	if scopes.is_empty() {
+		return Ok(vec![(files, cargo_options.clone())]);
+	}
+
+	Ok(scopes)
+}
+
+fn run_fix_round(
+	files: &[PathBuf],
+	cargo_options: &CargoOptions,
+	verbose: bool,
+) -> Result<FixRoundSummary> {
+	let round_start_snapshot = collect_file_snapshots(files);
 	let type_alias_plan = collect_type_alias_rename_plan(files)?;
 	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan)?;
 	let changed_files = changed_file_paths(&outcomes_all);
@@ -209,7 +271,20 @@ fn run_fix_round(files: &[PathBuf], cargo_options: &CargoOptions, verbose: bool)
 		}
 	}
 
-	total_applied += semantic::apply_semantic_fixes(files, &semantic_cargo_options, verbose)?;
+	let semantic_phase_start_snapshot = collect_file_snapshots(files);
+	let semantic_applied = semantic::apply_semantic_fixes(files, &semantic_cargo_options, verbose)?;
+
+	total_applied += semantic_applied;
+
+	if semantic_applied > 0 {
+		total_applied += apply_post_semantic_cleanup(
+			files,
+			&semantic_phase_start_snapshot,
+			&mut import_fallbacks,
+			&mut changed_originals,
+			&mut let_mut_reorder_files,
+		)?;
+	}
 
 	handle_semantic_validation_fallbacks(SemanticValidationFallbacks {
 		files,
@@ -222,7 +297,102 @@ fn run_fix_round(files: &[PathBuf], cargo_options: &CargoOptions, verbose: bool)
 		type_alias_rename_files: &type_alias_rename_files,
 	})?;
 
-	Ok(total_applied)
+	// Count this round as no-op when all edits are eventually rolled back.
+	if total_applied > 0 && !has_net_file_changes(&round_start_snapshot) {
+		return Ok(FixRoundSummary::default());
+	}
+
+	let requires_follow_up_round =
+		if semantic_applied > 0 { has_fixable_violations_in_files(files)? } else { false };
+
+	Ok(FixRoundSummary { applied_count: total_applied, requires_follow_up_round })
+}
+
+fn apply_post_semantic_cleanup(
+	files: &[PathBuf],
+	semantic_phase_start_snapshot: &BTreeMap<PathBuf, String>,
+	import_fallbacks: &mut BTreeMap<PathBuf, (PathBuf, String)>,
+	changed_originals: &mut BTreeMap<PathBuf, (PathBuf, String)>,
+	let_mut_reorder_files: &mut BTreeMap<PathBuf, ()>,
+) -> Result<usize> {
+	let mut applied_total = 0_usize;
+
+	for path in files {
+		let Some(before_semantic) = semantic_phase_start_snapshot.get(path) else {
+			continue;
+		};
+		let Ok(after_semantic) = fs::read_to_string(path) else {
+			continue;
+		};
+
+		if after_semantic == *before_semantic {
+			continue;
+		}
+
+		let normalized = normalize_path(path);
+
+		changed_originals
+			.entry(normalized.clone())
+			.or_insert_with(|| (path.clone(), before_semantic.clone()));
+
+		let (rewritten, applied, had_import_shortening_edits, had_let_mut_reorder_edits) =
+			apply_fix_passes(path, &after_semantic, true)?;
+
+		if rewritten == after_semantic || applied == 0 {
+			continue;
+		}
+
+		fs::write(path, &rewritten)?;
+
+		applied_total += applied;
+
+		if had_import_shortening_edits {
+			let (fallback, _applied, _had_import_shortening, _) =
+				apply_fix_passes(path, &after_semantic, false)?;
+
+			if fallback != rewritten {
+				import_fallbacks.insert(normalized.clone(), (path.clone(), fallback));
+			}
+		}
+		if had_let_mut_reorder_edits {
+			let_mut_reorder_files.insert(normalized, ());
+		}
+	}
+
+	Ok(applied_total)
+}
+
+fn collect_file_snapshots(files: &[PathBuf]) -> BTreeMap<PathBuf, String> {
+	let mut snapshots = BTreeMap::new();
+
+	for path in files {
+		if let Ok(text) = fs::read_to_string(path) {
+			snapshots.insert(path.clone(), text);
+		}
+	}
+
+	snapshots
+}
+
+fn has_net_file_changes(snapshots: &BTreeMap<PathBuf, String>) -> bool {
+	snapshots
+		.iter()
+		.any(|(path, before)| fs::read_to_string(path).is_ok_and(|after| after != *before))
+}
+
+fn has_fixable_violations_in_files(files: &[PathBuf]) -> Result<bool> {
+	for path in files {
+		let Some(ctx) = shared::read_file_context(path)? else {
+			continue;
+		};
+		let (violations, _edits) = collect_violations(&ctx, false);
+
+		if violations.iter().any(|violation| violation.fixable) {
+			return Ok(true);
+		}
+	}
+
+	Ok(false)
 }
 
 fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) -> Result<()> {
@@ -277,6 +447,13 @@ fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) ->
 			fs::write(path, fallback)?;
 
 			handled.insert(normalized.clone(), ());
+
+			if ctx.verbose {
+				eprintln!(
+					"Applied import-shortening fallback in {} due to failed semantic validation.",
+					path.display()
+				);
+			}
 		}
 	}
 	for normalized in post_error_files.difference(ctx.baseline_error_files) {
@@ -287,6 +464,9 @@ fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) ->
 		if let Some((path, original_text)) = ctx.changed_originals.get(normalized) {
 			fs::write(path, original_text)?;
 
+			if ctx.verbose {
+				eprintln!("Reverted {} due to failed semantic validation.", path.display());
+			}
 			if ctx.let_mut_reorder_files.contains_key(normalized) {
 				eprintln!(
 					"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
@@ -382,22 +562,24 @@ fn collect_fix_outcomes(
 					apply_type_alias_rename_plan(file, &original_text, type_alias_plan)?;
 				let (text, pass_applied, had_import_shortening_edits, had_let_mut_reorder_edits) =
 					apply_fix_passes(file, &base_text, true)?;
-				let applied_count = type_alias_applied + pass_applied;
-				let fallback_without_import_shortening = if had_import_shortening_edits {
-					let (fallback_base, _fallback_type_applied, _fallback_type_edits) =
-						apply_type_alias_rename_plan(file, &original_text, type_alias_plan)?;
-					let (fallback, _fallback_applied, _fallback_import_edits, _) =
-						apply_fix_passes(file, &fallback_base, false)?;
+				let did_change = text != original_text;
+				let applied_count = if did_change { type_alias_applied + pass_applied } else { 0 };
+				let fallback_without_import_shortening =
+					if had_import_shortening_edits && did_change {
+						let (fallback_base, _fallback_type_applied, _fallback_type_edits) =
+							apply_type_alias_rename_plan(file, &original_text, type_alias_plan)?;
+						let (fallback, _fallback_applied, _fallback_import_edits, _) =
+							apply_fix_passes(file, &fallback_base, false)?;
 
-					(text != fallback).then_some(fallback)
-				} else {
-					None
-				};
+						(text != fallback).then_some(fallback)
+					} else {
+						None
+					};
 
 				Ok(FileFixOutcome {
 					path: file.clone(),
-					original_text: if applied_count > 0 { Some(original_text) } else { None },
-					rewritten_text: if applied_count > 0 { Some(text) } else { None },
+					original_text: if did_change { Some(original_text) } else { None },
+					rewritten_text: if did_change { Some(text) } else { None },
 					fallback_without_import_shortening,
 					had_import_shortening_edits,
 					had_let_mut_reorder_edits,
@@ -459,7 +641,8 @@ fn apply_fix_passes(
 		let Some(ctx) = shared::read_file_context_from_text(path, text.clone())? else {
 			break;
 		};
-		let (_violations, mut edits) = collect_violations(&ctx, true);
+		let (_violations, mut edits) =
+			collect_violations_with_import_shortening(&ctx, true, with_import_shortening);
 
 		if with_import_shortening {
 			if edits.iter().any(|edit| is_import_shortening_rule(edit.rule)) {
@@ -499,6 +682,14 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, Vec<Edit>) {
+	collect_violations_with_import_shortening(ctx, with_fixes, true)
+}
+
+fn collect_violations_with_import_shortening(
+	ctx: &FileContext,
+	with_fixes: bool,
+	with_import_shortening: bool,
+) -> (Vec<Violation>, Vec<Edit>) {
 	let mut violations = Vec::new();
 	let mut edits = Vec::new();
 
@@ -507,7 +698,13 @@ fn collect_violations(ctx: &FileContext, with_fixes: bool) -> (Vec<Violation>, V
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
 	bindings::check_let_mut_reorder(ctx, &mut violations, &mut edits, with_fixes);
 	test_modules::check_test_module_super_glob(ctx, &mut edits, with_fixes);
-	imports::check_import_rules(ctx, &mut violations, &mut edits, with_fixes);
+	imports::check_import_rules(
+		ctx,
+		&mut violations,
+		&mut edits,
+		with_fixes,
+		with_import_shortening,
+	);
 	generics::check_unnecessary_turbofish(ctx, &mut violations, &mut edits, with_fixes);
 	generics::check_turbofish_canonicalization(ctx, &mut violations, &mut edits, with_fixes);
 	types::check_type_alias_renames(ctx, &mut violations);
@@ -532,10 +729,10 @@ fn violation_signature(violation: &Violation) -> (usize, &'static str, &str, boo
 
 #[cfg(test)]
 mod tests {
-	use std::path::Path;
+	use std::{collections::BTreeMap, fs, path::Path};
 
 	use crate::style::{
-		Edit, MAX_FIX_PASSES, apply_fix_passes, collect_violations, fixes, shared,
+		Edit, MAX_FIX_PASSES, apply_fix_passes, collect_violations, fixes, shared, types,
 		violation_signature,
 	};
 
@@ -552,10 +749,10 @@ mod tests {
 	}
 
 	#[test]
-	fn runtime_fix_rewrites_unwrap_to_expect() {
+	fn runtime_reports_unwrap_without_autofix() {
 		let original = "fn demo_case(value: Option<usize>) -> usize {\n\tvalue.unwrap()\n}\n";
 		let ctx = shared::read_file_context_from_text(
-			Path::new("runtime_unwrap_fix.rs"),
+			Path::new("runtime_unwrap_check.rs"),
 			original.to_owned(),
 		)
 		.expect("context")
@@ -565,18 +762,13 @@ mod tests {
 		assert!(
 			violations
 				.iter()
-				.any(|violation| violation.rule == "RUST-STYLE-RUNTIME-001" && violation.fixable)
+				.any(|violation| violation.rule == "RUST-STYLE-RUNTIME-001" && !violation.fixable)
 		);
-
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(applied >= 1);
-		assert!(rewritten.contains(r#"value.expect("Expected operation to succeed.")"#));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-RUNTIME-001"));
 	}
 
 	#[test]
-	fn runtime_fix_normalizes_expect_message_sentence() {
+	fn runtime_does_not_enforce_expect_sentence_style() {
 		let original =
 			"fn demo_case(value: Option<usize>) -> usize {\n\tvalue.expect(\"missing value\")\n}\n";
 		let ctx = shared::read_file_context_from_text(
@@ -587,17 +779,45 @@ mod tests {
 		.expect("has ctx");
 		let (violations, edits) = collect_violations(&ctx, true);
 
-		assert!(
-			violations
-				.iter()
-				.any(|violation| violation.rule == "RUST-STYLE-RUNTIME-002" && violation.fixable)
-		);
+		assert!(!violations.iter().any(|violation| violation.rule == "RUST-STYLE-RUNTIME-002"));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-RUNTIME-002"));
+	}
 
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+	#[test]
+	fn runtime_reports_expect_empty_message_without_autofix() {
+		let original = "fn demo_case(value: Option<usize>) -> usize {\n\tvalue.expect(\"\")\n}\n";
+		let ctx = shared::read_file_context_from_text(
+			Path::new("runtime_expect_empty_message.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
 
-		assert!(applied >= 1);
-		assert!(rewritten.contains(r#"value.expect("Missing value.")"#));
+		assert!(violations.iter().any(|violation| {
+			violation.rule == "RUST-STYLE-RUNTIME-002"
+				&& violation.message == "expect() message must not be empty."
+				&& !violation.fixable
+		}));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-RUNTIME-002"));
+	}
+
+	#[test]
+	fn log_rule_does_not_enforce_sentence_style() {
+		let text = "fn run() {\n\ttracing::info!(\"missing value\")\n}\n";
+		let ctx = shared::read_file_context_from_text(
+			Path::new("log_sentence_style.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|violation| {
+			violation.rule == "RUST-STYLE-LOG-002"
+				&& violation.message
+					== "Log messages should be complete sentences with capitalization and punctuation."
+		}));
 	}
 
 	#[test]
@@ -915,6 +1135,109 @@ mod tests {
 	}
 
 	#[test]
+	fn import007_fix_preserves_cfg_attribute_when_expanding_pub_glob() {
+		let original = r#"
+pub mod api_code {
+	#[cfg(feature = "pubfi")]
+	mod pubfi {
+		pub const ERR_A: i16 = -1;
+		pub const ERR_B: i16 = -2;
+	}
+
+	#[cfg(feature = "pubfi")]
+	pub use self::pubfi::*;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import007_preserves_cfg_pub_glob.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("#[cfg(feature = \"pubfi\")]"));
+		assert!(rewritten.contains("pub use self::pubfi::{ERR_A, ERR_B};"));
+	}
+
+	#[test]
+	fn import007_fix_preserves_inline_cfg_attribute_when_expanding_pub_glob() {
+		let original = r#"
+pub mod api_code {
+	#[cfg(feature = "pubfi")] mod pubfi {
+		pub const ERR_A: i16 = -1;
+		pub const ERR_B: i16 = -2;
+	}
+
+	#[cfg(feature = "pubfi")] pub use self::pubfi::*;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import007_preserves_inline_cfg_pub_glob.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(
+			rewritten.contains("#[cfg(feature = \"pubfi\")] pub use self::pubfi::{ERR_A, ERR_B};")
+		);
+	}
+
+	#[test]
+	fn import007_fix_expands_long_pub_glob_without_custom_layout() {
+		let original = r#"
+pub mod api_code {
+	#[cfg(feature = "pubfi")]
+	mod pubfi {
+		pub const ERR_000: i16 = -1;
+		pub const ERR_001: i16 = -2;
+		pub const ERR_002: i16 = -3;
+		pub const ERR_003: i16 = -4;
+		pub const ERR_004: i16 = -5;
+		pub const ERR_005: i16 = -6;
+		pub const ERR_006: i16 = -7;
+		pub const ERR_007: i16 = -8;
+		pub const ERR_008: i16 = -9;
+		pub const ERR_009: i16 = -10;
+		pub const ERR_010: i16 = -11;
+		pub const ERR_011: i16 = -12;
+	}
+
+	#[cfg(feature = "pubfi")]
+	pub use self::pubfi::*;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import007_long_pub_glob_multiline.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("pub use self::pubfi::{ERR_000"));
+		assert!(rewritten.contains("ERR_011};"));
+		assert!(!rewritten.contains("pub use self::pubfi::*;"));
+	}
+
+	#[test]
 	fn import007_fix_rewrites_rayon_prelude_glob_to_traits() {
 		let original = "use rayon::prelude::*;\n\nfn sample(batch: &[usize]) {\n\tlet _ = batch.par_iter().map(|value| value + 1).count();\n}\n";
 		let ctx = shared::read_file_context_from_text(
@@ -952,6 +1275,97 @@ mod tests {
 
 		assert!(rewritten.contains("use crate::style::shared::Edit;"));
 		assert!(!rewritten.contains("use super::shared::Edit;"));
+	}
+
+	#[test]
+	fn import010_does_not_report_self_prefix_use() {
+		let original = r#"
+pub mod api_code {
+	#[cfg(feature = "pubfi")]
+	pub use self::pubfi::{ERR_A, ERR_B};
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import010_self_prefix.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert_eq!(rewritten.trim_start_matches('\n'), original.trim_start_matches('\n'));
+	}
+
+	#[test]
+	fn fix_passes_rewrite_cfg_pub_use_glob_and_keep_macro_block_order() {
+		let original = r#"
+#[cfg(feature = "pubfi")]
+mod pubfi {
+	def_api_codes! {
+		ERR_A = -1,
+		ERR_B = -2,
+	}
+}
+
+def_api_codes! {
+	OUTSIDE_A = -3,
+}
+
+#[cfg(feature = "pubfi")]
+pub use self::pubfi::*;
+
+def_api_codes! {
+	OUTSIDE_B = -4,
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import007_mod001_macro_block.rs"), original, true)
+				.expect("apply fix passes");
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+		let use_pos =
+			compact.find("pubuseself::pubfi::{ERR_A,ERR_B};").expect("has rewritten pub use");
+		let first_macro_pos = compact.find("OUTSIDE_A=-3").expect("has first macro call");
+		let second_macro_pos = compact.find("OUTSIDE_B=-4").expect("has second macro call");
+
+		assert!(rewritten.contains("pub use self::pubfi::{ERR_A, ERR_B};"));
+		assert!(rewritten.contains("#[cfg(feature = \"pubfi\")]"));
+		assert!(use_pos < first_macro_pos);
+		assert!(first_macro_pos < second_macro_pos);
+	}
+
+	#[test]
+	fn fix_passes_rewrite_cfg_pub_use_self_path_and_keep_macro_block_order() {
+		let original = r#"
+def_api_codes! {
+	OUTSIDE_A = -3,
+}
+
+#[cfg(feature = "pubfi")]
+pub use self::pubfi::{ERR_A, ERR_B};
+
+def_api_codes! {
+	OUTSIDE_B = -4,
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import010_mod001_macro_block.rs"), original, true)
+				.expect("apply fix passes");
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+		let use_pos =
+			compact.find("pubuseself::pubfi::{ERR_A,ERR_B};").expect("has rewritten pub use");
+		let first_macro_pos = compact.find("OUTSIDE_A=-3").expect("has first macro call");
+		let second_macro_pos = compact.find("OUTSIDE_B=-4").expect("has second macro call");
+
+		assert!(rewritten.contains("pub use self::pubfi::{ERR_A, ERR_B};"));
+		assert!(rewritten.contains("#[cfg(feature = \"pubfi\")]"));
+		assert!(use_pos < first_macro_pos);
+		assert!(first_macro_pos < second_macro_pos);
 	}
 
 	#[test]
@@ -1119,6 +1533,91 @@ impl<T> Inference<T> {
 	}
 
 	#[test]
+	fn impl003_does_not_flag_std_trait_order_for_unqualified_display_import() {
+		let original = r#"
+use std::fmt::{Display, Formatter};
+
+#[derive(Debug)]
+enum DispatchError {
+	QueueFull,
+}
+impl Display for DispatchError {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{f}")
+	}
+}
+impl std::error::Error for DispatchError {}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("impl003_std_display_import_order.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-003"));
+	}
+
+	#[test]
+	fn impl003_fix_reorders_impl_blocks_by_origin_group() {
+		let original = r#"
+struct Sample;
+
+impl ext_crate::ExternalTrait for Sample {}
+
+impl std::fmt::Display for Sample {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "sample")
+	}
+}
+
+impl Sample {
+	fn new() -> Self {
+		Self
+	}
+}
+
+impl crate::WorkspaceTrait for Sample {}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("impl003_reorder_by_origin_group.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-003" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPL-003"));
+
+		let impl003_edits =
+			edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPL-003").collect::<Vec<_>>();
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, impl003_edits).expect("apply edits");
+
+		assert!(applied > 0);
+
+		let inherent_idx = rewritten.find("impl Sample {").expect("inherent impl");
+		let std_trait_idx = rewritten
+			.find("impl std::fmt::Display for Sample")
+			.or_else(|| rewritten.find("impl Display for Sample"))
+			.expect("std trait impl");
+		let third_party_idx = rewritten
+			.find("impl ext_crate::ExternalTrait for Sample")
+			.or_else(|| rewritten.find("impl ExternalTrait for Sample"))
+			.expect("third-party trait impl");
+		let workspace_idx = rewritten
+			.find("impl crate::WorkspaceTrait for Sample")
+			.or_else(|| rewritten.find("impl WorkspaceTrait for Sample"))
+			.expect("workspace trait impl");
+
+		assert!(inherent_idx < std_trait_idx);
+		assert!(std_trait_idx < third_party_idx);
+		assert!(third_party_idx < workspace_idx);
+	}
+
+	#[test]
 	fn numeric_rules_ignore_multiline_string_literals() {
 		let text = r##"
 const PROMPT: &str = r#"
@@ -1206,6 +1705,38 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 
+use crate::z::Z;
+"#
+		);
+	}
+
+	#[test]
+	fn import_group_fix_applies_with_cfg_attribute_string_literal() {
+		let original = r#"#[cfg(feature = "test")]
+use crate::z::Z;
+
+use std::collections::HashSet;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import_group_cfg.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.is_empty());
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert_eq!(
+			rewritten,
+			r#"use std::collections::HashSet;
+
+#[cfg(feature = "test")]
 use crate::z::Z;
 "#
 		);
@@ -1379,6 +1910,43 @@ use crate::z::Z;
 
 		assert!(std_idx < third_party_idx);
 		assert!(third_party_idx < self_idx);
+	}
+
+	#[test]
+	fn import_group_reorder_still_applies_in_fallback_mode_with_import009_present() {
+		let original = "use crate::z::Z;\n\nuse std::fmt::Result;\n\nfn parse() -> Result<()> {\n\tOk(())\n}\n";
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import_group_fallback_import009.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (fallback_violations, fallback_edits) =
+			super::collect_violations_with_import_shortening(&ctx, true, false);
+
+		assert!(
+			!fallback_edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"),
+			"fallback mode should not collect import-shortening edits"
+		);
+		assert!(
+			!fallback_violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"),
+			"fallback mode should not collect import-shortening violations"
+		);
+		assert!(
+			fallback_edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"),
+			"fallback mode should still include import-group edits, got edits={:?}, violations={:?}",
+			fallback_edits.iter().map(|edit| edit.rule).collect::<Vec<_>>(),
+			fallback_violations.iter().map(|violation| violation.rule).collect::<Vec<_>>()
+		);
+
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import_group_fallback_import009.rs"), original, false)
+				.expect("apply fix passes");
+
+		assert!(applied_count > 0);
+		assert!(rewritten.contains("use std::fmt::Result;\n\nuse crate::z::Z;\n"));
+		assert!(rewritten.contains("fn parse() -> Result<()> {\n\tOk(())\n}\n"));
+		assert!(rewritten.contains("use std::fmt::Result;"));
 	}
 
 	#[test]
@@ -1672,6 +2240,229 @@ fn noop() {}
 	}
 
 	#[test]
+	fn import003_fix_normalizes_unreferenced_trait_alias_and_avoids_ambiguous_symbol() {
+		let original = r#"
+use color_eyre::eyre::{Context as EyreContext, Result, eyre};
+use std::task::Context;
+
+fn run() -> Result<()> {
+	let _ = eyre!("boom").wrap_err("failed");
+	let _ = core::option::Option::<&Context<'_>>::None;
+	Ok(())
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_alias_context_ambiguous.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-004"
+				&& v.message
+					== "Do not import free functions or macros into scope; prefer qualified module paths."
+				&& v.fixable
+		}));
+		assert!(!violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003"
+				&& v.message == "Import aliases are not allowed except `as _` keep-alive imports."
+				&& !v.fixable
+		}));
+		assert!(
+			edits
+				.iter()
+				.any(|e| matches!(e.rule, "RUST-STYLE-IMPORT-003" | "RUST-STYLE-IMPORT-004"))
+		);
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(
+			rewritten.contains("use color_eyre::eyre::{self, Context as EyreContext, Result};"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("let _ = eyre::eyre!(\"boom\").wrap_err(\"failed\");"));
+
+		let rewritten_ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_alias_context_ambiguous.rs"),
+			rewritten,
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (rewritten_violations, _rewritten_edits) = collect_violations(&rewritten_ctx, true);
+
+		assert!(!rewritten_violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-004"
+				&& v.message
+					== "Ambiguous imported symbol `Context` is not allowed; use fully qualified paths."
+		}));
+
+		let (
+			stabilized,
+			_second_pass_applied,
+			_had_import_shortening_edits,
+			_had_let_mut_reorder_edits,
+		) = apply_fix_passes(
+			Path::new("import003_trait_alias_context_ambiguous.rs"),
+			&rewritten_ctx.text,
+			true,
+		)
+		.expect("apply fix passes");
+
+		assert!(
+			stabilized.contains("use color_eyre::eyre::{self, Context as _, Result};"),
+			"{stabilized}"
+		);
+		assert!(!stabilized.contains("Context as EyreContext"));
+	}
+
+	#[test]
+	fn import003_alias_is_non_fixable_when_alias_identifier_is_referenced() {
+		let text = r#"
+use color_eyre::eyre::Context as EyreContext;
+
+fn needs_context<T: EyreContext>(value: T) -> T {
+	value
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_trait_alias_referenced.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003"
+				&& v.message
+					== "Import alias `EyreContext` is not allowed; use a fully qualified path at use sites."
+				&& v.fixable
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+
+		let mut rewritten = text.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("as EyreContext"));
+		assert!(
+			rewritten.contains("fn needs_context<T: color_eyre::eyre::Context>(value: T) -> T {")
+		);
+	}
+
+	#[test]
+	fn import003_fix_rewrites_non_trait_alias_to_qualified_paths() {
+		let original = r#"
+use crate::error::{Error, Result};
+use pubfi_ai::{AgentEmbed, Error as AiError};
+
+fn should_retry_embed(error: &AiError) -> bool {
+	matches!(error, AiError::Reqwest(_))
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_non_trait_alias_qualified_paths.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003" && v.message.contains("`AiError`") && v.fixable
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("use pubfi_ai::{AgentEmbed};"));
+		assert!(rewritten.contains("error: &pubfi_ai::Error"));
+		assert!(rewritten.contains("pubfi_ai::Error::Reqwest"), "{rewritten}");
+		assert!(!rewritten.contains("Error as AiError"));
+	}
+
+	#[test]
+	fn import003_fix_rewrites_nested_braced_aliases_to_qualified_paths() {
+		let original = r#"
+use crate::{
+	grpc::{
+		ReferralCode as ProtoReferralCode,
+		UserData,
+		gateway_service_server::GatewayService as GrpcGatewayService,
+	},
+};
+
+fn map_types(
+	_code: ProtoReferralCode,
+	_service: GrpcGatewayService,
+	_user_data: UserData,
+) -> (crate::grpc::ReferralCode, crate::grpc::gateway_service_server::GatewayService) {
+	todo!()
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_nested_braced_aliases.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(
+			violations.iter().any(|v| {
+				v.rule == "RUST-STYLE-IMPORT-003"
+					&& v.message.contains("`ProtoReferralCode`")
+					&& v.fixable
+			}),
+			"{violations:#?}"
+		);
+		assert!(
+			violations.iter().any(|v| {
+				v.rule == "RUST-STYLE-IMPORT-003"
+					&& v.message.contains("`GrpcGatewayService`")
+					&& v.fixable
+			}),
+			"{violations:#?}"
+		);
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("use crate::{grpc::{UserData}};"), "{rewritten}");
+		assert!(rewritten.contains("_code: crate::grpc::ReferralCode"));
+		assert!(
+			rewritten.contains("_service: crate::grpc::gateway_service_server::GatewayService")
+		);
+		assert!(!rewritten.contains("ReferralCode as ProtoReferralCode"));
+		assert!(!rewritten.contains("GatewayService as GrpcGatewayService"));
+	}
+
+	#[test]
+	fn import_check_does_not_report_ambiguous_symbol_for_keep_alive_alias() {
+		let text = r#"
+use color_eyre::eyre::Context as _;
+use std::task::Context;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import_keep_alive_ambiguous_false_positive.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-004"
+				&& v.message
+					== "Ambiguous imported symbol `Context` is not allowed; use fully qualified paths."
+		}));
+	}
+
+	#[test]
 	fn import008_fix_rewrites_existing_keep_alive_trait_import_to_plain_when_symbol_is_used() {
 		let original = r#"
 use serde::{Deserialize as _};
@@ -1863,6 +2654,38 @@ fn sample() {
 		assert!(
 			!rewritten.contains("use super::shared::{Edit, line_from_offset, offset_from_line};")
 		);
+	}
+
+	#[test]
+	fn import004_fix_prefers_parent_module_keep_alive_style_for_eyre() {
+		let original = r#"
+use color_eyre::eyre::{Context as _, Result, eyre};
+
+fn sample() -> Result<()> {
+	Err(eyre!("boom"))
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import004_eyre_parent_module_fix.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 2);
+		assert!(
+			rewritten.contains("use color_eyre::eyre::{self, Context as _, Result};"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("Err(eyre::eyre!(\"boom\"))"));
+		assert!(!rewritten.contains("use color_eyre::eyre::{Context as _, Result, eyre};"));
 	}
 
 	#[test]
@@ -2357,7 +3180,7 @@ pub enum Error {
 	}
 
 	#[test]
-	fn import009_fix_rewrites_mixed_import_and_qualified_symbol_usage() {
+	fn import009_autofixes_when_different_qualified_symbol_path_exists() {
 		let original = r#"
 use a::A;
 
@@ -2374,6 +3197,7 @@ fn sample(a: A, aa: b::A) {
 		let (violations, edits) = collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
 
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
@@ -2383,7 +3207,7 @@ fn sample(a: A, aa: b::A) {
 	}
 
 	#[test]
-	fn import009_fix_rewrites_when_different_qualified_symbol_path_exists() {
+	fn import009_autofixes_when_qualified_and_imported_paths_differ() {
 		let original = r#"
 use qdrant_client::qdrant::Value;
 
@@ -2402,14 +3226,575 @@ fn build_value() -> Value {
 		.expect("context")
 		.expect("has ctx");
 		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
+
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
-		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(!rewritten.contains("use qdrant_client::qdrant::Value;"));
-		assert!(!rewritten.contains("fn build_value() -> Value"));
 		assert!(rewritten.contains("fn build_value() -> qdrant_client::qdrant::Value"));
 		assert!(rewritten.contains("qdrant_client::qdrant::Value::from(1_i64)"));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_ambiguous_pubfi_ai_usage_with_grouped_import_kept() {
+		let original = r#"
+use pubfi_ai::Usage;
+use pubfi_ai::{Cost, Inference};
+
+fn normalize(
+	input: Usage,
+	rig_usage: rig::completion::Usage,
+	qualified: pubfi_ai::Usage,
+) -> Usage {
+	let _ = (std::mem::size_of::<Cost>(), std::mem::size_of::<Inference>());
+	let _ = rig_usage;
+	let _ = qualified;
+	let local: Usage = input;
+	local
+}
+"#;
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_pubfi_ai_usage_grouped_import.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
+		assert!(!rewritten.contains("use pubfi_ai::Usage;"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains("use pubfi_ai::{Cost, Inference};"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains("input: pubfi_ai::Usage"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains(") -> pubfi_ai::Usage"), "Rewritten:\n{rewritten}");
+		assert!(
+			rewritten.contains("let local: pubfi_ai::Usage = input;"),
+			"Rewritten:\n{rewritten}"
+		);
+		assert!(rewritten.contains("rig_usage: rig::completion::Usage"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains("qualified: pubfi_ai::Usage"), "Rewritten:\n{rewritten}");
+	}
+
+	#[test]
+	fn import009_fix_rewrites_pubfi_ai_usage_snippet_and_is_idempotent() {
+		let original = r#"
+use pubfi_ai::Usage;
+use pubfi_ai::{Cost, Inference};
+
+#[test]
+fn usage_from_rig_skips_empty() {
+	let usage = rig::completion::Usage { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+
+	assert!(Usage::from_rig(usage).is_none());
+}
+
+#[test]
+fn usage_from_rig_maps_tokens() {
+	let usage = rig::completion::Usage { input_tokens: 12, output_tokens: 34, total_tokens: 46 };
+	let mapped = pubfi_ai::Usage::from_rig(usage).expect("Expected usage to map.");
+
+	assert_eq!(mapped, Usage { input_tokens: 12, output_tokens: 34, total_tokens: 46 });
+}
+
+#[test]
+fn usage_merge_accumulates() {
+	let mut usage = Some(pubfi_ai::Usage { input_tokens: 10, output_tokens: 5, total_tokens: 15 });
+
+	pubfi_ai::Usage::merge(&mut usage, Some(pubfi_ai::Usage { input_tokens: 2, output_tokens: 3, total_tokens: 5 }));
+
+	assert_eq!(usage, Some(Usage { input_tokens: 12, output_tokens: 8, total_tokens: 20 }));
+}
+
+#[test]
+fn inference_record_usage_accumulates() {
+	let mut usage = None;
+	let mut inference = Inference::new(
+		String::from("ok"),
+		Some(pubfi_ai::Usage { input_tokens: 7, output_tokens: 9, total_tokens: 16 }),
+	);
+
+	inference.cost = Some(Cost::usd(0.00012));
+
+	let mut cost = None;
+	let output = inference.record_usage(&mut usage, &mut cost);
+
+	assert_eq!(output, "ok");
+	assert_eq!(usage, Some(Usage { input_tokens: 7, output_tokens: 9, total_tokens: 16 }));
+	assert_eq!(cost, Some(Cost::usd(0.00012)));
+}
+"#;
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_pubfi_ai_usage_snippet_idempotence.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
+		assert!(!rewritten.contains("use pubfi_ai::Usage;"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains("assert!(pubfi_ai::Usage::from_rig(usage).is_none());"));
+		assert!(rewritten.contains(
+			"assert_eq!(mapped, pubfi_ai::Usage { input_tokens: 12, output_tokens: 34, total_tokens: 46 });"
+		));
+		assert!(rewritten.contains(
+			"assert_eq!(usage, Some(pubfi_ai::Usage { input_tokens: 12, output_tokens: 8, total_tokens: 20 }));"
+		));
+		assert!(rewritten.contains(
+			"assert_eq!(usage, Some(pubfi_ai::Usage { input_tokens: 7, output_tokens: 9, total_tokens: 16 }));"
+		));
+
+		let (
+			repeated,
+			repeated_applied_count,
+			_repeated_had_import_shortening_edits,
+			_repeated_had_let_mut_reorder_edits,
+		) = apply_fix_passes(
+			Path::new("import009_pubfi_ai_usage_snippet_idempotence.rs"),
+			&rewritten,
+			true,
+		)
+		.expect("repeat apply fix passes");
+
+		assert_eq!(repeated_applied_count, 0, "Repeated:\n{repeated}");
+		assert_eq!(repeated, rewritten);
+	}
+
+	#[test]
+	fn import009_autofixes_result_when_std_result_is_also_used() {
+		let original = r#"
+use color_eyre::Result;
+
+fn forward_std_result(value: std::result::Result<(), ()>) -> std::result::Result<(), ()> {
+	value
+}
+
+async fn acquire_queue() -> Result<()> {
+	let _ = std::result::Result::<(), ()>::Ok(());
+	Ok(())
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_result_std_result.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("use color_eyre::Result;"));
+		assert!(rewritten.contains("async fn acquire_queue() -> color_eyre::Result<()>"));
+		assert!(rewritten.contains("fn forward_std_result(value: std::result::Result<(), ()>)"));
+		assert!(rewritten.contains("std::result::Result::<(), ()>::Ok(())"));
+	}
+
+	#[test]
+	fn import009_autofixes_crawler_like_std_tokio_reqwest_symbol_conflicts() {
+		let original = r#"
+use std::io::Error;
+use std::result::Result;
+use std::time::Instant;
+
+fn dispatch() -> Result<(), Error> {
+	let _tokio_now = tokio::time::Instant::now();
+	let _reqwest_err = reqwest::Error::from(std::io::Error::other("boom"));
+	let _reqwest_ok = reqwest::Result::<(), reqwest::Error>::Ok(());
+	let _instant = Instant::now();
+	let _error = Error::other("local");
+	let _result = Result::<(), Error>::Ok(());
+	Ok(())
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_crawler_std_tokio_reqwest_conflict.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_crawler_std_tokio_reqwest_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use std::io::Error;"));
+		assert!(!rewritten.contains("use std::result::Result;"));
+		assert!(!rewritten.contains("use std::time::Instant;"));
+		assert!(rewritten.contains("fn dispatch() -> std::result::Result<(), std::io::Error>"));
+		assert!(rewritten.contains("let _instant = std::time::Instant::now();"));
+		assert!(rewritten.contains("let _error = std::io::Error::other(\"local\");"));
+		assert!(
+			rewritten.contains("let _result = std::result::Result::<(), std::io::Error>::Ok(());")
+		);
+		assert!(rewritten.contains("tokio::time::Instant::now()"));
+		assert!(rewritten.contains("reqwest::Error::from(std::io::Error::other(\"boom\"))"));
+		assert!(rewritten.contains("reqwest::Result::<(), reqwest::Error>::Ok(())"));
+	}
+
+	#[test]
+	fn import009_fix_applies_for_pubfi_crawler_dispatcher_braced_segments() {
+		let original = r#"
+use std::{
+	collections::{HashSet, VecDeque, hash_map::Entry},
+	error::Error,
+	fmt::{Display, Formatter},
+	time::Instant,
+};
+use color_eyre::{Report, eyre};
+use color_eyre::Result;
+
+#[derive(Debug)]
+struct DispatchError;
+
+impl Display for DispatchError {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{f}")
+	}
+}
+
+impl Error for DispatchError {}
+
+fn execute(deadline: Instant) -> Result<(), Report> {
+	let _ = HashSet::<String>::new();
+	let _ = VecDeque::<String>::new();
+	let _ = std::mem::size_of::<Entry<String, String>>();
+	let _ = eyre!("boom");
+	let _tokio_deadline = tokio::time::Instant::from_std(deadline);
+	let _now = Instant::now();
+	let _reqwest_error = reqwest::Error::from(std::io::Error::other("boom"));
+	let _std_result = std::result::Result::<(), reqwest::Error>::Ok(());
+	Ok(())
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_pubfi_crawler_dispatcher.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		for symbol in ["Error", "Instant", "Result"] {
+			assert!(violations.iter().any(|v| {
+				v.rule == "RUST-STYLE-IMPORT-009"
+					&& v.fixable && v.message.contains(&format!("`{symbol}`"))
+			}));
+		}
+
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import009_pubfi_crawler_dispatcher.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert!(applied_count > 0);
+		assert!(!rewritten.contains("error::Error,"));
+		assert!(!rewritten.contains("time::Instant,"));
+		assert!(rewritten.contains("impl std::error::Error for DispatchError {}"));
+		assert!(rewritten.contains("let _now = std::time::Instant::now();"));
+	}
+
+	#[test]
+	fn import009_fix_applies_for_pubfi_gateway_service_referral_symbols() {
+		let original = r#"
+use color_eyre::Result;
+use tonic::{Request, Response, Status};
+
+use crate::{
+	grpc::{
+		GetReferralCodeRequest, GetReferralRelationByInviteeRequest, UpsertReferralCodeRequest,
+		UpsertReferralRelationRequest,
+	},
+};
+use crate::grpc::ReferralCode;
+use crate::grpc::ReferralRelation;
+
+async fn get_referral_code(
+	request: Request<GetReferralCodeRequest>,
+) -> Result<Response<ReferralCode>, Status> {
+	let UpsertReferralCodeRequest { id, referral_code, referrer } = UpsertReferralCodeRequest {
+		id: String::new(),
+		referral_code: String::new(),
+		referrer: String::new(),
+	};
+	let _record = crate::types::ReferralCode { id, referral_code, referrer, created_at: now() };
+
+	let GetReferralCodeRequest { id: _ } = request.into_inner();
+
+	Ok(Response::new(ReferralCode {
+		id: String::new(),
+		referral_code: String::new(),
+		referrer: String::new(),
+		created_at: None,
+	}))
+}
+
+async fn get_referral_relation(
+	request: Request<GetReferralRelationByInviteeRequest>,
+) -> Result<Response<ReferralRelation>, Status> {
+	let UpsertReferralRelationRequest { id, referral_code, invitee } = UpsertReferralRelationRequest {
+		id: String::new(),
+		referral_code: String::new(),
+		invitee: String::new(),
+	};
+	let _relation = crate::types::ReferralRelation { id, referral_code, invitee, created_at: now() };
+
+	let GetReferralRelationByInviteeRequest { invitee: _ } = request.into_inner();
+
+	Ok(Response::new(ReferralRelation {
+		id: String::new(),
+		referral_code: String::new(),
+		invitee: String::new(),
+		created_at: None,
+	}))
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_pubfi_gateway_service.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		for symbol in ["ReferralCode", "ReferralRelation"] {
+			assert!(violations.iter().any(|v| {
+				v.rule == "RUST-STYLE-IMPORT-009"
+					&& v.fixable && v.message.contains(&format!("`{symbol}`"))
+			}));
+		}
+
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+		assert!(
+			edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009" && e.replacement.is_empty())
+		);
+
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import009_pubfi_gateway_service.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert!(applied_count > 0);
+		assert!(rewritten.contains("Response::new(crate::grpc::ReferralCode {"));
+		assert!(rewritten.contains("Response::new(crate::grpc::ReferralRelation {"));
+	}
+
+	#[test]
+	fn import009_fix_applies_for_pubfi_gateway_service_large_use_block_shape() {
+		let original = r#"
+use color_eyre::Result;
+use tonic::{Request, Response, Status};
+
+use crate::{auth, context::Context, db::{mail_code, referral, user_data}, error::SqlxStatusExt as _, grpc::{DeleteUserDataRequest, GetReferralCodeRequest, GetReferralRelationByInviteeRequest, GetReferralRelationsByCodeRequest, GetReferralRelationsByCodeResponse, GetUserDataRequest, SendMailCodeRequest, UpdateUserDataRequest, UpdateUserDataResponse, UpsertReferralCodeRequest, UpsertReferralRelationRequest, UserData, VerifyMailCodeRequest}, mail, rate_limit::{RateLimitAction, RateLimitKeyType, RateLimitWindow}, types::{UserDataUpdate}};
+use crate::grpc::ReferralCode;
+use crate::grpc::ReferralRelation;
+
+async fn get_referral_code(
+	request: Request<GetReferralCodeRequest>,
+) -> Result<Response<ReferralCode>, Status> {
+	let UpsertReferralCodeRequest { id, referral_code, referrer } = UpsertReferralCodeRequest {
+		id: String::new(),
+		referral_code: String::new(),
+		referrer: String::new(),
+	};
+	let _record = crate::types::ReferralCode { id, referral_code, referrer, created_at: now() };
+
+	let GetReferralCodeRequest { id: _ } = request.into_inner();
+
+	Ok(Response::new(ReferralCode {
+		id: String::new(),
+		referral_code: String::new(),
+		referrer: String::new(),
+		created_at: None,
+	}))
+}
+
+async fn get_referral_relation(
+	request: Request<GetReferralRelationByInviteeRequest>,
+) -> Result<Response<ReferralRelation>, Status> {
+	let UpsertReferralRelationRequest { id, referral_code, invitee } = UpsertReferralRelationRequest {
+		id: String::new(),
+		referral_code: String::new(),
+		invitee: String::new(),
+	};
+	let _relation = crate::types::ReferralRelation { id, referral_code, invitee, created_at: now() };
+
+	let GetReferralRelationByInviteeRequest { invitee: _ } = request.into_inner();
+
+	Ok(Response::new(ReferralRelation {
+		id: String::new(),
+		referral_code: String::new(),
+		invitee: String::new(),
+		created_at: None,
+	}))
+}
+"#;
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_pubfi_gateway_service_large_use_shape.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
+		assert!(!rewritten.contains("use crate::grpc::ReferralCode;"), "Rewritten:\n{rewritten}");
+		assert!(
+			!rewritten.contains("use crate::grpc::ReferralRelation;"),
+			"Rewritten:\n{rewritten}"
+		);
+		assert!(rewritten.contains("Result<Response<crate::grpc::ReferralCode>, Status>"));
+		assert!(rewritten.contains("Result<Response<crate::grpc::ReferralRelation>, Status>"));
+		assert!(rewritten.contains("Response::new(crate::grpc::ReferralCode {"));
+		assert!(rewritten.contains("Response::new(crate::grpc::ReferralRelation {"));
+	}
+
+	#[test]
+	fn import009_fix_applies_when_result_line_also_breaks_import_group_order() {
+		let original = r#"
+use std::time::Duration;
+use reqwest::Response;
+
+use crate::http::dispatcher::RequestSpec;
+use color_eyre::Result;
+
+fn execute(_spec: RequestSpec) -> Result<Response> {
+	let _std_result = std::result::Result::<(), reqwest::Error>::Ok(());
+	let _duration = Duration::from_millis(1);
+	todo!()
+}
+"#;
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_result_with_import001_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
+		assert!(!rewritten.contains("use color_eyre::Result;"), "Rewritten:\n{rewritten}");
+		assert!(
+			rewritten.contains("fn execute(_spec: RequestSpec) -> color_eyre::Result<Response>")
+		);
+	}
+
+	#[test]
+	fn import009_fix_applies_for_pubfi_crawler_result_import_after_workspace_group() {
+		let original = r#"
+use std::{collections::{HashSet, VecDeque, hash_map::Entry}, fmt::{Display, Formatter}, sync::atomic::{AtomicUsize, Ordering}, task::{Context, Poll}};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc, time::Duration};
+
+use derive_setters::Setters;
+use reqwest::{Method, Request, Response, Url, header::HeaderName};
+use tokio::sync::{
+	AcquireError, OwnedSemaphorePermit,
+	mpsc::{self, Receiver},
+	oneshot,
+};
+use tower::{
+	Service,
+	util::{BoxCloneService, ServiceExt as _},
+};
+use tracing::Instrument;
+use color_eyre::{Report, eyre};
+use reqwest::Client;
+use sqlx::types::Uuid;
+use tokio::sync::{Mutex, Semaphore};
+
+use crate::http::{
+	control::{AdaptiveState, CircuitBreaker, Feedback, HostControl, QpsLimiter},
+	params::{AdaptiveParams, DispatcherParams},
+};
+use pubfi_obs::{RuntimeEvent, RuntimeLog};
+use pubfi_util::{Backoff, RetryError};
+
+use color_eyre::Result;
+
+pub type GatewayService = BoxCloneService<RequestSpec, Response, Report>;
+
+#[derive(Debug)]
+enum DispatchError {
+	QueueFull,
+}
+impl Display for DispatchError {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{f}")
+	}
+}
+impl std::error::Error for DispatchError {}
+
+fn poll_ready(_: &mut Context) -> Poll<std::result::Result<(), Report>> {
+	let _ = std::result::Result::<(), Report>::Ok(());
+	Poll::Ready(Ok(()))
+}
+
+async fn acquire_queue() -> Result<OwnedSemaphorePermit> {
+	let _ = (
+		AdaptiveState::default(),
+		CircuitBreaker::new(0),
+		Feedback::default(),
+		HostControl::default(),
+		QpsLimiter::default(),
+		AdaptiveParams::default(),
+		DispatcherParams::default(),
+		Backoff::default(),
+		RetryError::default(),
+	);
+	let _ = (
+		HashSet::<String>::new(),
+		VecDeque::<String>::new(),
+		std::mem::size_of::<Entry<String, String>>(),
+		AtomicUsize::new(0),
+		Ordering::Relaxed,
+		Arc::new(AtomicUsize::new(1)),
+		Duration::from_millis(1),
+		Method::GET,
+		Request::new(Method::GET, Url::parse("https://example.com").expect("url")),
+		Response::new(reqwest::Body::default()),
+		HeaderName::from_static("x-test"),
+		AcquireError::NoPermits,
+		Receiver::<()>::default(),
+		oneshot::channel::<()>().0,
+		Client::new(),
+		Uuid::nil(),
+		Mutex::new(()),
+		Semaphore::new(1),
+		RuntimeEvent::Shutdown,
+		RuntimeLog::default(),
+		eyre!("boom"),
+	);
+	todo!()
+}
+"#;
+		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_pubfi_crawler_result_after_workspace_group.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
+		assert!(!rewritten.contains("use color_eyre::Result;"), "Rewritten:\n{rewritten}");
+		assert!(
+			rewritten
+				.contains("async fn acquire_queue() -> color_eyre::Result<OwnedSemaphorePermit>")
+		);
 	}
 
 	#[test]
@@ -2608,6 +3993,568 @@ fn parse_value() -> Result<u8, &'static str> {
 
 		assert!(!rewritten.contains("use std::fmt::Result;"));
 		assert!(rewritten.contains("fn parse_value() -> Result<u8, &'static str>"));
+	}
+
+	#[test]
+	fn import009_fix_is_not_undone_by_import008_for_result_symbols() {
+		let original = r#"
+use color_eyre::Result;
+
+fn display() -> std::fmt::Result {
+	Ok(())
+}
+
+fn run() -> Result<()> {
+	Ok(())
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import009_import008_result_cycle.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use color_eyre::Result;"));
+		assert!(rewritten.contains("fn display() -> std::fmt::Result"));
+		assert!(rewritten.contains("fn run() -> color_eyre::Result<()>"));
+
+		let (
+			repeated,
+			_repeated_applied_count,
+			_repeated_had_import_shortening_edits,
+			_repeated_had_let_mut_reorder_edits,
+		) = apply_fix_passes(Path::new("import009_import008_result_cycle.rs"), &rewritten, true)
+			.expect("repeat apply fix passes");
+
+		assert_eq!(repeated.trim_start_matches('\n'), rewritten.trim_start_matches('\n'));
+	}
+
+	#[test]
+	fn import009_autofix_applies_for_unqualified_type_with_qualified_same_path_value_constructor() {
+		let original = r#"
+use serde_json::Value;
+
+fn build_payload() -> Value {
+	serde_json::Value::String("ok".to_string())
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_unqualified_type_qualified_value_constructor.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let import009_edits = edits
+			.into_iter()
+			.filter(|edit| edit.rule == "RUST-STYLE-IMPORT-009")
+			.collect::<Vec<_>>();
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, import009_edits).expect("apply edits");
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(applied > 0);
+		assert!(!rewritten.contains("use serde_json::Value;"));
+		assert!(rewritten.contains("fn build_payload() -> serde_json::Value"));
+		assert!(rewritten.contains("serde_json::Value::String(\"ok\".to_string())"));
+	}
+
+	#[test]
+	fn import009_autofix_applies_for_unqualified_error_type_with_qualified_same_path_variant_usage()
+	{
+		let original = r#"
+use pubfi_search::Error;
+
+struct SearchFailure {
+	source: Error,
+}
+
+fn normalize_error(input: Error) -> Error {
+	let _ = input;
+	pubfi_search::Error::NotFound
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_unqualified_error_type_qualified_variant.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let import009_edits = edits
+			.into_iter()
+			.filter(|edit| edit.rule == "RUST-STYLE-IMPORT-009")
+			.collect::<Vec<_>>();
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, import009_edits).expect("apply edits");
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(applied > 0);
+		assert!(!rewritten.contains("use pubfi_search::Error;"));
+		assert!(rewritten.contains("source: pubfi_search::Error"));
+		assert!(
+			rewritten
+				.contains("fn normalize_error(input: pubfi_search::Error) -> pubfi_search::Error")
+		);
+		assert!(rewritten.contains("pubfi_search::Error::NotFound"));
+	}
+
+	#[test]
+	fn import009_fix_stays_applied_for_grouped_pubfi_search_import_with_separate_error_import() {
+		let original = r#"
+use pubfi_search::{
+	client::SearchClient,
+	query::SearchQuery,
+};
+use pubfi_search::Error;
+
+struct SearchFailure {
+	source: Error,
+}
+
+fn normalize_error(input: Error, query: SearchQuery, client: SearchClient) -> Error {
+	let _ = input;
+	let _ = query;
+	let _ = client;
+	pubfi_search::Error::NotFound
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_import008_pubfi_search_error_cycle.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use pubfi_search::Error;"));
+		assert!(rewritten.contains("source: pubfi_search::Error"));
+		assert!(
+			rewritten.contains(
+				"fn normalize_error(input: pubfi_search::Error, query: SearchQuery, client: SearchClient) -> pubfi_search::Error"
+			)
+		);
+		assert!(rewritten.contains("pubfi_search::Error::NotFound"));
+
+		let (
+			repeated,
+			repeated_applied_count,
+			_repeated_had_import_shortening_edits,
+			_repeated_had_let_mut_reorder_edits,
+		) = apply_fix_passes(
+			Path::new("import009_import008_pubfi_search_error_cycle.rs"),
+			&rewritten,
+			true,
+		)
+		.expect("repeat apply fix passes");
+
+		assert_eq!(repeated_applied_count, 0);
+		assert_eq!(repeated.trim_start_matches('\n'), rewritten.trim_start_matches('\n'));
+	}
+
+	#[test]
+	fn import009_does_not_autofix_when_symbol_has_standalone_value_uses() {
+		let original = r#"
+use pubfi_search::query;
+
+fn validate_percolator_query(query: &serde_json::Value) {
+	let _ = sqlx::query("SELECT 1");
+	let _ = query.get("bool");
+	let _dsl = query::build_percolate_dsl_from_constraints;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_standalone_value_uses.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
+	}
+
+	#[test]
+	fn import009_ignores_lowercase_module_symbol_with_qualified_module_sibling() {
+		let original = r#"
+use crate::service::feed::feeds;
+
+fn publish() {
+	let _ = feeds::get_owned_feed;
+	let _ = store::feed::feeds::update_by_id;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_lowercase_module_symbol.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_qualified_associated_fn_receiver_symbol() {
+		let original = r#"
+use crate::cli::PercolateFilterMode;
+
+fn normalize(filter_mode: PercolateFilterMode) {
+	let _ = pubfi_query::PercolateFilterMode::from(filter_mode);
+}
+"#;
+		let expected = r#"
+fn normalize(filter_mode: crate::cli::PercolateFilterMode) {
+	let _ = pubfi_query::PercolateFilterMode::from(filter_mode);
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(
+				Path::new("import009_associated_fn_receiver_symbol.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert_eq!(rewritten.trim_start_matches('\n'), expected.trim_start_matches('\n'));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_dyn_trait_type_when_associated_receiver_path_conflicts() {
+		let original = r#"
+use age::Recipient;
+
+fn encrypt(recipients: &[String]) {
+	let recipients = recipients.iter().map(|s| age::x25519::Recipient::from_str(s).unwrap());
+	let _ = recipients.map(|r| r as &dyn Recipient).count();
+}
+"#;
+		let expected = r#"
+fn encrypt(recipients: &[String]) {
+	let recipients = recipients.iter().map(|s| age::x25519::Recipient::from_str(s).unwrap());
+	let _ = recipients.map(|r| r as &dyn age::Recipient).count();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import009_age_recipient_conflict.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert_eq!(rewritten.trim_start_matches('\n'), expected.trim_start_matches('\n'));
+	}
+
+	#[test]
+	fn import009_cycle_guard_blocks_unqualified_value_with_qualified_type_same_path() {
+		let original = r#"
+use serde_json::Value;
+
+fn build_payload() -> serde_json::Value {
+	Value::String("ok".to_string())
+}
+"#;
+		let expected = r#"
+use serde_json::Value;
+
+fn build_payload() -> Value {
+	Value::String("ok".to_string())
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import009_import008_value_cycle.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert_eq!(rewritten.trim_start_matches('\n'), expected.trim_start_matches('\n'));
+
+		let (
+			repeated,
+			repeated_applied_count,
+			_repeated_had_import_shortening_edits,
+			_repeated_had_let_mut_reorder_edits,
+		) = apply_fix_passes(Path::new("import009_import008_value_cycle.rs"), &rewritten, true)
+			.expect("repeat apply fix passes");
+
+		assert_eq!(repeated_applied_count, 0);
+		assert_eq!(repeated.trim_start_matches('\n'), rewritten.trim_start_matches('\n'));
+	}
+
+	#[test]
+	fn import009_fix_stays_applied_for_serde_value_with_other_imports() {
+		let original = r#"
+use std::collections::HashMap;
+
+use serde_json::Value;
+
+fn build_payload() -> Value {
+	serde_json::Value::String("ok".to_string())
+}
+
+fn capture(mut map: HashMap<String, Value>) {
+	map.insert("kind".to_string(), serde_json::Value::String("x".to_string()));
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("import009_import008_serde_value_cycle.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use serde_json::Value;"));
+		assert!(rewritten.contains("fn build_payload() -> serde_json::Value"));
+		assert!(rewritten.contains("fn capture(mut map: HashMap<String, serde_json::Value>)"));
+		assert!(rewritten.contains("serde_json::Value::String(\"x\".to_string())"));
+
+		let (
+			repeated,
+			repeated_applied_count,
+			_repeated_had_import_shortening_edits,
+			_repeated_had_let_mut_reorder_edits,
+		) = apply_fix_passes(Path::new("import009_import008_serde_value_cycle.rs"), &rewritten, true)
+			.expect("repeat apply fix passes");
+
+		assert_eq!(repeated_applied_count, 0);
+		assert_eq!(repeated.trim_start_matches('\n'), rewritten.trim_start_matches('\n'));
+	}
+
+	#[test]
+	fn import009_fix_rewrites_struct_literal_value_path_when_symbol_is_ambiguous() {
+		let original = r#"
+use crate::types::ReferralCode;
+
+fn upsert(input: crate::grpc::ReferralCode) -> crate::types::ReferralCode {
+	let _ = input;
+	let record = ReferralCode { id: "x".to_string() };
+	record
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_struct_literal_value_path.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("use crate::types::ReferralCode;"));
+		assert!(
+			rewritten
+				.contains("let record = crate::types::ReferralCode { id: \"x\".to_string() };")
+		);
+	}
+
+	#[test]
+	fn import009_fix_rewrites_struct_literal_value_path_from_braced_use_with_alias_sibling() {
+		let original = r#"
+use crate::{error::SqlxStatusExt as _, grpc::{GetReferralCodeRequest}, types::{ReferralCode}};
+
+fn upsert(input: crate::grpc::ReferralCode) -> crate::types::ReferralCode {
+	let _ = input;
+	let _ = GetReferralCodeRequest { id: String::new() };
+	let record = ReferralCode { id: "x".to_string() };
+	record
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_struct_literal_braced_alias_sibling.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("SqlxStatusExt as _"));
+		assert!(!rewritten.contains("types::{ReferralCode}"));
+		assert!(
+			rewritten
+				.contains("let record = crate::types::ReferralCode { id: \"x\".to_string() };")
+		);
+	}
+
+	#[test]
+	fn import009_fix_rewrites_gateway_style_struct_literal_from_large_braced_use_tree() {
+		let original = r#"
+use crate::{auth, context::Context, db::{mail_code, referral, user_data}, error::SqlxStatusExt as _, grpc::{DeleteUserDataRequest, GetReferralCodeRequest, GetReferralRelationByInviteeRequest, GetReferralRelationsByCodeRequest, GetReferralRelationsByCodeResponse, GetUserDataRequest, SendMailCodeRequest, UpdateUserDataRequest, UpdateUserDataResponse, UpsertReferralCodeRequest, UpsertReferralRelationRequest, UserData, VerifyMailCodeRequest}, mail, rate_limit::{RateLimitAction, RateLimitKeyType, RateLimitWindow}, types::{ReferralCode, ReferralRelation, UserDataUpdate}};
+
+fn upsert_referral_code(request: crate::grpc::ReferralCode) -> crate::grpc::ReferralCode {
+	let _ = (
+		auth::client_app_from_request,
+		mail_code::delete_by_id,
+		referral::insert_code,
+		user_data::get_or_insert,
+		mail::generate_code,
+		RateLimitAction::Send,
+		RateLimitKeyType::Mail,
+		RateLimitWindow { window_seconds: 1, limit: 1 },
+		DeleteUserDataRequest {},
+		GetReferralCodeRequest {},
+		GetReferralRelationByInviteeRequest {},
+		GetReferralRelationsByCodeRequest {},
+		GetReferralRelationsByCodeResponse { relations: Vec::new() },
+		GetUserDataRequest {},
+		SendMailCodeRequest {},
+		UpdateUserDataRequest {},
+		UpdateUserDataResponse {},
+		UpsertReferralCodeRequest {},
+		UpsertReferralRelationRequest {},
+		UserData {},
+		VerifyMailCodeRequest {},
+	);
+	let _ = (
+		ReferralRelation { id: String::new(), referral_code: String::new(), invitee: String::new(), created_at: now() },
+		UserDataUpdate { user_id: String::new(), user_data: None },
+	);
+	let record = ReferralCode { id: String::new(), referral_code: String::new(), referrer: String::new(), created_at: now() };
+	let _ = Context::new();
+	let _ = request;
+	crate::grpc::ReferralCode { id: record.id, referral_code: record.referral_code, referrer: record.referrer, created_at: None }
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_gateway_style_large_use.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("types::{ReferralCode,"));
+		assert!(rewritten.contains("let record = crate::types::ReferralCode {"));
+	}
+
+	#[test]
+	fn import009_fix_applies_for_gateway_symbols_with_separate_imports_and_conflicting_paths() {
+		let original = r#"
+use crate::types::ReferralCode;
+use crate::types::ReferralRelation;
+
+fn upsert_referral_code(
+	request: crate::grpc::ReferralCode,
+	request_relation: crate::grpc::ReferralRelation,
+) -> crate::grpc::ReferralCode {
+	let _ = request_relation;
+	let _relation = ReferralRelation {
+		id: String::new(),
+		referral_code: String::new(),
+		invitee: String::new(),
+		created_at: now(),
+	};
+	let record = ReferralCode {
+		id: String::new(),
+		referral_code: String::new(),
+		referrer: String::new(),
+		created_at: now(),
+	};
+	let _type_conflict_code: crate::grpc::ReferralCode = request;
+	let _type_conflict_relation: crate::grpc::ReferralRelation = request_relation;
+	crate::grpc::ReferralCode {
+		id: record.id,
+		referral_code: record.referral_code,
+		referrer: record.referrer,
+		created_at: None,
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_gateway_separate_imports_conflicting_paths.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-009" && v.fixable && v.message.contains("`ReferralCode`")
+		}));
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-009"
+				&& v.fixable && v.message.contains("`ReferralRelation`")
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied > 0);
+		assert!(!rewritten.contains("use crate::types::ReferralCode;"));
+		assert!(!rewritten.contains("use crate::types::ReferralRelation;"));
+		assert!(rewritten.contains("let _relation = crate::types::ReferralRelation {"));
+		assert!(rewritten.contains("let record = crate::types::ReferralCode {"));
+	}
+
+	#[test]
+	fn import009_fix_applies_when_gateway_imports_are_eof_and_same_line() {
+		let original = r#"fn upsert_referral_code(
+	request: crate::grpc::ReferralCode,
+	request_relation: crate::grpc::ReferralRelation,
+) -> crate::grpc::ReferralCode {
+	let _relation = ReferralRelation {
+		id: String::new(),
+		referral_code: String::new(),
+		invitee: String::new(),
+		created_at: now(),
+	};
+	let record = ReferralCode {
+		id: String::new(),
+		referral_code: String::new(),
+		referrer: String::new(),
+		created_at: now(),
+	};
+	let _type_conflict_code: crate::grpc::ReferralCode = request;
+	let _type_conflict_relation: crate::grpc::ReferralRelation = request_relation;
+	crate::grpc::ReferralCode {
+		id: record.id,
+		referral_code: record.referral_code,
+		referrer: record.referrer,
+		created_at: None,
+	}
+}
+use crate::types::ReferralCode; use crate::types::ReferralRelation;"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import009_gateway_separate_imports_eof_same_line.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-009" && v.fixable && v.message.contains("`ReferralCode`")
+		}));
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-009"
+				&& v.fixable && v.message.contains("`ReferralRelation`")
+		}));
+
+		let import009_edits = edits
+			.into_iter()
+			.filter(|edit| edit.rule == "RUST-STYLE-IMPORT-009")
+			.collect::<Vec<_>>();
+
+		assert!(!import009_edits.is_empty());
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, import009_edits).expect("apply edits");
+
+		assert!(applied > 0);
+		assert!(!rewritten.contains("use crate::types::ReferralCode;"));
+		assert!(!rewritten.contains("use crate::types::ReferralRelation;"));
+		assert!(rewritten.contains("let _relation = crate::types::ReferralRelation {"));
+		assert!(rewritten.contains("let record = crate::types::ReferralCode {"));
 	}
 
 	#[test]
@@ -3174,6 +5121,233 @@ const LIMIT: usize = 3;
 	}
 
 	#[test]
+	fn mod001_fix_reorders_use_before_macro_calls() {
+		let original = r#"
+macro_rules! define_placeholder {
+	() => {};
+}
+
+define_placeholder! {}
+
+pub use crate::api::Code;
+
+define_placeholder! {}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod001_macro_call_reorder.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-001" && v.fixable));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-001"));
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		let use_pos = rewritten.find("pub use crate::api::Code;").expect("has use");
+		let first_macro_call_pos =
+			rewritten.find("define_placeholder! {}").expect("has macro call");
+
+		assert!(use_pos < first_macro_call_pos);
+	}
+
+	#[test]
+	fn mod001_fix_reorders_use_before_macro_calls_inside_inline_module() {
+		let original = r#"
+pub mod api_code {
+	#[cfg(feature = "pubfi")]
+	mod pubfi {
+		def_api_codes! {
+			ERR_A = -1,
+			ERR_B = -2,
+		}
+	}
+
+	def_api_codes! {
+		OUTSIDE_A = -3,
+	}
+
+	#[cfg(feature = "pubfi")] pub use self::pubfi::*;
+
+	#[cfg(feature = "pubfi")]
+	def_api_codes! {
+		OK = 0,
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("mod001_inline_module_macro_use.rs"), original, true)
+				.expect("apply fix passes");
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+		let use_pos =
+			compact.find("pubuseself::pubfi::{ERR_A,ERR_B};").expect("has rewritten pub use");
+		let first_macro_pos = compact.find("OUTSIDE_A=-3").expect("has first macro call");
+		let second_macro_pos = compact.find("OK=0").expect("has second macro call");
+
+		assert!(use_pos < first_macro_pos);
+		assert!(first_macro_pos < second_macro_pos);
+		assert!(rewritten.contains("}\n\n\t#[cfg(feature = \"pubfi\")] pub use self::pubfi::{"));
+		assert!(rewritten.contains("pub use self::pubfi::{ERR_A, ERR_B};\n\n\tdef_api_codes! {"));
+	}
+
+	#[test]
+	fn mod001_fix_hoists_macro_rules_before_prior_nested_macro_call() {
+		let original = r#"
+pub mod api_code {
+	#[cfg(feature = "pubfi")]
+	pub mod pubfi {
+		def_api_codes! {
+			ERR_A = -1;
+		}
+	}
+
+	pub use self::pubfi::{ERR_A};
+
+	macro_rules! def_api_codes {
+		($($name:ident = $code:expr;)*) => {
+			$(pub const $name: i16 = $code;)*
+		};
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			apply_fix_passes(Path::new("mod001_hoist_macro_rules.rs"), original, true)
+				.expect("apply fix passes");
+		let macro_pos = rewritten.find("macro_rules! def_api_codes").expect("has macro rules");
+		let mod_pos = rewritten.find("pub mod pubfi").expect("has pubfi module");
+
+		assert!(macro_pos < mod_pos, "{rewritten}");
+	}
+
+	#[test]
+	fn mod001_mod002_fix_reorders_use_blocks_split_by_mod_items() {
+		let original = r#"use std::sync::LazyLock;
+
+pub mod backoff;
+#[cfg(feature = "crypto")] pub mod crypto;
+pub mod retry;
+#[cfg(feature = "serde")] pub mod serde_helpers;
+
+#[cfg(feature = "crypto")] pub use crate::crypto::blake2b256;
+pub use crate::{
+	backoff::Backoff,
+	retry::{RetryError, RetryPolicy},
+};
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod001_mod002_split_use_blocks.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(
+			violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-001" && v.fixable),
+			"{violations:#?}"
+		);
+		assert!(
+			violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-002" && v.fixable),
+			"{violations:#?}"
+		);
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-001"), "{edits:#?}");
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(rewritten.contains(
+			"pub mod backoff;\n#[cfg(feature = \"crypto\")] pub mod crypto;\npub mod retry;\n#[cfg(feature = \"serde\")] pub mod serde_helpers;"
+		));
+	}
+
+	#[test]
+	fn mod_group_spacing_fix_keeps_pub_mod_group_compact() {
+		let original = r#"
+pub mod backoff;
+
+#[cfg(feature = "crypto")] pub mod crypto;
+
+pub mod retry;
+
+#[cfg(feature = "serde")] pub mod serde_helpers;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod_group_compact_spacing.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-SPACE-003"
+				&& v.message == "Do not insert blank lines within module declaration groups."
+				&& v.fixable
+		}));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(rewritten.contains(
+			"pub mod backoff;\n#[cfg(feature = \"crypto\")] pub mod crypto;\npub mod retry;\n#[cfg(feature = \"serde\")] pub mod serde_helpers;"
+		));
+	}
+
+	#[test]
+	fn mod002_fix_inserts_blank_line_between_pub_and_pub_crate_mod_batches() {
+		let original = r#"
+pub mod backoff;
+pub(crate) mod crypto;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod002_visibility_batch_spacing_mod.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-MOD-002"
+				&& v.message
+					== "Insert exactly one blank line between visibility batches within the same item kind."
+				&& v.fixable
+		}));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(rewritten.contains("pub mod backoff;\n\npub(crate) mod crypto;"));
+	}
+
+	#[test]
+	fn mod002_keeps_existing_blank_line_between_pub_and_pub_crate_mod_batches() {
+		let original = r#"
+pub mod backoff;
+
+pub(crate) mod crypto;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod002_visibility_batch_spacing_mod_keep.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-SPACE-003"
+				&& v.message == "Do not insert blank lines within module declaration groups."
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SPACE-003"));
+	}
+
+	#[test]
 	fn mod002_fix_reorders_pub_items_across_interleaved_segments() {
 		let original = r#"
 fn internal_a() -> usize {
@@ -3290,13 +5464,13 @@ pub const PUBLIC_LIMIT: usize = 5;
 	}
 
 	#[test]
-	fn mod002_fix_inserts_blank_line_between_visibility_batches_without_reorder() {
+	fn mod002_fix_inserts_blank_line_between_pub_and_pub_crate_const_batches_without_reorder() {
 		let original = r#"
 pub const PUBLIC_LIMIT: usize = 5;
-const INTERNAL_LIMIT: usize = 3;
+pub(crate) const CRATE_LIMIT: usize = 3;
 "#;
 		let ctx = shared::read_file_context_from_text(
-			Path::new("mod002_visibility_batch_spacing.rs"),
+			Path::new("mod002_visibility_batch_spacing_const.rs"),
 			original.to_owned(),
 		)
 		.expect("context")
@@ -3306,7 +5480,7 @@ const INTERNAL_LIMIT: usize = 3;
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-MOD-002"
 				&& v.message
-					== "Insert exactly one blank line between pub and non-pub batches within the same item kind."
+					== "Insert exactly one blank line between visibility batches within the same item kind."
 				&& v.fixable
 		}));
 
@@ -3314,10 +5488,31 @@ const INTERNAL_LIMIT: usize = 3;
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
 		assert!(applied >= 1);
-		assert!(
-			rewritten
-				.contains("pub const PUBLIC_LIMIT: usize = 5;\n\nconst INTERNAL_LIMIT: usize = 3;")
-		);
+		assert!(rewritten.contains(
+			"pub const PUBLIC_LIMIT: usize = 5;\n\npub(crate) const CRATE_LIMIT: usize = 3;"
+		));
+	}
+
+	#[test]
+	fn mod002_keeps_existing_blank_line_between_pub_and_pub_crate_const_batches() {
+		let original = r#"
+pub const PUBLIC_LIMIT: usize = 5;
+
+pub(crate) const CRATE_LIMIT: usize = 3;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod002_visibility_batch_spacing_const_keep.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-SPACE-003"
+				&& v.message == "Do not insert blank lines within constant declaration groups."
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SPACE-003"));
 	}
 
 	#[test]
@@ -3464,14 +5659,14 @@ type A<'a, T> = B<'a, T>;
 			violations.iter().filter(|v| v.rule == "RUST-STYLE-TYPE-001").collect::<Vec<_>>();
 
 		assert_eq!(matches.len(), 4);
-		assert!(matches.iter().all(|v| !v.fixable));
+		assert!(matches.iter().all(|v| v.fixable));
 	}
 
 	#[test]
 	fn type001_skips_specialized_or_non_path_aliases() {
 		let original = r#"
-	type Bytes = Vec<u8>;
-	type MyResult<T> = Result<T, MyError>;
+		type Bytes = Vec<u8>;
+		type MyResult<T> = Result<T, MyError>;
 	type MyResultWithDefault<T, E = Error> = std::result::Result<T, E>;
 	type Span = (usize, usize);
 	"#;
@@ -3484,6 +5679,107 @@ type A<'a, T> = B<'a, T>;
 		let (violations, _edits) = collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001"));
+	}
+
+	#[test]
+	fn type001_skips_associated_types_in_impl_blocks() {
+		let original = r#"
+trait Service {
+	type Response;
+	type Error;
+}
+
+struct Wrapper;
+
+impl Service for Wrapper {
+	type Response = String;
+	type Error = std::io::Error;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("types_rule_impl_associated_types.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001"));
+	}
+
+	#[test]
+	fn type001_fix_removes_primitive_public_alias_and_rewrites_uses() {
+		let original = r#"
+pub type Code = i16;
+
+	pub struct ApiEnvelope {
+		pub code: Code,
+	}
+"#;
+		let path = Path::new("types_rule_primitive_alias_fix.rs");
+		let ctx = shared::read_file_context_from_text(path, original.to_owned())
+			.expect("context")
+			.expect("has ctx");
+		let type_fixes = types::collect_type_alias_rename_fixes(&ctx);
+
+		assert_eq!(type_fixes.len(), 1);
+
+		let plan = &type_fixes[0];
+		let mut renames = BTreeMap::new();
+		let mut edits = plan.definition_edits.clone();
+
+		renames.insert(plan.alias.clone(), plan.target.clone());
+
+		let skip_ranges = edits.iter().map(|edit| (edit.start, edit.end)).collect::<Vec<_>>();
+		let usage_edits = types::build_type_alias_usage_rename_edits(&ctx, &renames, &skip_ranges);
+
+		edits.extend(usage_edits);
+
+		let mut rewritten = original.to_owned();
+		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(!rewritten.contains("type Code"));
+		assert!(rewritten.contains("pub code: i16,"));
+	}
+
+	#[test]
+	fn type001_private_alias_is_autofixable() {
+		let original = r#"
+type Hidden = i32;
+
+fn produce() -> Hidden {
+	Hidden
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("types_rule_private_alias.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, _edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001" && v.fixable));
+
+		let type_fixes = types::collect_type_alias_rename_fixes(&ctx);
+
+		assert_eq!(type_fixes.len(), 1);
+
+		let plan = &type_fixes[0];
+
+		assert_eq!(plan.alias, "Hidden");
+		assert_eq!(plan.target, "i32");
+		assert!(plan.definition_edits.iter().any(|edit| edit.rule == "RUST-STYLE-TYPE-001"));
+
+		let mut renames = BTreeMap::new();
+
+		renames.insert(plan.alias.clone(), plan.target.clone());
+
+		let skip_ranges =
+			plan.definition_edits.iter().map(|edit| (edit.start, edit.end)).collect::<Vec<_>>();
+		let usage_edits = types::build_type_alias_usage_rename_edits(&ctx, &renames, &skip_ranges);
+
+		assert!(usage_edits.iter().any(|edit| edit.replacement == "i32"));
 	}
 
 	#[test]
@@ -3708,7 +6004,7 @@ fn sample() {
 	#[test]
 	fn should_stop_tune_round_stops_when_no_fixes_applied() {
 		let (should_stop, non_decreasing_rounds) =
-			crate::style::should_stop_tune_round(0, 10, 12, 1);
+			crate::style::should_stop_tune_round(0, 10, 12, 1, true);
 
 		assert!(should_stop);
 		assert_eq!(non_decreasing_rounds, 1);
@@ -3717,7 +6013,7 @@ fn sample() {
 	#[test]
 	fn should_stop_tune_round_stops_when_no_fixable_violations() {
 		let (should_stop, non_decreasing_rounds) =
-			crate::style::should_stop_tune_round(2, 0, 12, 1);
+			crate::style::should_stop_tune_round(2, 0, 12, 1, true);
 
 		assert!(should_stop);
 		assert_eq!(non_decreasing_rounds, 1);
@@ -3726,7 +6022,7 @@ fn sample() {
 	#[test]
 	fn should_stop_tune_round_resets_streak_when_fixable_count_decreases() {
 		let (should_stop, non_decreasing_rounds) =
-			crate::style::should_stop_tune_round(2, 8, 12, 2);
+			crate::style::should_stop_tune_round(2, 8, 12, 2, true);
 
 		assert!(!should_stop);
 		assert_eq!(non_decreasing_rounds, 0);
@@ -3735,7 +6031,7 @@ fn sample() {
 	#[test]
 	fn should_stop_tune_round_continues_on_first_non_decreasing_round() {
 		let (should_stop, non_decreasing_rounds) =
-			crate::style::should_stop_tune_round(2, 12, 12, 0);
+			crate::style::should_stop_tune_round(2, 12, 12, 0, true);
 
 		assert!(!should_stop);
 		assert_eq!(non_decreasing_rounds, 1);
@@ -3744,9 +6040,53 @@ fn sample() {
 	#[test]
 	fn should_stop_tune_round_stops_on_second_consecutive_non_decreasing_round() {
 		let (should_stop, non_decreasing_rounds) =
-			crate::style::should_stop_tune_round(2, 12, 12, 1);
+			crate::style::should_stop_tune_round(2, 12, 12, 1, true);
 
 		assert!(should_stop);
 		assert_eq!(non_decreasing_rounds, 2);
+	}
+
+	#[test]
+	fn should_stop_tune_round_stops_when_follow_up_round_is_not_needed() {
+		let (should_stop, non_decreasing_rounds) =
+			crate::style::should_stop_tune_round(2, 8, 12, 0, false);
+
+		assert!(should_stop);
+		assert_eq!(non_decreasing_rounds, 0);
+	}
+
+	#[test]
+	fn resolve_fix_round_scopes_workspace_splits_to_package_scopes() {
+		let cargo_options = shared::CargoOptions { workspace: true, ..Default::default() };
+		let scopes = super::resolve_fix_round_scopes(&cargo_options).expect("resolve fix scopes");
+
+		assert!(!scopes.is_empty());
+		assert!(scopes.iter().all(|(files, options)| !files.is_empty() && !options.workspace));
+		assert!(scopes.iter().all(|(_, options)| !options.packages.is_empty()));
+	}
+
+	#[test]
+	fn net_file_change_detection_matches_snapshot_delta() {
+		let nanos = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("current timestamp")
+			.as_nanos();
+		let path = std::env::temp_dir().join(format!(
+			"vstyle-net-change-{}-{}.rs",
+			std::process::id(),
+			nanos
+		));
+
+		fs::write(&path, "fn sample() {}\n").expect("seed temp file");
+
+		let snapshots = super::collect_file_snapshots(std::slice::from_ref(&path));
+
+		assert!(!super::has_net_file_changes(&snapshots));
+
+		fs::write(&path, "fn changed() {}\n").expect("mutate temp file");
+
+		assert!(super::has_net_file_changes(&snapshots));
+
+		let _ = fs::remove_file(&path);
 	}
 }

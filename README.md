@@ -207,6 +207,7 @@ Rules are built into the checker.
 - `RUST-STYLE-MOD-002`: Place `pub` items before non-`pub` items within the same kind. Visibility boundaries define separate batches and must be separated by exactly one blank line.
 - `RUST-STYLE-MOD-003`: Place non-`async` functions before `async` functions at the same visibility.
 - `RUST-STYLE-MOD-005`: Keep each type adjacent to related `impl` blocks, with no blank line between the type and its first `impl`.
+- `RUST-STYLE-MOD-007`: In `#[cfg(test)] mod tests`, remove unused `use super::*;` keep-alive imports during `tune`.
 
 ### Serde
 
@@ -219,17 +220,20 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPORT-003`: Do not alias imports, except `as _` keep-alive imports. Trait imports used only for method resolution must use `as _`.
 - `RUST-STYLE-IMPORT-004`: Do not import free functions or macros into scope; use qualified paths. If imported symbols are ambiguous, use fully qualified paths.
 - `RUST-STYLE-IMPORT-005`: In `error.rs`, do not add `use` imports.
+- `RUST-STYLE-IMPORT-007`: Do not use glob imports (`use ...::*` or equivalent). Use explicit imports only.
 - `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
-- `RUST-STYLE-IMPORT-007`: Do not use glob imports (`use ...::*` or equivalent). Use explicit imports only.
-- `RUST-STYLE-IMPORT-010`: Do not use `super` imports; rewrite to crate-absolute imports (`use crate::...`) when module depth allows it.
+- `RUST-STYLE-IMPORT-010`: Do not use `super` or `self` import prefixes. Rewrite `super` imports to crate-absolute imports (`use crate::...`) when module depth allows it, and rewrite `self::...` imports to direct module paths.
 
 ### Types and generics
 
 - `RUST-STYLE-IMPL-001`: Use `Self` instead of concrete type names in `impl` method signatures.
 - `RUST-STYLE-IMPL-003`: Keep `impl` blocks contiguous and ordered as inherent, standard-library traits, third-party traits, then workspace-member traits.
 - `RUST-STYLE-GENERICS-001`: Move trait bounds to `where`; do not use inline bounds.
+- `RUST-STYLE-GENERICS-002`: Remove unnecessary turbofish when the type is already explicit in a `let` binding.
+- `RUST-STYLE-GENERICS-003`: Canonicalize turbofish paths to `Type::<Args>::Assoc` form.
 - `RUST-STYLE-TYPE-001`: Do not add type aliases that are only pure renames.
+- `RUST-STYLE-LET-001`: Place immutable `let` bindings before mutable ones when the reorder is semantically safe.
 
 ### Logging and runtime safety
 

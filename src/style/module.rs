@@ -1,5 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use ra_ap_syntax::{
+	AstNode,
+	ast::{self, HasAttrs, HasVisibility, Item, ItemList},
+};
+use regex::Regex;
+
 use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
 
 #[derive(Clone)]
@@ -8,9 +14,24 @@ struct ModuleReorderEntry {
 	line: usize,
 	kind: TopKind,
 	bucket: usize,
+	hoist_for_macro_scope: bool,
 	is_pub: bool,
+	visibility: String,
 	is_async: bool,
 	text: String,
+}
+
+#[derive(Clone)]
+struct ScopeTopItem {
+	kind: TopKind,
+	line: usize,
+	start_offset: usize,
+	end_offset: usize,
+	hoist_for_macro_scope: bool,
+	is_pub: bool,
+	visibility: String,
+	is_async: bool,
+	attrs: Vec<String>,
 }
 
 #[derive(Default)]
@@ -26,11 +47,7 @@ pub(crate) fn check_module_order(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
-	let items_for_order = ctx
-		.top_items
-		.iter()
-		.filter(|item| !(item.kind == TopKind::Mod && is_cfg_test_attrs(&item.attrs)))
-		.collect::<Vec<_>>();
+	let items_for_order = collect_non_cfg_test_top_items(ctx);
 	let (planned_reorder_edits, mod001_fixable_lines, mod002_fixable_lines, mod003_fixable_lines) =
 		build_module_reorder_plans(ctx);
 
@@ -38,9 +55,33 @@ pub(crate) fn check_module_order(
 		edits.extend(planned_reorder_edits);
 	}
 
+	push_mod001_order_violations(ctx, violations, &items_for_order, &mod001_fixable_lines);
+	push_mod002_visibility_violations(ctx, violations, &items_for_order, &mod002_fixable_lines);
+	push_mod003_async_violations(ctx, violations, &items_for_order, &mod003_fixable_lines);
+	push_cfg_test_module_placement_violations(ctx, violations);
+	check_top_level_const_group_spacing(ctx, violations, edits, emit_edits);
+	check_top_level_mod_group_spacing(ctx, violations, edits, emit_edits);
+	check_top_level_visibility_batch_spacing(ctx, violations, edits, emit_edits);
+	check_top_level_excess_blank_lines(ctx, violations, edits, emit_edits);
+	check_nested_module_item_order(ctx, violations, edits, emit_edits);
+}
+
+fn collect_non_cfg_test_top_items(ctx: &FileContext) -> Vec<&TopItem> {
+	ctx.top_items
+		.iter()
+		.filter(|item| !(item.kind == TopKind::Mod && is_cfg_test_attrs(&item.attrs)))
+		.collect::<Vec<_>>()
+}
+
+fn push_mod001_order_violations(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	items_for_order: &[&TopItem],
+	mod001_fixable_lines: &HashSet<usize>,
+) {
 	let mut order_seen: Vec<usize> = Vec::new();
 
-	for item in &items_for_order {
+	for item in items_for_order {
 		let Some(order) = order_bucket(item.kind) else {
 			continue;
 		};
@@ -60,34 +101,66 @@ pub(crate) fn check_module_order(
 
 		order_seen.push(order);
 	}
+}
 
+fn push_mod002_visibility_violations(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	items_for_order: &[&TopItem],
+	mod002_fixable_lines: &HashSet<usize>,
+) {
 	let mut non_pub_seen: HashMap<TopKind, bool> = HashMap::new();
+	let mut seen_visibility_batches: HashMap<TopKind, HashSet<String>> = HashMap::new();
+	let mut active_visibility_batch: HashMap<TopKind, String> = HashMap::new();
 
-	for item in &items_for_order {
+	for item in items_for_order {
 		let seen_non_pub = non_pub_seen.get(&item.kind).copied().unwrap_or(false);
+		let mut has_mod002_violation = false;
 
-		if item.is_pub {
-			if seen_non_pub {
-				shared::push_violation(
-					violations,
-					ctx,
-					item.line,
-					"RUST-STYLE-MOD-002",
-					"Place pub items before non-pub items within the same group.",
-					mod002_fixable_lines.contains(&item.line),
-				);
-			}
-		} else {
+		if item.is_pub && seen_non_pub {
+			has_mod002_violation = true;
+		}
+		if !item.is_pub {
 			non_pub_seen.insert(item.kind, true);
 		}
-	}
 
+		let previous_visibility = active_visibility_batch.get(&item.kind);
+
+		if previous_visibility != Some(&item.visibility) {
+			let seen_for_kind = seen_visibility_batches.entry(item.kind).or_default();
+
+			if seen_for_kind.contains(&item.visibility) {
+				has_mod002_violation = true;
+			}
+
+			seen_for_kind.insert(item.visibility.clone());
+			active_visibility_batch.insert(item.kind, item.visibility.clone());
+		}
+		if has_mod002_violation {
+			shared::push_violation(
+				violations,
+				ctx,
+				item.line,
+				"RUST-STYLE-MOD-002",
+				"Place pub items before non-pub items within the same group.",
+				mod002_fixable_lines.contains(&item.line),
+			);
+		}
+	}
+}
+
+fn push_mod003_async_violations(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	items_for_order: &[&TopItem],
+	mod003_fixable_lines: &HashSet<usize>,
+) {
 	let mut async_seen = HashMap::new();
 
 	async_seen.insert(true, false);
 	async_seen.insert(false, false);
 
-	for item in &items_for_order {
+	for item in items_for_order {
 		if item.kind != TopKind::Fn {
 			continue;
 		}
@@ -107,7 +180,9 @@ pub(crate) fn check_module_order(
 			);
 		}
 	}
+}
 
+fn push_cfg_test_module_placement_violations(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	let mut last_non_test_idx: Option<usize> = None;
 
 	for (idx, item) in ctx.top_items.iter().enumerate() {
@@ -133,10 +208,6 @@ pub(crate) fn check_module_order(
 			}
 		}
 	}
-
-	check_top_level_const_group_spacing(ctx, violations, edits, emit_edits);
-	check_top_level_visibility_batch_spacing(ctx, violations, edits, emit_edits);
-	check_top_level_excess_blank_lines(ctx, violations, edits, emit_edits);
 }
 
 fn order_bucket(kind: TopKind) -> Option<usize> {
@@ -183,7 +254,9 @@ fn item_text_range(ctx: &FileContext, item: &TopItem) -> Option<(usize, usize)> 
 fn is_reorderable_kind(kind: TopKind) -> bool {
 	matches!(
 		kind,
-		TopKind::Use
+		TopKind::Mod
+			| TopKind::Use
+			| TopKind::MacroRules
 			| TopKind::Type
 			| TopKind::Const
 			| TopKind::Static
@@ -199,13 +272,40 @@ fn is_const_like_kind(kind: TopKind) -> bool {
 	matches!(kind, TopKind::Const | TopKind::Static)
 }
 
+fn same_visibility_batch(prev_visibility: &str, next_visibility: &str) -> bool {
+	prev_visibility == next_visibility
+}
+
 fn is_compact_const_group_pair(
 	prev_kind: TopKind,
-	prev_is_pub: bool,
+	prev_visibility: &str,
 	next_kind: TopKind,
-	next_is_pub: bool,
+	next_visibility: &str,
 ) -> bool {
-	prev_kind == next_kind && prev_is_pub == next_is_pub && is_const_like_kind(prev_kind)
+	prev_kind == next_kind
+		&& same_visibility_batch(prev_visibility, next_visibility)
+		&& is_const_like_kind(prev_kind)
+}
+
+fn is_compact_mod_group_pair(
+	prev_kind: TopKind,
+	prev_visibility: &str,
+	next_kind: TopKind,
+	next_visibility: &str,
+) -> bool {
+	prev_kind == TopKind::Mod
+		&& next_kind == TopKind::Mod
+		&& same_visibility_batch(prev_visibility, next_visibility)
+}
+
+fn is_compact_top_level_group_pair(
+	prev_kind: TopKind,
+	prev_visibility: &str,
+	next_kind: TopKind,
+	next_visibility: &str,
+) -> bool {
+	is_compact_const_group_pair(prev_kind, prev_visibility, next_kind, next_visibility)
+		|| is_compact_mod_group_pair(prev_kind, prev_visibility, next_kind, next_visibility)
 }
 
 fn check_top_level_const_group_spacing(
@@ -218,7 +318,7 @@ fn check_top_level_const_group_spacing(
 		let prev = &pair[0];
 		let next = &pair[1];
 
-		if !is_compact_const_group_pair(prev.kind, prev.is_pub, next.kind, next.is_pub) {
+		if !is_compact_const_group_pair(prev.kind, &prev.visibility, next.kind, &next.visibility) {
 			continue;
 		}
 		if prev.end_line >= next.start_line.saturating_sub(1) {
@@ -263,6 +363,61 @@ fn check_top_level_const_group_spacing(
 	}
 }
 
+fn check_top_level_mod_group_spacing(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	for pair in ctx.top_items.windows(2) {
+		let prev = &pair[0];
+		let next = &pair[1];
+
+		if !is_compact_mod_group_pair(prev.kind, &prev.visibility, next.kind, &next.visibility) {
+			continue;
+		}
+		if prev.end_line >= next.start_line.saturating_sub(1) {
+			continue;
+		}
+
+		let between_start = prev.end_line;
+		let between_end = next.start_line.saturating_sub(1);
+		let between = &ctx.lines[between_start..between_end];
+		let blank_count = between.iter().filter(|line| line.trim().is_empty()).count();
+
+		if blank_count == 0 {
+			continue;
+		}
+
+		let can_autofix = between.iter().all(|line| line.trim().is_empty());
+
+		shared::push_violation(
+			violations,
+			ctx,
+			next.line,
+			"RUST-STYLE-SPACE-003",
+			"Do not insert blank lines within module declaration groups.",
+			can_autofix,
+		);
+
+		if emit_edits && can_autofix {
+			let Some(start) = shared::offset_from_line(&ctx.line_starts, prev.end_line + 1) else {
+				continue;
+			};
+			let Some(end) = shared::offset_from_line(&ctx.line_starts, next.start_line) else {
+				continue;
+			};
+
+			edits.push(Edit {
+				start,
+				end,
+				replacement: String::new(),
+				rule: "RUST-STYLE-SPACE-003",
+			});
+		}
+	}
+}
+
 fn check_top_level_visibility_batch_spacing(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -273,7 +428,7 @@ fn check_top_level_visibility_batch_spacing(
 		let prev = &pair[0];
 		let next = &pair[1];
 
-		if prev.kind != next.kind || prev.is_pub == next.is_pub {
+		if prev.kind != next.kind || same_visibility_batch(&prev.visibility, &next.visibility) {
 			continue;
 		}
 
@@ -302,7 +457,7 @@ fn check_top_level_visibility_batch_spacing(
 			ctx,
 			next.line,
 			"RUST-STYLE-MOD-002",
-			"Insert exactly one blank line between pub and non-pub batches within the same item kind.",
+			"Insert exactly one blank line between visibility batches within the same item kind.",
 			can_autofix,
 		);
 
@@ -337,7 +492,8 @@ fn check_top_level_excess_blank_lines(
 		if prev.end_line >= next.start_line.saturating_sub(1) {
 			continue;
 		}
-		if is_compact_const_group_pair(prev.kind, prev.is_pub, next.kind, next.is_pub) {
+		if is_compact_top_level_group_pair(prev.kind, &prev.visibility, next.kind, &next.visibility)
+		{
 			continue;
 		}
 
@@ -379,6 +535,314 @@ fn check_top_level_excess_blank_lines(
 				rule: "RUST-STYLE-SPACE-003",
 			});
 		}
+	}
+}
+
+fn check_nested_module_item_order(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	for module in ctx.source_file.syntax().descendants().filter_map(ast::Module::cast) {
+		let Some(item_list) = module.item_list() else {
+			continue;
+		};
+		let items = collect_scope_top_items(ctx, &item_list);
+
+		if items.len() < 2 {
+			continue;
+		}
+
+		check_scope_top_item_runs(ctx, &items, violations, edits, emit_edits);
+	}
+}
+
+fn collect_scope_top_items(ctx: &FileContext, item_list: &ItemList) -> Vec<ScopeTopItem> {
+	let mut items = Vec::new();
+
+	for item in item_list.syntax().children().filter_map(Item::cast) {
+		let text_range = item.syntax().text_range();
+		let syntax_start = usize::from(text_range.start());
+		let line = shared::line_from_offset(&ctx.line_starts, syntax_start);
+		let start_offset = shared::offset_from_line(&ctx.line_starts, line).unwrap_or(syntax_start);
+		let end_offset = usize::from(text_range.end());
+		let visibility = scope_item_visibility_key(&item);
+		let attrs = item.attrs().map(|attr| attr.syntax().text().to_string()).collect::<Vec<_>>();
+		let hoist_for_macro_scope = scope_item_should_hoist_for_macro_scope(item_list, &item);
+
+		items.push(ScopeTopItem {
+			kind: scope_item_kind(&item),
+			line,
+			start_offset,
+			end_offset,
+			hoist_for_macro_scope,
+			is_pub: !visibility.is_empty(),
+			visibility,
+			is_async: matches!(&item, Item::Fn(func) if func.async_token().is_some()),
+			attrs,
+		});
+	}
+
+	items
+}
+
+fn scope_item_kind(item: &Item) -> TopKind {
+	match item {
+		Item::Module(_) => TopKind::Mod,
+		Item::Use(_) => TopKind::Use,
+		Item::MacroRules(_) => TopKind::MacroRules,
+		Item::MacroCall(_) => TopKind::MacroRules,
+		Item::TypeAlias(_) => TopKind::Type,
+		Item::Const(_) => TopKind::Const,
+		Item::Static(_) => TopKind::Static,
+		Item::Trait(_) => TopKind::Trait,
+		Item::Enum(_) => TopKind::Enum,
+		Item::Struct(_) => TopKind::Struct,
+		Item::Impl(_) => TopKind::Impl,
+		Item::Fn(_) => TopKind::Fn,
+		_ => TopKind::Other,
+	}
+}
+
+fn scope_item_should_hoist_for_macro_scope(item_list: &ItemList, item: &Item) -> bool {
+	let Item::MacroRules(macro_rules) = item else {
+		return false;
+	};
+	let Some(name) = macro_rules_name_text(macro_rules.syntax().text().to_string().as_str()) else {
+		return false;
+	};
+
+	scope_has_macro_call(item_list, name.as_str())
+}
+
+fn macro_rules_name_text(text: &str) -> Option<String> {
+	let re = Regex::new(r"^\s*macro_rules!\s*([A-Za-z_][A-Za-z0-9_]*)\b")
+		.expect("Compile macro_rules name regex.");
+
+	re.captures(text).and_then(|captures| captures.get(1).map(|name| name.as_str().to_owned()))
+}
+
+fn scope_has_macro_call(item_list: &ItemList, macro_name: &str) -> bool {
+	for macro_call in item_list.syntax().descendants().filter_map(ast::MacroCall::cast) {
+		let Some(path_text) = macro_call.path().map(|path| path.syntax().text().to_string()) else {
+			continue;
+		};
+		let Some(last_segment) = path_text.rsplit("::").next() else {
+			continue;
+		};
+
+		if !is_same_ident_local(last_segment.trim(), macro_name) {
+			continue;
+		}
+
+		return true;
+	}
+
+	false
+}
+
+fn is_same_ident_local(lhs: &str, rhs: &str) -> bool {
+	let lhs = lhs.strip_prefix("r#").unwrap_or(lhs);
+	let rhs = rhs.strip_prefix("r#").unwrap_or(rhs);
+
+	lhs == rhs
+}
+
+fn scope_item_visibility_key(item: &Item) -> String {
+	scope_item_visibility_text(item)
+		.map(|text| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>())
+		.unwrap_or_default()
+}
+
+fn scope_item_visibility_text(item: &Item) -> Option<String> {
+	match item {
+		Item::Module(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Use(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::TypeAlias(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Const(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Static(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Trait(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Enum(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Struct(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Fn(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		Item::Impl(node) =>
+			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
+		_ => None,
+	}
+}
+
+fn scope_separator_blank_only(ctx: &FileContext, prev: &ScopeTopItem, next: &ScopeTopItem) -> bool {
+	if prev.end_offset >= next.start_offset {
+		return true;
+	}
+
+	ctx.text
+		.get(prev.end_offset..next.start_offset)
+		.is_some_and(|between| between.trim().is_empty())
+}
+
+fn is_cfg_test_scope_mod_item(item: &ScopeTopItem) -> bool {
+	item.kind == TopKind::Mod && is_cfg_test_attrs(&item.attrs)
+}
+
+fn check_scope_top_item_runs(
+	ctx: &FileContext,
+	items: &[ScopeTopItem],
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	let mut idx = 0_usize;
+
+	while idx < items.len() {
+		let end = scope_module_reorder_run_end(ctx, items, idx);
+		let run = &items[idx..end];
+
+		if let Some((edit, run_lines)) = build_scope_module_reorder_run_edit(ctx, run) {
+			push_scope_reorder_violations(ctx, violations, &run_lines);
+
+			if emit_edits {
+				edits.push(edit);
+			}
+		}
+
+		idx = end;
+	}
+}
+
+fn scope_module_reorder_run_end(ctx: &FileContext, items: &[ScopeTopItem], start: usize) -> usize {
+	let Some(first) = items.get(start) else {
+		return start;
+	};
+
+	if is_cfg_test_scope_mod_item(first) || !is_reorderable_kind(first.kind) {
+		return start + 1;
+	}
+
+	let mut end = start + 1;
+
+	while end < items.len() {
+		let previous = &items[end - 1];
+		let candidate = &items[end];
+
+		if is_cfg_test_scope_mod_item(candidate) || !is_reorderable_kind(candidate.kind) {
+			break;
+		}
+		if !scope_separator_blank_only(ctx, previous, candidate) {
+			break;
+		}
+
+		end += 1;
+	}
+
+	end
+}
+
+fn build_scope_module_reorder_run_edit(
+	ctx: &FileContext,
+	run: &[ScopeTopItem],
+) -> Option<(Edit, ModuleReorderLines)> {
+	if run.len() < 2
+		|| run.windows(2).any(|pair| !scope_separator_blank_only(ctx, &pair[0], &pair[1]))
+	{
+		return None;
+	}
+
+	let entries = collect_scope_module_reorder_entries(ctx, run)?;
+	let run_lines = collect_module_reorder_lines(&entries);
+	let ordered = sorted_module_reorder_entries(&entries);
+	let order_changed = entries.iter().map(|entry| entry.order).collect::<Vec<_>>()
+		!= ordered.iter().map(|entry| entry.order).collect::<Vec<_>>();
+	let run_start = run.first()?.start_offset;
+	let run_end = run.last()?.end_offset;
+	let original = ctx.text.get(run_start..run_end).unwrap_or_default();
+	let replacement = build_module_reorder_replacement(original, &ordered);
+
+	if !order_changed && replacement == original {
+		return None;
+	}
+
+	let rule = if run_lines.mod001.is_empty()
+		&& run_lines.mod002.is_empty()
+		&& run_lines.mod003.is_empty()
+	{
+		"RUST-STYLE-SPACE-003"
+	} else {
+		select_module_reorder_rule(&run_lines)
+	};
+
+	Some((Edit { start: run_start, end: run_end, replacement, rule }, run_lines))
+}
+
+fn collect_scope_module_reorder_entries(
+	ctx: &FileContext,
+	run: &[ScopeTopItem],
+) -> Option<Vec<ModuleReorderEntry>> {
+	let mut entries = Vec::with_capacity(run.len());
+
+	for (offset, item) in run.iter().enumerate() {
+		let slice = ctx.text.get(item.start_offset..item.end_offset)?;
+
+		entries.push(ModuleReorderEntry {
+			order: offset,
+			line: item.line,
+			kind: item.kind,
+			bucket: order_bucket(item.kind).unwrap_or(usize::MAX),
+			hoist_for_macro_scope: item.hoist_for_macro_scope,
+			is_pub: item.is_pub,
+			visibility: item.visibility.clone(),
+			is_async: item.is_async,
+			text: slice.trim_end_matches('\n').to_owned(),
+		});
+	}
+
+	Some(entries)
+}
+
+fn push_scope_reorder_violations(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	run_lines: &ModuleReorderLines,
+) {
+	for line in &run_lines.mod001 {
+		shared::push_violation(
+			violations,
+			ctx,
+			*line,
+			"RUST-STYLE-MOD-001",
+			"Top-level module item order does not match rust.md order.",
+			true,
+		);
+	}
+	for line in &run_lines.mod002 {
+		shared::push_violation(
+			violations,
+			ctx,
+			*line,
+			"RUST-STYLE-MOD-002",
+			"Place pub items before non-pub items within the same group.",
+			true,
+		);
+	}
+	for line in &run_lines.mod003 {
+		shared::push_violation(
+			violations,
+			ctx,
+			*line,
+			"RUST-STYLE-MOD-003",
+			"Place non-async functions before async functions at the same visibility.",
+			true,
+		);
 	}
 }
 
@@ -495,7 +959,9 @@ fn collect_module_reorder_entries(
 			line: item.line,
 			kind: item.kind,
 			bucket: order_bucket(item.kind).unwrap_or(usize::MAX),
+			hoist_for_macro_scope: false,
 			is_pub: item.is_pub,
+			visibility: item.visibility.clone(),
 			is_async: item.is_async,
 			text: slice.trim_end_matches('\n').to_owned(),
 		});
@@ -517,18 +983,41 @@ fn collect_module_reorder_lines(entries: &[ModuleReorderEntry]) -> ModuleReorder
 
 		last_bucket = Some(entry.bucket);
 	}
+	for (idx, entry) in entries.iter().enumerate() {
+		if entry.hoist_for_macro_scope && idx > 0 {
+			out.mod001.push(entry.line);
+		}
+	}
 
 	let mut seen_non_pub_by_kind = HashMap::new();
+	let mut seen_visibility_batches_by_kind: HashMap<TopKind, HashSet<String>> = HashMap::new();
+	let mut active_visibility_batch_by_kind: HashMap<TopKind, String> = HashMap::new();
 
 	for entry in entries {
 		let seen_non_pub = seen_non_pub_by_kind.get(&entry.kind).copied().unwrap_or(false);
+		let mut has_mod002_violation = false;
 
-		if entry.is_pub {
-			if seen_non_pub {
-				out.mod002.push(entry.line);
-			}
-		} else {
+		if entry.is_pub && seen_non_pub {
+			has_mod002_violation = true;
+		}
+		if !entry.is_pub {
 			seen_non_pub_by_kind.insert(entry.kind, true);
+		}
+
+		let previous_visibility = active_visibility_batch_by_kind.get(&entry.kind);
+
+		if previous_visibility != Some(&entry.visibility) {
+			let seen_for_kind = seen_visibility_batches_by_kind.entry(entry.kind).or_default();
+
+			if seen_for_kind.contains(&entry.visibility) {
+				has_mod002_violation = true;
+			}
+
+			seen_for_kind.insert(entry.visibility.clone());
+			active_visibility_batch_by_kind.insert(entry.kind, entry.visibility.clone());
+		}
+		if has_mod002_violation {
+			out.mod002.push(entry.line);
 		}
 	}
 
@@ -553,6 +1042,8 @@ fn collect_module_reorder_lines(entries: &[ModuleReorderEntry]) -> ModuleReorder
 
 fn sorted_module_reorder_entries(entries: &[ModuleReorderEntry]) -> Vec<ModuleReorderEntry> {
 	let mut kind_order = HashMap::new();
+	let mut visibility_batch_order_by_kind: HashMap<(TopKind, String), usize> = HashMap::new();
+	let mut next_visibility_order_by_kind: HashMap<TopKind, usize> = HashMap::new();
 
 	for entry in entries {
 		if !kind_order.contains_key(&entry.kind) {
@@ -560,15 +1051,30 @@ fn sorted_module_reorder_entries(entries: &[ModuleReorderEntry]) -> Vec<ModuleRe
 
 			kind_order.insert(entry.kind, next_order);
 		}
+
+		let key = (entry.kind, entry.visibility.clone());
+
+		visibility_batch_order_by_kind.entry(key).or_insert_with(|| {
+			let next_order = next_visibility_order_by_kind.get(&entry.kind).copied().unwrap_or(0);
+
+			next_visibility_order_by_kind.insert(entry.kind, next_order + 1);
+
+			next_order
+		});
 	}
 
 	let mut ordered = entries.to_owned();
 
 	ordered.sort_by_key(|entry| {
 		(
+			if entry.hoist_for_macro_scope { 0 } else { 1 },
 			entry.bucket,
 			kind_order.get(&entry.kind).copied().unwrap_or(usize::MAX),
 			if entry.is_pub { 0 } else { 1 },
+			visibility_batch_order_by_kind
+				.get(&(entry.kind, entry.visibility.clone()))
+				.copied()
+				.unwrap_or(usize::MAX),
 			if entry.kind == TopKind::Fn && entry.is_async { 1 } else { 0 },
 			entry.order,
 		)
@@ -583,10 +1089,14 @@ fn build_module_reorder_replacement(original: &str, ordered: &[ModuleReorderEntr
 	for (position, entry) in ordered.iter().enumerate() {
 		if position > 0 {
 			let prev = &ordered[position - 1];
-			let is_compact_const_group =
-				is_compact_const_group_pair(prev.kind, prev.is_pub, entry.kind, entry.is_pub);
+			let is_compact_group = is_compact_top_level_group_pair(
+				prev.kind,
+				&prev.visibility,
+				entry.kind,
+				&entry.visibility,
+			);
 
-			if is_compact_const_group {
+			if is_compact_group {
 				replacement.push('\n');
 			} else {
 				replacement.push_str("\n\n");

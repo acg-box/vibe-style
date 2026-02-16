@@ -14,10 +14,11 @@ type StatementSpan = (usize, usize, String);
 
 static CONTROL_FLOW_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
 	Regex::new(r"^(if|if\s+let|match|for|while|loop|return|let)\b")
-		.expect("Expected operation to succeed.")
+		.expect("Compile control-flow statement prefix regex.")
 });
 static STRUCT_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+,?$").expect("Expected operation to succeed.")
+	Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+,?$")
+		.expect("Compile struct field detection regex.")
 });
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -810,7 +811,7 @@ fn parse_ufcs_target_call(text: &str) -> Option<(String, String)> {
 	rest = &rest[2..];
 
 	let fn_match = Regex::new(r"^(?P<func>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
-		.expect("Expected operation to succeed.")
+		.expect("Compile UFCS function extraction regex.")
 		.captures(rest)?;
 	let func = fn_match.name("func")?.as_str().to_owned();
 	let target = if let Some((_, right)) = body.split_once(" as ") {
@@ -874,39 +875,45 @@ fn classify_statement_type(statement_lines: &[String]) -> String {
 
 	let first = normalized.as_str();
 
-	if Regex::new(r"^let\b").expect("Expected operation to succeed.").is_match(first) {
+	if Regex::new(r"^let\b").expect("Compile let-statement classification regex.").is_match(first) {
 		return "let".to_owned();
 	}
-	if Regex::new(r"^if\s+let\b").expect("Expected operation to succeed.").is_match(first) {
+	if Regex::new(r"^if\s+let\b")
+		.expect("Compile if-let statement classification regex.")
+		.is_match(first)
+	{
 		return "if-let".to_owned();
 	}
-	if Regex::new(r"^if\b").expect("Expected operation to succeed.").is_match(first) {
+	if Regex::new(r"^if\b").expect("Compile if-statement classification regex.").is_match(first) {
 		return "if".to_owned();
 	}
-	if Regex::new(r"^match\b").expect("Expected operation to succeed.").is_match(first) {
+	if Regex::new(r"^match\b")
+		.expect("Compile match-statement classification regex.")
+		.is_match(first)
+	{
 		return "match".to_owned();
 	}
-	if Regex::new(r"^for\b").expect("Expected operation to succeed.").is_match(first) {
+	if Regex::new(r"^for\b").expect("Compile for-loop classification regex.").is_match(first) {
 		return "for".to_owned();
 	}
-	if Regex::new(r"^while\b").expect("Expected operation to succeed.").is_match(first) {
+	if Regex::new(r"^while\b").expect("Compile while-loop classification regex.").is_match(first) {
 		return "while".to_owned();
 	}
-	if Regex::new(r"^loop\b").expect("Expected operation to succeed.").is_match(first) {
+	if Regex::new(r"^loop\b").expect("Compile loop classification regex.").is_match(first) {
 		return "loop".to_owned();
 	}
 	if Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\.await)?\?\s*;?$")
-		.expect("Expected operation to succeed.")
+		.expect("Compile try-expression classification regex.")
 		.is_match(first)
 	{
 		return "try-expr".to_owned();
 	}
 	if Regex::new(r"^(?P<name>[A-Za-z_][A-Za-z0-9_:]*)!\s*\(")
-		.expect("Expected operation to succeed.")
+		.expect("Compile macro invocation classification regex.")
 		.is_match(first)
 	{
 		let macro_name = Regex::new(r"^(?P<name>[A-Za-z_][A-Za-z0-9_:]*)!\s*\(")
-			.expect("Expected operation to succeed.")
+			.expect("Compile macro name extraction regex.")
 			.captures(first)
 			.and_then(|caps| caps.name("name"))
 			.map(|value| value.as_str().to_owned())
@@ -925,26 +932,26 @@ fn classify_statement_type(statement_lines: &[String]) -> String {
 		return "path-call".to_owned();
 	}
 	if Regex::new(r"^(?P<target>[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*\(")
-		.expect("Expected operation to succeed.")
+		.expect("Compile qualified path call classification regex.")
 		.is_match(first)
 	{
 		return "path-call".to_owned();
 	}
 	if Regex::new(r"^(?P<target>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
-		.expect("Expected operation to succeed.")
+		.expect("Compile direct function call classification regex.")
 		.is_match(first)
 	{
 		return "call".to_owned();
 	}
 	if Regex::new(r"^[^;]*\.(?P<method>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
-		.expect("Expected operation to succeed.")
+		.expect("Compile method call classification regex.")
 		.is_match(first)
 	{
 		return "method".to_owned();
 	}
 
 	let token = Regex::new(r"[\s({;]")
-		.expect("Expected operation to succeed.")
+		.expect("Compile statement token split regex.")
 		.split(first)
 		.next()
 		.unwrap_or_default();
@@ -1084,7 +1091,8 @@ fn is_return_or_tail_statement(statement_lines: &[String]) -> bool {
 		return false;
 	};
 
-	if Regex::new(r"^return\b").expect("Expected operation to succeed.").is_match(&first) {
+	if Regex::new(r"^return\b").expect("Compile return statement detection regex.").is_match(&first)
+	{
 		return true;
 	}
 
@@ -1092,7 +1100,10 @@ fn is_return_or_tail_statement(statement_lines: &[String]) -> bool {
 		return false;
 	};
 
-	if Regex::new(r"^return\b").expect("Expected operation to succeed.").is_match(&last) {
+	if Regex::new(r"^return\b")
+		.expect("Compile trailing return statement detection regex.")
+		.is_match(&last)
+	{
 		return true;
 	}
 	if last.ends_with(';')
@@ -1109,7 +1120,9 @@ fn is_return_or_tail_statement(statement_lines: &[String]) -> bool {
 fn is_explicit_return_statement(statement_lines: &[String]) -> bool {
 	first_significant_statement_line(statement_lines)
 		.map(|first| {
-			Regex::new(r"^return\b").expect("Expected operation to succeed.").is_match(&first)
+			Regex::new(r"^return\b")
+				.expect("Compile explicit return statement detection regex.")
+				.is_match(&first)
 		})
 		.unwrap_or(false)
 }
@@ -1251,7 +1264,7 @@ fn is_item_like_statement(statement_lines: &[String]) -> bool {
 	Regex::new(
 		r"^(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*(?:fn|struct|enum|impl|trait|type|use|mod|static|const|macro_rules!|macro)\b",
 	)
-	.expect("Expected operation to succeed.")
+	.expect("Compile item-like statement detection regex.")
 	.is_match(first.trim())
 }
 
@@ -1267,7 +1280,7 @@ fn is_const_group_statement(statement_lines: &[String]) -> bool {
 	};
 
 	Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?(?:const|static(?:\s+mut)?)\b")
-		.expect("Expected operation to succeed.")
+		.expect("Compile const/static statement detection regex.")
 		.is_match(first.trim())
 }
 

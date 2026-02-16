@@ -2,10 +2,7 @@ use std::path::Path;
 
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
-	ast::{
-		self, ArgList, Attr, Expr, HasArgList, HasAttrs, HasModuleItem, HasName, MacroCall,
-		MethodCallExpr,
-	},
+	ast::{self, Attr, HasArgList, HasAttrs, HasModuleItem, HasName, MacroCall, MethodCallExpr},
 };
 use regex::Regex;
 
@@ -15,7 +12,6 @@ const NUMERIC_SUFFIXES: [&str; 14] = [
 	"usize", "isize", "u128", "i128", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8", "f64",
 	"f32",
 ];
-
 #[derive(Debug, Default)]
 struct ArgSplitState {
 	paren: i32,
@@ -75,27 +71,17 @@ pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Viol
 			usize::from(macro_call.syntax().text_range().start()),
 		);
 
-		if let Some(message) = message {
-			if message.contains('{') || message.contains('}') {
-				shared::push_violation(
-					violations,
-					ctx,
-					line,
-					"RUST-STYLE-LOG-002",
-					"Do not interpolate dynamic values in log message strings; use structured fields.",
-					false,
-				);
-			}
-			if !is_sentence(&message) {
-				shared::push_violation(
-					violations,
-					ctx,
-					line,
-					"RUST-STYLE-LOG-002",
-					"Log messages should be complete sentences with capitalization and punctuation.",
-					false,
-				);
-			}
+		if let Some(message) = message
+			&& (message.contains('{') || message.contains('}'))
+		{
+			shared::push_violation(
+				violations,
+				ctx,
+				line,
+				"RUST-STYLE-LOG-002",
+				"Do not interpolate dynamic values in log message strings; use structured fields.",
+				false,
+			);
 		}
 
 		if parts.len() > 1 && !has_structured_fields(&head_text) {
@@ -114,8 +100,8 @@ pub(crate) fn check_logging_quality(ctx: &FileContext, violations: &mut Vec<Viol
 pub(crate) fn check_expect_unwrap(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
+	_edits: &mut Vec<Edit>,
+	_emit_edits: bool,
 ) {
 	if is_test_file(&ctx.path) {
 		return;
@@ -132,8 +118,8 @@ pub(crate) fn check_expect_unwrap(
 		let line = method_call_line(ctx, &method_call);
 
 		match name.as_str() {
-			"unwrap" => handle_unwrap_call(ctx, violations, edits, emit_edits, &method_call, line),
-			"expect" => handle_expect_call(ctx, violations, edits, emit_edits, &method_call, line),
+			"unwrap" => handle_unwrap_call(ctx, violations, line),
+			"expect" => handle_expect_call(ctx, violations, &method_call, line),
 			_ => {},
 		}
 	}
@@ -423,56 +409,45 @@ fn method_call_line(ctx: &FileContext, method_call: &MethodCallExpr) -> usize {
 	)
 }
 
-fn handle_unwrap_call(
-	ctx: &FileContext,
-	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
-	method_call: &MethodCallExpr,
-	line: usize,
-) {
+fn handle_unwrap_call(ctx: &FileContext, violations: &mut Vec<Violation>, line: usize) {
 	shared::push_violation(
 		violations,
 		ctx,
 		line,
 		"RUST-STYLE-RUNTIME-001",
 		"Do not use unwrap() in non-test code.",
-		true,
+		false,
 	);
-
-	if !emit_edits {
-		return;
-	}
-
-	let name_range = method_call.name_ref().map(|name_ref| name_ref.syntax().text_range());
-	let arg_range = method_call.arg_list().map(|arg_list| arg_list.syntax().text_range());
-
-	if let (Some(name_range), Some(arg_range)) = (name_range, arg_range) {
-		edits.push(Edit {
-			start: usize::from(name_range.start()),
-			end: usize::from(arg_range.end()),
-			replacement: r#"expect("Expected operation to succeed.")"#.to_owned(),
-			rule: "RUST-STYLE-RUNTIME-001",
-		});
-	}
 }
 
 fn handle_expect_call(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
 	method_call: &MethodCallExpr,
 	line: usize,
 ) {
 	let Some(arg_list) = method_call.arg_list() else {
-		report_expect_missing_arg_list(ctx, violations, edits, emit_edits, method_call, line);
+		shared::push_violation(
+			violations,
+			ctx,
+			line,
+			"RUST-STYLE-RUNTIME-002",
+			"expect() must use a clear, user-actionable string literal message.",
+			false,
+		);
 
 		return;
 	};
 	let mut args = arg_list.args();
 	let Some(first_arg) = args.next() else {
-		report_expect_empty_arg_list(ctx, violations, edits, emit_edits, &arg_list, line);
+		shared::push_violation(
+			violations,
+			ctx,
+			line,
+			"RUST-STYLE-RUNTIME-002",
+			"expect() message must not be empty.",
+			false,
+		);
 
 		return;
 	};
@@ -497,135 +472,14 @@ fn handle_expect_call(
 	let message = message.trim().to_owned();
 
 	if message.is_empty() {
-		report_expect_empty_message(ctx, violations, edits, emit_edits, &first_arg, line);
-
-		return;
-	}
-
-	let first = message.chars().next().unwrap_or('a');
-	let last = message.chars().last().unwrap_or('.');
-
-	if !first.is_uppercase() || !matches!(last, '.' | '!' | '?') {
-		report_expect_non_sentence_message(
-			ctx, violations, edits, emit_edits, &first_arg, &message, line,
+		shared::push_violation(
+			violations,
+			ctx,
+			line,
+			"RUST-STYLE-RUNTIME-002",
+			"expect() message must not be empty.",
+			false,
 		);
-	}
-}
-
-fn report_expect_missing_arg_list(
-	ctx: &FileContext,
-	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
-	method_call: &MethodCallExpr,
-	line: usize,
-) {
-	shared::push_violation(
-		violations,
-		ctx,
-		line,
-		"RUST-STYLE-RUNTIME-002",
-		"expect() must use a clear, user-actionable string literal message.",
-		true,
-	);
-
-	if !emit_edits {
-		return;
-	}
-
-	let name_range = method_call.name_ref().map(|name_ref| name_ref.syntax().text_range());
-
-	if let Some(name_range) = name_range {
-		edits.push(Edit {
-			start: usize::from(name_range.start()),
-			end: usize::from(method_call.syntax().text_range().end()),
-			replacement: r#"expect("Expected operation to succeed.")"#.to_owned(),
-			rule: "RUST-STYLE-RUNTIME-002",
-		});
-	}
-}
-
-fn report_expect_empty_arg_list(
-	ctx: &FileContext,
-	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
-	arg_list: &ArgList,
-	line: usize,
-) {
-	shared::push_violation(
-		violations,
-		ctx,
-		line,
-		"RUST-STYLE-RUNTIME-002",
-		"expect() message must not be empty.",
-		true,
-	);
-
-	if emit_edits {
-		edits.push(Edit {
-			start: usize::from(arg_list.syntax().text_range().start()),
-			end: usize::from(arg_list.syntax().text_range().end()),
-			replacement: r#"("Expected operation to succeed.")"#.to_owned(),
-			rule: "RUST-STYLE-RUNTIME-002",
-		});
-	}
-}
-
-fn report_expect_empty_message(
-	ctx: &FileContext,
-	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
-	first_arg: &Expr,
-	line: usize,
-) {
-	shared::push_violation(
-		violations,
-		ctx,
-		line,
-		"RUST-STYLE-RUNTIME-002",
-		"expect() message must not be empty.",
-		true,
-	);
-
-	if emit_edits {
-		edits.push(Edit {
-			start: usize::from(first_arg.syntax().text_range().start()),
-			end: usize::from(first_arg.syntax().text_range().end()),
-			replacement: r#""Expected operation to succeed.""#.to_owned(),
-			rule: "RUST-STYLE-RUNTIME-002",
-		});
-	}
-}
-
-fn report_expect_non_sentence_message(
-	ctx: &FileContext,
-	violations: &mut Vec<Violation>,
-	edits: &mut Vec<Edit>,
-	emit_edits: bool,
-	first_arg: &Expr,
-	message: &str,
-	line: usize,
-) {
-	shared::push_violation(
-		violations,
-		ctx,
-		line,
-		"RUST-STYLE-RUNTIME-002",
-		"expect() message should start with a capital letter and end with punctuation.",
-		true,
-	);
-
-	if emit_edits {
-		let normalized = normalize_expect_message(message);
-
-		edits.push(Edit {
-			start: usize::from(first_arg.syntax().text_range().start()),
-			end: usize::from(first_arg.syntax().text_range().end()),
-			replacement: format!("{normalized:?}"),
-			rule: "RUST-STYLE-RUNTIME-002",
-		});
 	}
 }
 
@@ -795,25 +649,12 @@ fn parse_string_literal(text: &str) -> Option<String> {
 	Some(stripped[body_start..body_end].to_owned())
 }
 
-fn is_sentence(text: &str) -> bool {
-	let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-
-	if normalized.is_empty() {
-		return false;
-	}
-
-	let first = normalized.chars().next().unwrap_or('a');
-	let last = normalized.chars().last().unwrap_or('.');
-
-	first.is_uppercase() && matches!(last, '.' | '!' | '?')
-}
-
 fn has_structured_fields(text: &str) -> bool {
 	Regex::new(r"\b[A-Za-z_][A-Za-z0-9_]*\s*=")
-		.expect("Expected operation to succeed.")
+		.expect("Compile structured logging key-value regex.")
 		.is_match(text)
 		|| Regex::new(r"[%?]\s*[A-Za-z_][A-Za-z0-9_:]*")
-			.expect("Expected operation to succeed.")
+			.expect("Compile structured logging formatter regex.")
 			.is_match(text)
 }
 
@@ -848,30 +689,6 @@ fn method_call_in_test_context(call: &MethodCallExpr) -> bool {
 	}
 
 	false
-}
-
-fn normalize_expect_message(message: &str) -> String {
-	let mut normalized = message.trim().to_owned();
-
-	if normalized.is_empty() {
-		return "Expected operation to succeed.".to_owned();
-	}
-
-	let mut chars = normalized.chars();
-	let first = chars.next().unwrap_or('E');
-
-	if !first.is_uppercase() {
-		let mut rewritten = first.to_uppercase().collect::<String>();
-
-		rewritten.push_str(chars.as_str());
-
-		normalized = rewritten;
-	}
-	if !matches!(normalized.chars().last().unwrap_or('.'), '.' | '!' | '?') {
-		normalized.push('.');
-	}
-
-	normalized
 }
 
 fn add_numeric_grouping(number: &str) -> String {

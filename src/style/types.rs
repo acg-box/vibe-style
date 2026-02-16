@@ -27,6 +27,10 @@ pub(crate) struct TypeAliasRenameFix {
 
 pub(crate) fn check_type_alias_renames(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	for type_alias in ctx.source_file.syntax().descendants().filter_map(TypeAlias::cast) {
+		if !is_meaningless_type_alias_item(&type_alias) {
+			continue;
+		}
+
 		let Some(Type::PathType(path_type)) = type_alias.ty() else {
 			continue;
 		};
@@ -53,6 +57,10 @@ pub(crate) fn collect_type_alias_rename_fixes(ctx: &FileContext) -> Vec<TypeAlia
 	let mut out = Vec::new();
 
 	for type_alias in ctx.source_file.syntax().descendants().filter_map(TypeAlias::cast) {
+		if !is_meaningless_type_alias_item(&type_alias) {
+			continue;
+		}
+
 		let Some(Type::PathType(path_type)) = type_alias.ty() else {
 			continue;
 		};
@@ -104,6 +112,24 @@ pub(crate) fn build_type_alias_usage_rename_edits(
 	edits
 }
 
+fn is_meaningless_type_alias_item(type_alias: &TypeAlias) -> bool {
+	let mut ancestor = type_alias.syntax().parent();
+
+	while let Some(node) = ancestor {
+		match node.kind() {
+			SyntaxKind::ASSOC_ITEM_LIST => return false,
+			SyntaxKind::ITEM_LIST | SyntaxKind::SOURCE_FILE | SyntaxKind::BLOCK_EXPR => {
+				return true;
+			},
+			_ => {},
+		}
+
+		ancestor = node.parent();
+	}
+
+	true
+}
+
 fn is_meaningless_alias(path: &Path, aliases: &[AliasGenericParam]) -> bool {
 	let mut segments = Vec::<PathSegment>::new();
 
@@ -151,9 +177,6 @@ fn type_alias_autofix_plan(
 		return None;
 	}
 
-	// Only automatically rewrite public aliases, since replacing the name affects callers.
-	type_alias.visibility()?;
-
 	let alias_name = type_alias.name()?.text().to_string();
 	let mut rhs_segments = Vec::<PathSegment>::new();
 
@@ -163,25 +186,47 @@ fn type_alias_autofix_plan(
 
 	let target_segment = rhs_segments.last()?;
 	let target_name = target_segment.name_ref()?.text().to_string();
+	let alias_is_public = type_alias.visibility().is_some();
 	let alias_start = usize::from(type_alias.syntax().text_range().start());
 	let alias_end = usize::from(type_alias.syntax().text_range().end());
 	let mut definition_edits = Vec::new();
 
-	if rhs_segments.len() >= 2 {
-		let rhs_text = rhs_path.syntax().text().to_string();
+	if alias_is_public {
+		if rhs_segments.len() >= 2 {
+			let rhs_text = rhs_path.syntax().text().to_string();
 
-		definition_edits.push(Edit {
-			start: alias_start,
-			end: alias_end,
-			replacement: format!("pub use {rhs_text};"),
-			rule: RULE_ID,
-		});
-	} else {
-		let (use_start, use_end, use_path, use_is_pub) =
-			find_simple_sibling_use_importing_ident(ctx, type_alias, target_name.as_str())?;
-
-		if use_is_pub {
-			// The target is already exported; remove the alias and rewrite callers.
+			definition_edits.push(Edit {
+				start: alias_start,
+				end: alias_end,
+				replacement: format!("pub use {rhs_text};"),
+				rule: RULE_ID,
+			});
+		} else if let Some((use_start, use_end, use_path, use_is_pub)) =
+			find_simple_sibling_use_importing_ident(ctx, type_alias, target_name.as_str())
+		{
+			if use_is_pub {
+				// The target is already exported; remove the alias and rewrite callers.
+				definition_edits.push(Edit {
+					start: alias_start,
+					end: alias_end,
+					replacement: String::new(),
+					rule: RULE_ID,
+				});
+			} else {
+				definition_edits.push(Edit {
+					start: alias_start,
+					end: alias_end,
+					replacement: format!("pub use {use_path};"),
+					rule: RULE_ID,
+				});
+				definition_edits.push(Edit {
+					start: use_start,
+					end: use_end,
+					replacement: String::new(),
+					rule: RULE_ID,
+				});
+			}
+		} else if is_primitive_type_ident(&target_name) {
 			definition_edits.push(Edit {
 				start: alias_start,
 				end: alias_end,
@@ -189,22 +234,33 @@ fn type_alias_autofix_plan(
 				rule: RULE_ID,
 			});
 		} else {
-			definition_edits.push(Edit {
-				start: alias_start,
-				end: alias_end,
-				replacement: format!("pub use {use_path};"),
-				rule: RULE_ID,
-			});
-			definition_edits.push(Edit {
-				start: use_start,
-				end: use_end,
-				replacement: String::new(),
-				rule: RULE_ID,
-			});
+			return None;
 		}
+	} else {
+		definition_edits.push(Edit {
+			start: alias_start,
+			end: alias_end,
+			replacement: String::new(),
+			rule: RULE_ID,
+		});
 	}
 
 	Some(TypeAliasRenameFix { alias: alias_name, target: target_name, definition_edits })
+}
+
+fn is_primitive_type_ident(name: &str) -> bool {
+	matches!(
+		name,
+		"bool"
+			| "char" | "str"
+			| "i8" | "i16"
+			| "i32" | "i64"
+			| "i128" | "isize"
+			| "u8" | "u16"
+			| "u32" | "u64"
+			| "u128" | "usize"
+			| "f32" | "f64"
+	)
 }
 
 fn simple_use_path_text(text: &str) -> Option<String> {
