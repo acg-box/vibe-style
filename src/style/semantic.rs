@@ -174,6 +174,7 @@ fn run_semantic_cargo_check(
 	for arg in args {
 		cmd.arg(arg);
 	}
+
 	if progress {
 		// Keep cargo's own progress/status messages visible in interactive tune sessions.
 		cmd.stderr(Stdio::inherit());

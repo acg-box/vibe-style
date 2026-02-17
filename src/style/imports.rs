@@ -5033,6 +5033,7 @@ fn apply_pub_use_group_rules(
 				applied_self_group_edit = true;
 			}
 		}
+
 		if applied_self_group_edit {
 			continue;
 		}
@@ -5088,6 +5089,7 @@ fn collect_pub_use_self_group_segments<'a>(run: &'a [&'a TopItem]) -> Vec<&'a [&
 
 	while start < run.len() {
 		let visibility = run[start].visibility.trim();
+
 		if visibility.is_empty() {
 			start += 1;
 
@@ -5105,6 +5107,7 @@ fn collect_pub_use_self_group_segments<'a>(run: &'a [&'a TopItem]) -> Vec<&'a [&
 
 			end += 1;
 		}
+
 		if end.saturating_sub(start) >= 2 {
 			segments.push(&run[start..end]);
 		}

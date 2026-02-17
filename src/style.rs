@@ -6337,7 +6337,6 @@ fn sample() {
 		));
 
 		fs::write(&path, "fn already_clean() {}\n").expect("seed temp file");
-
 		crate::style::semantic::reset_cache_stats();
 
 		let summary = super::run_fix_round(
