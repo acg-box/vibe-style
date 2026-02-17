@@ -91,7 +91,7 @@ pub(crate) fn check_import_rules(
 ) {
 	let use_runs = collect_non_pub_use_runs(ctx);
 
-	apply_pub_use_same_root_spacing_rule(ctx, violations, edits, emit_edits);
+	apply_pub_use_group_rules(ctx, violations, edits, emit_edits);
 
 	let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
 	let import010_fixed_lines =
@@ -5001,36 +5001,41 @@ fn collect_pub_use_runs(ctx: &FileContext) -> Vec<Vec<&TopItem>> {
 	runs
 }
 
-fn apply_pub_use_same_root_spacing_rule(
+fn apply_pub_use_group_rules(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
+	let local_module_roots = collect_local_module_roots(ctx);
 	let pub_use_runs = collect_pub_use_runs(ctx);
 
 	for run in pub_use_runs {
+		if let Some((line, start, end, replacement)) =
+			build_pub_use_self_group_edit(ctx, &run, &local_module_roots)
+		{
+			shared::push_violation(
+				violations,
+				ctx,
+				line,
+				"RUST-STYLE-IMPORT-002",
+				"Prefer converging local module re-exports into `pub use self::{...};`.",
+				true,
+			);
+
+			if emit_edits {
+				edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-IMPORT-002" });
+			}
+
+			continue;
+		}
+
 		for pair in run.windows(2) {
 			let prev = pair[0];
 			let curr = pair[1];
 			let between = separator_lines(ctx, prev, curr);
 
 			if between.is_empty() || !between.iter().all(|line| line.trim().is_empty()) {
-				continue;
-			}
-
-			let Some(prev_path) = extract_use_path(ctx, prev) else {
-				continue;
-			};
-			let Some(curr_path) = extract_use_path(ctx, curr) else {
-				continue;
-			};
-			let prev_root =
-				prev_path.split_once("::").map(|(root, _)| root).unwrap_or(prev_path.as_str());
-			let curr_root =
-				curr_path.split_once("::").map(|(root, _)| root).unwrap_or(curr_path.as_str());
-
-			if prev_root != curr_root {
 				continue;
 			}
 
@@ -5068,6 +5073,60 @@ fn apply_pub_use_same_root_spacing_rule(
 			});
 		}
 	}
+}
+
+fn build_pub_use_self_group_edit(
+	ctx: &FileContext,
+	run: &[&TopItem],
+	local_module_roots: &HashSet<String>,
+) -> Option<(usize, usize, usize, String)> {
+	if run.len() < 2 {
+		return None;
+	}
+	if !run.windows(2).all(|pair| {
+		separator_lines(ctx, pair[0], pair[1]).iter().all(|line| line.trim().is_empty())
+	}) {
+		return None;
+	}
+
+	let first_visibility = run[0].visibility.trim();
+
+	if first_visibility.is_empty() {
+		return None;
+	}
+	if run.iter().any(|item| !item.attrs.is_empty() || item.visibility.trim() != first_visibility) {
+		return None;
+	}
+
+	let mut grouped_paths = Vec::with_capacity(run.len());
+
+	for item in run {
+		let path = extract_use_path(ctx, item)?;
+		let root =
+			path.trim_start_matches(':').split("::").next().map(str::trim).unwrap_or_default();
+		let normalized_root = normalize_ident(root);
+
+		if matches!(normalized_root, "crate" | "self" | "super")
+			|| !local_module_roots.contains(normalized_root)
+		{
+			return None;
+		}
+
+		grouped_paths.push(path);
+	}
+
+	let (start, end) = run_text_range(ctx, run[0], run[run.len() - 1])?;
+	let original = ctx.text.get(start..end)?;
+	let mut replacement = format!("{first_visibility} use self::{{{}}};", grouped_paths.join(", "));
+
+	if original.ends_with('\n') {
+		replacement.push('\n');
+	}
+	if replacement == original {
+		return None;
+	}
+
+	Some((run[0].line, start, end, replacement))
 }
 
 fn separator_lines<'a>(ctx: &'a FileContext, prev: &TopItem, curr: &TopItem) -> &'a [String] {

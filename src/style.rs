@@ -1777,6 +1777,41 @@ use unicode_segmentation::UnicodeSegmentation;
 	}
 
 	#[test]
+	fn pub_use_group_fix_converges_local_module_reexports_to_self_group() {
+		let original = r#"
+mod add_event;
+mod add_note;
+
+pub use add_event::{AddEventRequest, AddEventResponse};
+
+pub use add_note::{AddNoteRequest, AddNoteResponse};
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("pub_use_local_self_group_fix.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-002"
+				&& v.fixable && v.message
+				== "Prefer converging local module re-exports into `pub use self::{...};`."
+		}));
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+
+		assert!(applied >= 1);
+		assert!(compact.contains(
+			"pubuseself::{add_event::{AddEventRequest,AddEventResponse},add_note::{AddNoteRequest,AddNoteResponse}};"
+		));
+	}
+
+	#[test]
 	fn import_group_fix_does_not_rewrite_unknown_separator_comments() {
 		let original = r#"
 use crate::z::Z;
