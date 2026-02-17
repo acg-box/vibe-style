@@ -5138,7 +5138,9 @@ fn build_pub_use_self_group_edit(
 	if first_visibility.is_empty() {
 		return None;
 	}
-	if run.iter().any(|item| item.visibility.trim() != first_visibility || item.attrs != *first_attrs)
+	if run
+		.iter()
+		.any(|item| item.visibility.trim() != first_visibility || item.attrs != *first_attrs)
 	{
 		return None;
 	}
@@ -5165,8 +5167,11 @@ fn build_pub_use_self_group_edit(
 	let attrs_prefix = if first_attrs.is_empty() {
 		String::new()
 	} else {
-		let attrs =
-			first_attrs.iter().map(|attr| attr.trim()).filter(|attr| !attr.is_empty()).collect::<Vec<_>>();
+		let attrs = first_attrs
+			.iter()
+			.map(|attr| attr.trim())
+			.filter(|attr| !attr.is_empty())
+			.collect::<Vec<_>>();
 
 		if attrs.is_empty() { String::new() } else { format!("{} ", attrs.join(" ")) }
 	};
