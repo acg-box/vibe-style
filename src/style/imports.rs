@@ -5011,22 +5011,29 @@ fn apply_pub_use_group_rules(
 	let pub_use_runs = collect_pub_use_runs(ctx);
 
 	for run in pub_use_runs {
-		if let Some((line, start, end, replacement)) =
-			build_pub_use_self_group_edit(ctx, &run, &local_module_roots)
-		{
-			shared::push_violation(
-				violations,
-				ctx,
-				line,
-				"RUST-STYLE-IMPORT-002",
-				"Prefer converging local module re-exports into `pub use self::{...};`.",
-				true,
-			);
+		let mut applied_self_group_edit = false;
 
-			if emit_edits {
-				edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-IMPORT-002" });
+		for segment in collect_pub_use_self_group_segments(&run) {
+			if let Some((line, start, end, replacement)) =
+				build_pub_use_self_group_edit(ctx, segment, &local_module_roots)
+			{
+				shared::push_violation(
+					violations,
+					ctx,
+					line,
+					"RUST-STYLE-IMPORT-002",
+					"Prefer converging local module re-exports into `pub use self::{...};`.",
+					true,
+				);
+
+				if emit_edits {
+					edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-IMPORT-002" });
+				}
+
+				applied_self_group_edit = true;
 			}
-
+		}
+		if applied_self_group_edit {
 			continue;
 		}
 
@@ -5075,6 +5082,39 @@ fn apply_pub_use_group_rules(
 	}
 }
 
+fn collect_pub_use_self_group_segments<'a>(run: &'a [&'a TopItem]) -> Vec<&'a [&'a TopItem]> {
+	let mut segments = Vec::new();
+	let mut start = 0_usize;
+
+	while start < run.len() {
+		let visibility = run[start].visibility.trim();
+		if visibility.is_empty() {
+			start += 1;
+
+			continue;
+		}
+
+		let mut end = start + 1;
+
+		while end < run.len() {
+			let current = run[end];
+
+			if current.visibility.trim() != visibility || current.attrs != run[start].attrs {
+				break;
+			}
+
+			end += 1;
+		}
+		if end.saturating_sub(start) >= 2 {
+			segments.push(&run[start..end]);
+		}
+
+		start = end;
+	}
+
+	segments
+}
+
 fn build_pub_use_self_group_edit(
 	ctx: &FileContext,
 	run: &[&TopItem],
@@ -5090,11 +5130,13 @@ fn build_pub_use_self_group_edit(
 	}
 
 	let first_visibility = run[0].visibility.trim();
+	let first_attrs = &run[0].attrs;
 
 	if first_visibility.is_empty() {
 		return None;
 	}
-	if run.iter().any(|item| !item.attrs.is_empty() || item.visibility.trim() != first_visibility) {
+	if run.iter().any(|item| item.visibility.trim() != first_visibility || item.attrs != *first_attrs)
+	{
 		return None;
 	}
 
@@ -5117,7 +5159,16 @@ fn build_pub_use_self_group_edit(
 
 	let (start, end) = run_text_range(ctx, run[0], run[run.len() - 1])?;
 	let original = ctx.text.get(start..end)?;
-	let mut replacement = format!("{first_visibility} use self::{{{}}};", grouped_paths.join(", "));
+	let attrs_prefix = if first_attrs.is_empty() {
+		String::new()
+	} else {
+		let attrs =
+			first_attrs.iter().map(|attr| attr.trim()).filter(|attr| !attr.is_empty()).collect::<Vec<_>>();
+
+		if attrs.is_empty() { String::new() } else { format!("{} ", attrs.join(" ")) }
+	};
+	let mut replacement =
+		format!("{attrs_prefix}{first_visibility} use self::{{{}}};", grouped_paths.join(", "));
 
 	if original.ends_with('\n') {
 		replacement.push('\n');

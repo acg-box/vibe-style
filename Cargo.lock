@@ -979,12 +979,11 @@ dependencies = [
 
 [[package]]
 name = "vibe-style"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "cargo_metadata",
  "clap",
  "color-eyre",
- "once_cell",
  "ra_ap_syntax",
  "rayon",
  "regex",

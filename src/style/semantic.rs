@@ -2,7 +2,7 @@ use std::{
 	collections::{BTreeMap, BTreeSet},
 	fs,
 	path::{Path, PathBuf},
-	process::Command,
+	process::{Command, Stdio},
 	sync::{
 		OnceLock,
 		atomic::{AtomicU64, Ordering},
@@ -38,6 +38,7 @@ pub(crate) fn apply_semantic_fixes(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
 	verbose: bool,
+	progress: bool,
 ) -> Result<usize> {
 	if files.is_empty() {
 		return Ok(0);
@@ -47,7 +48,7 @@ pub(crate) fn apply_semantic_fixes(
 	let mut applied_total = 0_usize;
 
 	for _ in 0..max_import_suggestion_rounds() {
-		let stdout = run_semantic_cargo_check(cargo_options, files, verbose)?;
+		let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
 		let suggestions = collect_missing_import_suggestions(&stdout);
 		let mut applied_round = 0_usize;
 
@@ -73,13 +74,14 @@ pub(crate) fn collect_compiler_error_files(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
 	verbose: bool,
+	progress: bool,
 ) -> Result<BTreeSet<PathBuf>> {
 	if files.is_empty() {
 		return Ok(BTreeSet::new());
 	}
 
 	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
-	let stdout = run_semantic_cargo_check(cargo_options, files, verbose)?;
+	let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
 	let all = collect_compiler_error_files_from_output(&stdout);
 
 	Ok(all.into_iter().filter(|path| tracked.contains(path)).collect())
@@ -147,6 +149,7 @@ fn run_semantic_cargo_check(
 	cargo_options: &CargoOptions,
 	files: &[PathBuf],
 	verbose: bool,
+	progress: bool,
 ) -> Result<String> {
 	let args = semantic_check_args(cargo_options);
 	let cache_path = semantic_cache_path(cargo_options, files, verbose);
@@ -170,6 +173,10 @@ fn run_semantic_cargo_check(
 
 	for arg in args {
 		cmd.arg(arg);
+	}
+	if progress {
+		// Keep cargo's own progress/status messages visible in interactive tune sessions.
+		cmd.stderr(Stdio::inherit());
 	}
 
 	let output =

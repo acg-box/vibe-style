@@ -3,11 +3,11 @@ use std::{
 	fs,
 	path::{Path, PathBuf},
 	process::Command,
+	sync::LazyLock,
 };
 
 use cargo_metadata::{MetadataCommand, TargetKind};
 use color_eyre::{Result, eyre};
-use once_cell::sync::Lazy;
 use ra_ap_syntax::{
 	AstNode, Edition, SourceFile, TextRange,
 	ast::{self, HasAttrs, HasModuleItem, HasName, HasVisibility, Item},
@@ -50,9 +50,10 @@ pub(crate) const STYLE_RULE_IDS: [&str; 33] = [
 	"RUST-STYLE-TEST-002",
 ];
 
-pub(crate) static SNAKE_CASE_RE: Lazy<Regex> =
-	Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]*$").expect("Compile snake_case validation regex."));
-pub(crate) static WORKSPACE_IMPORT_ROOTS: Lazy<HashSet<String>> = Lazy::new(|| {
+pub(crate) static SNAKE_CASE_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^[a-z][a-z0-9_]*$").expect("Compile snake_case validation regex.")
+});
+pub(crate) static WORKSPACE_IMPORT_ROOTS: LazyLock<HashSet<String>> = LazyLock::new(|| {
 	let pkg_name = env!("CARGO_PKG_NAME");
 
 	let mut roots = HashSet::new();

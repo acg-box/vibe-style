@@ -61,6 +61,7 @@ struct SemanticValidationFallbacks<'a> {
 	semantic_cargo_options: &'a CargoOptions,
 	baseline_error_files: &'a BTreeSet<PathBuf>,
 	verbose: bool,
+	progress: bool,
 	import_fallbacks: &'a BTreeMap<PathBuf, (PathBuf, String)>,
 	changed_originals: &'a BTreeMap<PathBuf, (PathBuf, String)>,
 	let_mut_reorder_files: &'a BTreeMap<PathBuf, ()>,
@@ -314,14 +315,6 @@ fn run_fix_round(
 	let type_alias_plan = collect_type_alias_rename_plan(files)?;
 	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan)?;
 	let changed_files = changed_file_paths(&outcomes_all);
-	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
-
-	if progress {
-		eprintln!("vstyle tune: [{scope_label}] running semantic validation.");
-	}
-
-	let baseline_error_files =
-		semantic::collect_compiler_error_files(files, &semantic_cargo_options, verbose)?;
 	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
 	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
@@ -356,14 +349,35 @@ fn run_fix_round(
 		}
 	}
 
-	let semantic_phase_start_snapshot = collect_file_snapshots(files);
-	let semantic_applied = semantic::apply_semantic_fixes(files, &semantic_cargo_options, verbose)?;
+	if changed_files.is_empty() {
+		if progress {
+			eprintln!("vstyle tune: [{scope_label}] applied {} fix(es) this round.", total_applied);
+		}
+
+		return Ok(FixRoundSummary::default());
+	}
+
+	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
+
+	if progress {
+		eprintln!("vstyle tune: [{scope_label}] running semantic validation.");
+	}
+
+	let baseline_error_files = semantic::collect_compiler_error_files(
+		&changed_files,
+		&semantic_cargo_options,
+		verbose,
+		progress,
+	)?;
+	let semantic_phase_start_snapshot = collect_file_snapshots(&changed_files);
+	let semantic_applied =
+		semantic::apply_semantic_fixes(&changed_files, &semantic_cargo_options, verbose, progress)?;
 
 	total_applied += semantic_applied;
 
 	if semantic_applied > 0 {
 		total_applied += apply_post_semantic_cleanup(
-			files,
+			&changed_files,
 			&semantic_phase_start_snapshot,
 			&mut import_fallbacks,
 			&mut changed_originals,
@@ -372,10 +386,11 @@ fn run_fix_round(
 	}
 
 	handle_semantic_validation_fallbacks(SemanticValidationFallbacks {
-		files,
+		files: &changed_files,
 		semantic_cargo_options: &semantic_cargo_options,
 		baseline_error_files: &baseline_error_files,
 		verbose,
+		progress,
 		import_fallbacks: &import_fallbacks,
 		changed_originals: &changed_originals,
 		let_mut_reorder_files: &let_mut_reorder_files,
@@ -501,8 +516,12 @@ fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) ->
 		return Ok(());
 	}
 
-	let post_error_files =
-		semantic::collect_compiler_error_files(ctx.files, ctx.semantic_cargo_options, ctx.verbose)?;
+	let post_error_files = semantic::collect_compiler_error_files(
+		ctx.files,
+		ctx.semantic_cargo_options,
+		ctx.verbose,
+		ctx.progress,
+	)?;
 	let new_errors =
 		post_error_files.difference(ctx.baseline_error_files).cloned().collect::<Vec<_>>();
 	let mut handled = BTreeMap::<PathBuf, ()>::new();
@@ -1913,6 +1932,49 @@ pub use add_note::{AddNoteRequest, AddNoteResponse};
 		assert!(applied >= 1);
 		assert!(compact.contains(
 			"pubuseself::{add_event::{AddEventRequest,AddEventResponse},add_note::{AddNoteRequest,AddNoteResponse}};"
+		));
+	}
+
+	#[test]
+	fn pub_use_group_fix_converges_pub_super_local_reexports_with_cfg_tail() {
+		let original = r#"
+mod cache;
+mod diversity;
+mod policy;
+mod text;
+
+pub(super) use cache::{build_cached_scores, hash_query};
+pub(super) use diversity::{build_rerank_ranks, select_diverse_results};
+pub(super) use policy::{build_policy_snapshot, resolve_scopes};
+pub(super) use text::{merge_matched_fields, tokenize_query};
+#[cfg(test)] pub(super) use policy::BlendSegment;
+#[cfg(test)] pub(super) use text::{lexical_overlap_ratio, scope_description_boost};
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("pub_use_local_self_group_pub_super_fix.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-002"
+				&& v.fixable && v.message
+				== "Prefer converging local module re-exports into `pub use self::{...};`."
+		}));
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"));
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+
+		assert!(applied >= 1);
+		assert!(compact.contains(
+			"pub(super)useself::{cache::{build_cached_scores,hash_query},diversity::{build_rerank_ranks,select_diverse_results},policy::{build_policy_snapshot,resolve_scopes},text::{merge_matched_fields,tokenize_query}};"
+		));
+		assert!(compact.contains(
+			"#[cfg(test)]pub(super)useself::{policy::BlendSegment,text::{lexical_overlap_ratio,scope_description_boost}};"
 		));
 	}
 
@@ -6258,6 +6320,38 @@ fn sample() {
 		fs::write(&path, "fn changed() {}\n").expect("mutate temp file");
 
 		assert!(super::has_net_file_changes(&snapshots));
+
+		let _ = fs::remove_file(&path);
+	}
+
+	#[test]
+	fn run_fix_round_skips_semantic_for_no_change_scope() {
+		let nanos = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("current timestamp")
+			.as_nanos();
+		let path = std::env::temp_dir().join(format!(
+			"vstyle-noop-round-{}-{}.rs",
+			std::process::id(),
+			nanos
+		));
+
+		fs::write(&path, "fn already_clean() {}\n").expect("seed temp file");
+
+		crate::style::semantic::reset_cache_stats();
+
+		let summary = super::run_fix_round(
+			std::slice::from_ref(&path),
+			&shared::CargoOptions::default(),
+			false,
+			false,
+		)
+		.expect("run no-op fix round");
+		let stats = crate::style::semantic::cache_stats();
+
+		assert_eq!(summary.applied_count, 0);
+		assert!(!summary.requires_follow_up_round);
+		assert_eq!(stats.misses, 0);
 
 		let _ = fs::remove_file(&path);
 	}

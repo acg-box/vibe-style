@@ -12,7 +12,7 @@ name        = "vibe-style"
 readme      = "README.md"
 repository  = "https://github.com/hack-ink/vibe-style"
 resolver    = "3"
-version     = "0.1.11"
+version     = "0.1.12"
 
 [[bin]]
 name = "vstyle"
@@ -38,7 +38,6 @@ vergen-gitcl = { version = "9.1", features = ["cargo"] }
 cargo_metadata = { version = "0.23" }
 clap           = { version = "4.5", features = ["derive"] }
 color-eyre     = { version = "0.6" }
-once_cell      = { version = "1.21" }
 ra_ap_syntax   = { version = "0.0.319" }
 rayon          = { version = "1.11" }
 regex          = { version = "1.12" }
