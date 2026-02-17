@@ -105,7 +105,11 @@ pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
 	})
 }
 
-pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<RunSummary> {
+pub(crate) fn run_fix(
+	cargo_options: &CargoOptions,
+	verbose: bool,
+	progress: bool,
+) -> Result<RunSummary> {
 	semantic::reset_cache_stats();
 
 	let mut total_applied = 0_usize;
@@ -114,9 +118,22 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 		checked.violation_count.saturating_sub(checked.unfixable_count);
 	let mut non_decreasing_rounds = 0_usize;
 
-	for _ in 0..MAX_TUNE_ROUNDS {
+	for round in 0..MAX_TUNE_ROUNDS {
 		let fix_round_scopes = resolve_fix_round_scopes(cargo_options)?;
-		let scope_summaries = run_fix_rounds_for_scopes(&fix_round_scopes, verbose)?;
+		let parallel_scopes = should_parallelize_fix_scopes(&fix_round_scopes);
+
+		if progress {
+			let mode = if parallel_scopes { "parallel" } else { "serial" };
+
+			eprintln!(
+				"vstyle tune: round {}/{} with {} scope(s) ({mode}).",
+				round + 1,
+				MAX_TUNE_ROUNDS,
+				fix_round_scopes.len(),
+			);
+		}
+
+		let scope_summaries = run_fix_rounds_for_scopes(&fix_round_scopes, verbose, progress)?;
 		let mut applied_this_round = 0_usize;
 		let mut requires_follow_up_round = false;
 
@@ -140,6 +157,15 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 		);
 
 		if should_stop {
+			if progress {
+				eprintln!(
+					"vstyle tune: stopping after round {} (applied {}, remaining {}).",
+					round + 1,
+					applied_this_round,
+					fixable_count,
+				);
+			}
+
 			break;
 		}
 
@@ -227,11 +253,14 @@ fn resolve_fix_round_scopes(cargo_options: &CargoOptions) -> Result<Vec<FixRound
 fn run_fix_rounds_for_scopes(
 	fix_round_scopes: &[FixRoundScope],
 	verbose: bool,
+	progress: bool,
 ) -> Result<Vec<FixRoundSummary>> {
 	if should_parallelize_fix_scopes(fix_round_scopes) {
 		let results = fix_round_scopes
 			.par_iter()
-			.map(|(scope_files, scope_options)| run_fix_round(scope_files, scope_options, verbose))
+			.map(|(scope_files, scope_options)| {
+				run_fix_round(scope_files, scope_options, verbose, progress)
+			})
 			.collect::<Vec<_>>();
 		let mut summaries = Vec::with_capacity(results.len());
 
@@ -245,7 +274,7 @@ fn run_fix_rounds_for_scopes(
 	let mut summaries = Vec::with_capacity(fix_round_scopes.len());
 
 	for (scope_files, scope_options) in fix_round_scopes {
-		summaries.push(run_fix_round(scope_files, scope_options, verbose)?);
+		summaries.push(run_fix_round(scope_files, scope_options, verbose, progress)?);
 	}
 
 	Ok(summaries)
@@ -273,12 +302,24 @@ fn run_fix_round(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
 	verbose: bool,
+	progress: bool,
 ) -> Result<FixRoundSummary> {
+	let scope_label = fix_scope_label(cargo_options);
+
+	if progress {
+		eprintln!("vstyle tune: [{scope_label}] collecting fixes for {} file(s).", files.len());
+	}
+
 	let round_start_snapshot = collect_file_snapshots(files);
 	let type_alias_plan = collect_type_alias_rename_plan(files)?;
 	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan)?;
 	let changed_files = changed_file_paths(&outcomes_all);
 	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
+
+	if progress {
+		eprintln!("vstyle tune: [{scope_label}] running semantic validation.");
+	}
+
 	let baseline_error_files =
 		semantic::collect_compiler_error_files(files, &semantic_cargo_options, verbose)?;
 	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
@@ -349,7 +390,23 @@ fn run_fix_round(
 	let requires_follow_up_round =
 		if semantic_applied > 0 { has_fixable_violations_in_files(files)? } else { false };
 
+	if progress {
+		eprintln!("vstyle tune: [{scope_label}] applied {} fix(es) this round.", total_applied);
+	}
+
 	Ok(FixRoundSummary { applied_count: total_applied, requires_follow_up_round })
+}
+
+fn fix_scope_label(cargo_options: &CargoOptions) -> String {
+	if !cargo_options.packages.is_empty() {
+		return cargo_options.packages.join(",");
+	}
+
+	if cargo_options.workspace {
+		return "workspace".to_owned();
+	}
+
+	"default".to_owned()
 }
 
 fn apply_post_semantic_cleanup(
