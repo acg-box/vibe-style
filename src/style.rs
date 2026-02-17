@@ -26,6 +26,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use semantic::SemanticCacheStats;
 use shared::{Edit, FileContext, Violation};
 
+type FixRoundScope = (Vec<PathBuf>, CargoOptions);
+
 const FILE_BATCH_SIZE: usize = 64;
 const MAX_FIX_PASSES: usize = 8;
 const MAX_TUNE_ROUNDS: usize = 4;
@@ -114,12 +116,11 @@ pub(crate) fn run_fix(cargo_options: &CargoOptions, verbose: bool) -> Result<Run
 
 	for _ in 0..MAX_TUNE_ROUNDS {
 		let fix_round_scopes = resolve_fix_round_scopes(cargo_options)?;
+		let scope_summaries = run_fix_rounds_for_scopes(&fix_round_scopes, verbose)?;
 		let mut applied_this_round = 0_usize;
 		let mut requires_follow_up_round = false;
 
-		for (scope_files, scope_options) in fix_round_scopes {
-			let scope_summary = run_fix_round(&scope_files, &scope_options, verbose)?;
-
+		for scope_summary in scope_summaries {
 			applied_this_round += scope_summary.applied_count;
 			requires_follow_up_round |= scope_summary.requires_follow_up_round;
 		}
@@ -189,9 +190,7 @@ fn should_stop_tune_round(
 	(false, next_non_decreasing_rounds)
 }
 
-fn resolve_fix_round_scopes(
-	cargo_options: &CargoOptions,
-) -> Result<Vec<(Vec<PathBuf>, CargoOptions)>> {
+fn resolve_fix_round_scopes(cargo_options: &CargoOptions) -> Result<Vec<FixRoundScope>> {
 	let files = shared::resolve_files(cargo_options)?;
 
 	if !cargo_options.workspace || !cargo_options.packages.is_empty() {
@@ -223,6 +222,51 @@ fn resolve_fix_round_scopes(
 	}
 
 	Ok(scopes)
+}
+
+fn run_fix_rounds_for_scopes(
+	fix_round_scopes: &[FixRoundScope],
+	verbose: bool,
+) -> Result<Vec<FixRoundSummary>> {
+	if should_parallelize_fix_scopes(fix_round_scopes) {
+		let results = fix_round_scopes
+			.par_iter()
+			.map(|(scope_files, scope_options)| run_fix_round(scope_files, scope_options, verbose))
+			.collect::<Vec<_>>();
+		let mut summaries = Vec::with_capacity(results.len());
+
+		for result in results {
+			summaries.push(result?);
+		}
+
+		return Ok(summaries);
+	}
+
+	let mut summaries = Vec::with_capacity(fix_round_scopes.len());
+
+	for (scope_files, scope_options) in fix_round_scopes {
+		summaries.push(run_fix_round(scope_files, scope_options, verbose)?);
+	}
+
+	Ok(summaries)
+}
+
+fn should_parallelize_fix_scopes(fix_round_scopes: &[FixRoundScope]) -> bool {
+	fix_round_scopes.len() > 1 && fix_scope_files_are_disjoint(fix_round_scopes)
+}
+
+fn fix_scope_files_are_disjoint(fix_round_scopes: &[FixRoundScope]) -> bool {
+	let mut seen_files = BTreeSet::<PathBuf>::new();
+
+	for (scope_files, _scope_options) in fix_round_scopes {
+		for file in scope_files {
+			if !seen_files.insert(file.clone()) {
+				return false;
+			}
+		}
+	}
+
+	true
 }
 
 fn run_fix_round(
@@ -729,7 +773,11 @@ fn violation_signature(violation: &Violation) -> (usize, &'static str, &str, boo
 
 #[cfg(test)]
 mod tests {
-	use std::{collections::BTreeMap, fs, path::Path};
+	use std::{
+		collections::BTreeMap,
+		fs,
+		path::{Path, PathBuf},
+	};
 
 	use crate::style::{
 		Edit, MAX_FIX_PASSES, apply_fix_passes, collect_violations, fixes, shared, types,
@@ -6098,6 +6146,38 @@ fn sample() {
 		assert!(!scopes.is_empty());
 		assert!(scopes.iter().all(|(files, options)| !files.is_empty() && !options.workspace));
 		assert!(scopes.iter().all(|(_, options)| !options.packages.is_empty()));
+	}
+
+	#[test]
+	fn should_parallelize_fix_scopes_when_multiple_scopes_are_disjoint() {
+		let scopes = vec![
+			(
+				vec![PathBuf::from("a/src/lib.rs"), PathBuf::from("a/src/mod.rs")],
+				shared::CargoOptions { packages: vec!["a".to_owned()], ..Default::default() },
+			),
+			(
+				vec![PathBuf::from("b/src/lib.rs")],
+				shared::CargoOptions { packages: vec!["b".to_owned()], ..Default::default() },
+			),
+		];
+
+		assert!(super::should_parallelize_fix_scopes(&scopes));
+	}
+
+	#[test]
+	fn should_not_parallelize_fix_scopes_when_files_overlap() {
+		let scopes = vec![
+			(
+				vec![PathBuf::from("shared/src/lib.rs")],
+				shared::CargoOptions { packages: vec!["a".to_owned()], ..Default::default() },
+			),
+			(
+				vec![PathBuf::from("shared/src/lib.rs"), PathBuf::from("b/src/lib.rs")],
+				shared::CargoOptions { packages: vec!["b".to_owned()], ..Default::default() },
+			),
+		];
+
+		assert!(!super::should_parallelize_fix_scopes(&scopes));
 	}
 
 	#[test]
