@@ -2065,7 +2065,10 @@ fn build_import009_plan<'a>(
 	qualified_type_paths_by_symbol: &HashMap<String, HashSet<String>>,
 	qualified_value_paths_by_symbol: &HashMap<String, HashSet<String>>,
 ) -> Option<Import009Plan<'a>> {
-	let type_rewrites = unqualified_type_path_rewrites(ctx, symbol, imported_path);
+	let mut type_rewrites = unqualified_type_path_rewrites(ctx, symbol, imported_path);
+
+	type_rewrites.extend(unqualified_derive_attr_symbol_rewrites(ctx, symbol, imported_path));
+
 	let value_rewrites = unqualified_value_path_rewrites(ctx, symbol, imported_path);
 	let has_unqualified_type_uses = !type_rewrites.is_empty();
 	let has_unqualified_value_uses = !value_rewrites.is_empty();
@@ -3127,6 +3130,97 @@ fn alias_macro_token_tree_rewrites(
 	}
 
 	rewrites
+}
+
+fn unqualified_derive_attr_symbol_rewrites(
+	ctx: &FileContext,
+	symbol: &str,
+	qualified_path: &str,
+) -> Vec<(usize, usize, String)> {
+	let symbol_re = Regex::new(&format!(r"\b{}\b", regex::escape(symbol)))
+		.expect("Compile import009 derive symbol regex.");
+	let mut rewrites = Vec::new();
+
+	for attr in ctx.source_file.syntax().descendants().filter_map(ast::Attr::cast) {
+		let Some(meta) = attr.meta() else {
+			continue;
+		};
+		let Some(meta_path) = meta.path() else {
+			continue;
+		};
+		let Some(meta_name) = meta_path.segment().and_then(|segment| segment.name_ref()) else {
+			continue;
+		};
+
+		if meta_name.text() != "derive" {
+			continue;
+		}
+
+		let Some(token_tree) = meta.token_tree() else {
+			continue;
+		};
+		let tree_text = token_tree.syntax().text().to_string();
+		let tree_start = usize::from(token_tree.syntax().text_range().start());
+
+		for found in symbol_re.find_iter(&tree_text) {
+			let symbol_start = found.start();
+			let symbol_end = found.end();
+
+			if !derive_symbol_is_unqualified(&tree_text, symbol_start)
+				|| !derive_symbol_has_import009_follow(&tree_text, symbol_end)
+			{
+				continue;
+			}
+
+			rewrites.push((
+				tree_start + symbol_start,
+				tree_start + symbol_end,
+				qualified_path.to_owned(),
+			));
+		}
+	}
+
+	rewrites
+}
+
+fn derive_symbol_is_unqualified(text: &str, symbol_start: usize) -> bool {
+	if symbol_start == 0 {
+		return true;
+	}
+
+	let bytes = text.as_bytes();
+	let mut idx = symbol_start;
+
+	while idx > 0 && bytes[idx - 1].is_ascii_whitespace() {
+		idx -= 1;
+	}
+
+	if idx == 0 {
+		return true;
+	}
+
+	let prev = bytes[idx - 1];
+
+	if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b':' || prev == b'#' {
+		return false;
+	}
+
+	true
+}
+
+fn derive_symbol_has_import009_follow(text: &str, symbol_end: usize) -> bool {
+	let bytes = text.as_bytes();
+	let mut idx = symbol_end;
+
+	while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+		idx += 1;
+	}
+
+	if idx >= bytes.len() {
+		return true;
+	}
+
+	matches!(bytes[idx], b',' | b')')
 }
 
 fn unqualified_nongeneric_type_path_rewrites(

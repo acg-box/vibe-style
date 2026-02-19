@@ -3541,6 +3541,65 @@ fn build_value() -> Value {
 	}
 
 	#[test]
+	fn import009_rewrites_unqualified_derive_symbol() {
+		let original = r#"
+use foo::Bar;
+#[serde(skip_serializing_if = "core::ops::Not::not")]
+#[derive(Bar)]
+struct Row;
+
+#[derive(foo :: Bar)]
+struct Qualified;
+
+fn run() {
+	foo::Bar::make();
+}
+"#;
+		let mut rewritten = original.to_owned();
+		let mut applied_count = 0_usize;
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import009_unqualified_derive_symbol.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+			applied_count += applied;
+		}
+
+		assert!(applied_count > 0);
+		assert!(rewritten.contains("#[derive(foo::Bar)]"));
+		assert!(!rewritten.contains("#[derive(Bar)]"));
+		assert!(!rewritten.contains("use foo::Bar;"));
+		assert!(!rewritten.contains("foo::foo::Bar"));
+		assert!(
+			rewritten.lines().any(|line| line.contains("derive") && line.contains("foo :: Bar"))
+		);
+		assert!(rewritten.contains("foo::Bar::make()"));
+
+		let skip_serializing_if_lines: Vec<&str> = rewritten
+			.lines()
+			.filter(|line| line.contains("skip_serializing_if"))
+			.map(str::trim)
+			.collect();
+
+		assert_eq!(skip_serializing_if_lines.len(), 1);
+		assert_eq!(
+			skip_serializing_if_lines[0],
+			r#"#[serde(skip_serializing_if = "core::ops::Not::not")]"#
+		);
+	}
+
+	#[test]
 	fn import009_fix_rewrites_ambiguous_pubfi_ai_usage_with_grouped_import_kept() {
 		let original = r#"
 use pubfi_ai::Usage;
