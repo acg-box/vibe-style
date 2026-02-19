@@ -221,7 +221,7 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPORT-004`: Do not import free functions or macros into scope; use qualified paths. If imported symbols are ambiguous, use fully qualified paths.
 - `RUST-STYLE-IMPORT-005`: In `error.rs`, do not add `use` imports.
 - `RUST-STYLE-IMPORT-007`: Do not use glob imports (`use ...::*` or equivalent). Use explicit imports only.
-- `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
+- `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths and `#[derive(...)]` attributes, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
 - `RUST-STYLE-IMPORT-010`: Do not use `super` or `self` import prefixes. Rewrite `super` imports to crate-absolute imports (`use crate::...`) when module depth allows it, and rewrite `self::...` imports to direct module paths.
 
