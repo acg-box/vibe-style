@@ -3382,6 +3382,106 @@ pub enum Error {
 	}
 
 	#[test]
+	fn import008_shortens_qualified_derive_path_and_inserts_use() {
+		let original = r#"
+#[derive(Clone, Debug, sqlx::FromRow)]
+struct Row;
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_derive_row.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.lines().any(|line| line.trim() == "use sqlx::FromRow;"));
+		assert!(rewritten.contains("#[derive(Clone, Debug, FromRow)]"));
+		assert!(!rewritten.contains("#[derive(Clone, Debug, sqlx::FromRow)]"));
+	}
+
+	#[test]
+	fn import008_skips_ambiguous_derive_symbol_paths() {
+		let text = r#"
+#[derive(sqlx::FromRow)]
+struct SqlRow;
+
+#[derive(other::FromRow)]
+struct OtherRow;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import008_derive_ambiguous.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = collect_violations(&ctx, true);
+		let import008_violations =
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-IMPORT-008").count();
+		let import008_edits = edits.iter().filter(|e| e.rule == "RUST-STYLE-IMPORT-008").count();
+
+		assert_eq!(import008_violations, 0);
+		assert_eq!(import008_edits, 0);
+	}
+
+	#[test]
+	fn import008_derive_does_not_touch_skip_serializing_if_string_literal() {
+		let original = r#"
+#[serde(skip_serializing_if = "core::ops::Not::not")]
+#[derive(serde::Serialize)]
+struct Record {
+	#[allow(dead_code)]
+	value: bool,
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_derive_skip_serializing.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		let skip_serializing_if_lines: Vec<&str> = rewritten
+			.lines()
+			.filter(|line| line.contains("skip_serializing_if"))
+			.map(str::trim)
+			.collect();
+
+		assert_eq!(
+			skip_serializing_if_lines.len(),
+			1,
+			"expected exactly one skip_serializing_if attribute"
+		);
+		assert_eq!(
+			skip_serializing_if_lines[0],
+			r#"#[serde(skip_serializing_if = "core::ops::Not::not")]"#
+		);
+		assert!(!rewritten.contains("use core::ops::Not;"));
+		assert!(rewritten.contains("#[derive(Serialize)]"));
+	}
+
+	#[test]
 	fn import009_autofixes_when_different_qualified_symbol_path_exists() {
 		let original = r#"
 use a::A;

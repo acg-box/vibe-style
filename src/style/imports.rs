@@ -2590,9 +2590,26 @@ fn push_import_group_order_spacing_violations(
 }
 
 fn collect_import008_candidates(ctx: &FileContext) -> Vec<Import008Candidate> {
+	let Ok(derive_path_re) = Regex::new(
+		r"(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*(?:::\s*(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*)+",
+	) else {
+		return Vec::new();
+	};
 	let mut candidates = Vec::new();
 	let mut seen_ranges = HashSet::new();
 
+	collect_import008_from_paths(ctx, &mut candidates, &mut seen_ranges);
+	collect_import008_from_macro_calls(ctx, &mut candidates, &mut seen_ranges);
+	collect_import008_from_derive_attrs(ctx, &derive_path_re, &mut candidates, &mut seen_ranges);
+
+	candidates
+}
+
+fn collect_import008_from_paths(
+	ctx: &FileContext,
+	candidates: &mut Vec<Import008Candidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+) {
 	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
 		let Some(path) = path_type.path() else {
 			continue;
@@ -2651,6 +2668,13 @@ fn collect_import008_candidates(ctx: &FileContext) -> Vec<Import008Candidate> {
 
 		candidates.push(Import008Candidate { line, start, end, symbol, import_path, replacement });
 	}
+}
+
+fn collect_import008_from_macro_calls(
+	ctx: &FileContext,
+	candidates: &mut Vec<Import008Candidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+) {
 	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
 		let Some(path) = macro_call.path() else {
 			continue;
@@ -2702,8 +2726,127 @@ fn collect_import008_candidates(ctx: &FileContext) -> Vec<Import008Candidate> {
 
 		candidates.push(Import008Candidate { line, start, end, symbol, import_path, replacement });
 	}
+}
 
-	candidates
+fn collect_import008_from_derive_attrs(
+	ctx: &FileContext,
+	derive_path_re: &Regex,
+	candidates: &mut Vec<Import008Candidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+) {
+	for attr in ctx.source_file.syntax().descendants().filter_map(ast::Attr::cast) {
+		let Some(attr_path) = attr.path() else {
+			continue;
+		};
+		let Some(attr_name) = attr_path.segment().and_then(|segment| segment.name_ref()) else {
+			continue;
+		};
+
+		if attr_name.text() != "derive" {
+			continue;
+		}
+
+		let is_cfg_test = attr.syntax().ancestors().filter_map(Module::cast).any(|module| {
+			module
+				.attrs()
+				.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg(test)"))
+		});
+
+		if is_cfg_test {
+			continue;
+		}
+
+		let attr_text = attr.syntax().text().to_string();
+		let attr_start = usize::from(attr.syntax().text_range().start());
+		let mut derive_body = None;
+
+		if let Some(open_paren_offset) = attr_text.find('(') {
+			let body_start = open_paren_offset + 1;
+			let mut depth = 1_usize;
+			let mut close_offset = None;
+
+			for (idx, ch) in attr_text.as_bytes().iter().enumerate().skip(body_start) {
+				match ch {
+					b'(' => depth += 1,
+					b')' => {
+						depth -= 1;
+
+						if depth == 0 {
+							close_offset = Some(idx);
+
+							break;
+						}
+					},
+					_ => {},
+				}
+			}
+
+			if let Some(close_offset) = close_offset
+				&& close_offset >= body_start
+			{
+				derive_body = Some((body_start, close_offset));
+			}
+		}
+
+		let Some((body_start, body_end)) = derive_body else {
+			continue;
+		};
+		let body = &attr_text[body_start..body_end];
+		let body_offset = body_start;
+
+		for derive_match in derive_path_re.find_iter(body) {
+			let compact_match =
+				derive_match.as_str().chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+			let segments = compact_match.split("::").map(ToString::to_string).collect::<Vec<_>>();
+
+			if segments.len() < 2 {
+				continue;
+			}
+
+			let symbol = normalize_ident(segments[segments.len() - 1].as_str()).to_owned();
+
+			if matches!(symbol.as_str(), "" | "self" | "super" | "crate" | "Self") {
+				continue;
+			}
+
+			let root = normalize_ident(segments[0].as_str());
+
+			if is_non_importable_root(root) {
+				continue;
+			}
+
+			let import_path = compact_match;
+
+			if matches!(
+				import_path.as_str(),
+				"std::fmt::Result"
+					| "core::fmt::Result"
+					| "std::result::Result"
+					| "core::result::Result"
+			) {
+				continue;
+			}
+
+			let replacement = segments[segments.len() - 1].clone();
+			let start = attr_start + body_offset + derive_match.start();
+			let end = attr_start + body_offset + derive_match.end();
+
+			if start >= end || !seen_ranges.insert((start, end)) {
+				continue;
+			}
+
+			let line = shared::line_from_offset(&ctx.line_starts, start);
+
+			candidates.push(Import008Candidate {
+				line,
+				start,
+				end,
+				symbol,
+				import_path,
+				replacement,
+			});
+		}
+	}
 }
 
 fn collect_qualified_type_paths_by_symbol(ctx: &FileContext) -> HashMap<String, HashSet<String>> {
