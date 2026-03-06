@@ -25,6 +25,7 @@ AST-backed rules (some may also use limited text for replacement formatting):
 - `RUST-STYLE-IMPORT-008`
 - `RUST-STYLE-IMPORT-009`
 - `RUST-STYLE-IMPORT-010`
+- `RUST-STYLE-IMPORT-011`
 - `RUST-STYLE-GENERICS-001`
 - `RUST-STYLE-GENERICS-002`
 - `RUST-STYLE-GENERICS-003`
@@ -56,4 +57,3 @@ Hybrid AST-backed + layout-backed rules (AST classification plus line-aware spac
 Semantic-backed rules:
 
 - `RUST-STYLE-LET-001` (AST edit generation with compiler-error diff validation during `tune`)
-

@@ -13,6 +13,7 @@ Audience: This documentation is written for LLM consumption and should remain ex
 ## Specs
 
 - `docs/spec/system_style_rule_backends.md` for the AST-backed vs layout-backed rule map.
+- `docs/spec/system_style_import_derive_interactions.md` for the normative interaction between `IMPORT-008`, `IMPORT-009`, and `IMPORT-011` on `#[derive(...)]`.
 
 ## Authoring guidance (LLM-first)
 

@@ -224,6 +224,7 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths and `#[derive(...)]` attributes, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
 - `RUST-STYLE-IMPORT-010`: Do not use `super` or `self` import prefixes. Rewrite `super` imports to crate-absolute imports (`use crate::...`) when module depth allows it, and rewrite `self::...` imports to direct module paths.
+- `RUST-STYLE-IMPORT-011`: Order `#[derive(...)]` entries like imports: `std`/`core`/`alloc` first, then third-party derives, then workspace derives; alphabetize within each group.
 
 ### Types and generics
 
