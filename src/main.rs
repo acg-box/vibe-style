@@ -5,7 +5,7 @@
 mod cli;
 mod style;
 
-use std::process::ExitCode;
+use std::{env, process::ExitCode};
 
 use clap::Parser;
 
@@ -20,7 +20,7 @@ fn normalize_args(mut args: Vec<String>) -> Vec<String> {
 }
 
 fn normalized_cli_args() -> Vec<String> {
-	normalize_args(std::env::args().collect::<Vec<_>>())
+	normalize_args(env::args().collect::<Vec<_>>())
 }
 
 fn main() -> ExitCode {
@@ -42,12 +42,11 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-	use crate::normalize_args;
 
 	#[test]
 	fn cargo_subcommand_arg_shape_is_normalized() {
 		let args = vec!["cargo-vstyle".to_owned(), "vstyle".to_owned(), "curate".to_owned()];
-		let normalized = normalize_args(args);
+		let normalized = crate::normalize_args(args);
 
 		assert_eq!(normalized, vec!["cargo-vstyle", "curate"]);
 	}

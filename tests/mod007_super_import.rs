@@ -1,5 +1,5 @@
 use std::{
-	fs,
+	env, fs,
 	path::PathBuf,
 	process::Command,
 	time::{SystemTime, UNIX_EPOCH},
@@ -7,7 +7,7 @@ use std::{
 
 fn create_temp_crate_root() -> PathBuf {
 	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Clock.").as_nanos();
-	let root = std::env::temp_dir().join(format!("vstyle-mod007-{}", stamp));
+	let root = env::temp_dir().join(format!("vstyle-mod007-{}", stamp));
 	let _ = fs::remove_dir_all(&root);
 
 	fs::create_dir_all(root.join("src")).expect("Create src.");
@@ -105,11 +105,15 @@ mod tests {
 		"used super glob should be expanded (IMPORT-007) rather than left as a glob in src/used.rs"
 	);
 
-	let has_helper_use = used_after.lines().any(|line| {
+	let has_used_module_import = used_after.lines().any(|line| {
 		let trimmed = line.trim_start();
 
-		trimmed.starts_with("use ") && trimmed.contains("helper")
+		trimmed == "use crate::used;"
 	});
+	let has_qualified_helper_call = used_after.contains("used::helper()");
 
-	assert!(has_helper_use, "expected helper to be explicitly imported after tune");
+	assert!(
+		has_used_module_import && has_qualified_helper_call,
+		"expected helper to be reached through an explicit module import after tune"
+	);
 }

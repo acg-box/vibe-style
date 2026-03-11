@@ -50,7 +50,7 @@ struct TypeAliasRenamePlan {
 	definition_edits: BTreeMap<PathBuf, Vec<Edit>>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct FixRoundSummary {
 	applied_count: usize,
 	requires_follow_up_round: bool,
@@ -851,14 +851,12 @@ fn violation_signature(violation: &Violation) -> (usize, &'static str, &str, boo
 mod tests {
 	use std::{
 		collections::BTreeMap,
-		fs,
+		env, fs,
 		path::{Path, PathBuf},
+		process, slice,
 	};
 
-	use crate::style::{
-		Edit, MAX_FIX_PASSES, apply_fix_passes, collect_violations, fixes, shared, types,
-		violation_signature,
-	};
+	use crate::style::{Edit, MAX_FIX_PASSES, fixes, semantic, shared, types, violation_signature};
 
 	#[test]
 	fn suffix_rewrite_works() {
@@ -866,7 +864,7 @@ mod tests {
 		let ctx = shared::read_file_context_from_text(Path::new("a.rs"), text.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.is_empty());
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-NUM-001"));
@@ -881,7 +879,7 @@ mod tests {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(
 			violations
@@ -901,7 +899,7 @@ mod tests {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|violation| violation.rule == "RUST-STYLE-RUNTIME-002"));
 		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-RUNTIME-002"));
@@ -916,7 +914,7 @@ mod tests {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|violation| {
 			violation.rule == "RUST-STYLE-RUNTIME-002"
@@ -935,7 +933,7 @@ mod tests {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|violation| {
 			violation.rule == "RUST-STYLE-LOG-002"
@@ -951,7 +949,7 @@ mod tests {
 			shared::read_file_context_from_text(Path::new("runtime_cfg_test.rs"), text.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().all(|violation| !matches!(
 			violation.rule,
@@ -974,7 +972,7 @@ struct Payload {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
@@ -1002,7 +1000,7 @@ struct Payload {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
@@ -1039,7 +1037,7 @@ pub fn to_status() -> Status {
 		let ctx = shared::read_file_context_from_text(Path::new("error.rs"), original.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-005" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-005"));
@@ -1069,7 +1067,7 @@ pub enum Error {
 		let ctx = shared::read_file_context_from_text(Path::new("error.rs"), text.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-005" && !v.fixable));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-005"));
@@ -1092,7 +1090,7 @@ fn run() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && !v.fixable));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-007"));
@@ -1126,7 +1124,7 @@ mod tests {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-007"));
@@ -1176,10 +1174,14 @@ mod tests {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (_violations, _edits) = collect_violations(&ctx, true);
+		let (_violations, _edits) = crate::style::collect_violations(&ctx, true);
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import007_super_glob_string_symbol.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import007_super_glob_string_symbol.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(!rewritten.contains("use super::*;"));
 		assert!(!rewritten.contains("use super::{"));
@@ -1191,28 +1193,27 @@ mod tests {
 			.duration_since(std::time::UNIX_EPOCH)
 			.expect("Read timestamp.")
 			.as_nanos();
-		let root = std::env::temp_dir()
-			.join(format!("vstyle-prelude-expand-{}-{now}", std::process::id()));
+		let root = env::temp_dir().join(format!("vstyle-prelude-expand-{}-{now}", process::id()));
 		let src_dir = root.join("src");
 		let sample_path = src_dir.join("sample.rs");
 		let original = "use crate::prelude::*;\n\nfn run() -> Result<()> {\n\tOk(())\n}\n";
 
-		std::fs::create_dir_all(&src_dir).expect("Create temp src directory.");
-		std::fs::write(
+		fs::create_dir_all(&src_dir).expect("Create temp src directory.");
+		fs::write(
 			root.join("Cargo.toml"),
 			"[package]\nname = \"vstyle-prelude-expand\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
 		)
 		.expect("Write Cargo manifest.");
-		std::fs::write(
+		fs::write(
 			root.join("src/main.rs"),
 			"mod prelude {\n\tpub use color_eyre::{Result, eyre};\n}\n",
 		)
 		.expect("Write crate root.");
-		std::fs::write(&sample_path, original).expect("Write sample source.");
+		fs::write(&sample_path, original).expect("Write sample source.");
 
 		let ctx =
 			shared::read_file_context(&sample_path).expect("Read context.").expect("Have context.");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("Apply edits.");
 
@@ -1226,28 +1227,27 @@ mod tests {
 			.duration_since(std::time::UNIX_EPOCH)
 			.expect("Read timestamp.")
 			.as_nanos();
-		let root = std::env::temp_dir()
-			.join(format!("vstyle-prelude-braced-{}-{now}", std::process::id()));
+		let root = env::temp_dir().join(format!("vstyle-prelude-braced-{}-{now}", process::id()));
 		let src_dir = root.join("src");
 		let sample_path = src_dir.join("sample.rs");
 		let original = "use crate::{\n\tprelude::*,\n\tstyle::RunSummary,\n};\n\nfn run(summary: RunSummary) -> Result<()> {\n\tlet _ = summary;\n\tOk(())\n}\n";
 
-		std::fs::create_dir_all(&src_dir).expect("Create temp src directory.");
-		std::fs::write(
+		fs::create_dir_all(&src_dir).expect("Create temp src directory.");
+		fs::write(
 			root.join("Cargo.toml"),
 			"[package]\nname = \"vstyle-prelude-braced\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
 		)
 		.expect("Write Cargo manifest.");
-		std::fs::write(
+		fs::write(
 			root.join("src/main.rs"),
 			"mod prelude {\n\tpub use color_eyre::{Result, eyre};\n}\nmod style { pub struct RunSummary; }\n",
 		)
 		.expect("Write crate root.");
-		std::fs::write(&sample_path, original).expect("Write sample source.");
+		fs::write(&sample_path, original).expect("Write sample source.");
 
 		let ctx =
 			shared::read_file_context(&sample_path).expect("Read context.").expect("Have context.");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("Apply edits.");
 		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
@@ -1278,7 +1278,7 @@ pub mod api_code {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
 
@@ -1307,7 +1307,7 @@ pub mod api_code {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
 
@@ -1349,7 +1349,7 @@ pub mod api_code {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && v.fixable));
 
@@ -1370,7 +1370,7 @@ pub mod api_code {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -1389,7 +1389,7 @@ pub mod api_code {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
@@ -1415,7 +1415,7 @@ pub mod api_code {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
@@ -1449,8 +1449,12 @@ def_api_codes! {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import007_mod001_macro_block.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import007_mod001_macro_block.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
 		let use_pos =
 			compact.find("pubuseself::pubfi::{ERR_A,ERR_B};").expect("has rewritten pub use");
@@ -1478,8 +1482,12 @@ def_api_codes! {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import010_mod001_macro_block.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import010_mod001_macro_block.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
 		let use_pos =
 			compact.find("pubuseself::pubfi::{ERR_A,ERR_B};").expect("has rewritten pub use");
@@ -1507,7 +1515,7 @@ mod inner {
 			shared::read_file_context_from_text(Path::new("src/style/foo.rs"), original.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
@@ -1525,7 +1533,7 @@ mod inner {
 		let ctx = shared::read_file_context_from_text(Path::new("src/lib.rs"), text.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-010" && !v.fixable));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-010"));
@@ -1571,8 +1579,8 @@ fn example() {
 		let ctx = shared::read_file_context_from_text(Path::new("c.rs"), text.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (check_violations, _check_edits) = collect_violations(&ctx, false);
-		let (fix_violations, _fix_edits) = collect_violations(&ctx, true);
+		let (check_violations, _check_edits) = crate::style::collect_violations(&ctx, false);
+		let (fix_violations, _fix_edits) = crate::style::collect_violations(&ctx, true);
 		let mut check_set = check_violations.iter().map(violation_signature).collect::<Vec<_>>();
 		let mut fix_set = fix_violations.iter().map(violation_signature).collect::<Vec<_>>();
 
@@ -1595,7 +1603,7 @@ impl Usage {
 		let ctx = shared::read_file_context_from_text(Path::new("impl.rs"), original.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -1626,7 +1634,7 @@ impl From<UserData> for grpc::UserData {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-001"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPL-001"));
@@ -1650,7 +1658,7 @@ impl<T> Inference<T> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-001"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPL-001"));
@@ -1678,7 +1686,7 @@ impl std::error::Error for DispatchError {}
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-003"));
 	}
@@ -1710,7 +1718,7 @@ impl crate::WorkspaceTrait for Sample {}
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPL-003" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPL-003"));
@@ -1752,7 +1760,7 @@ const PROMPT: &str = r#"
 		let ctx = shared::read_file_context_from_text(Path::new("num_prompt.rs"), text.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(
 			!violations
@@ -1772,7 +1780,7 @@ fn sample() {
 		let ctx = shared::read_file_context_from_text(Path::new("num_fix.rs"), original.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -1792,7 +1800,7 @@ fn sample() {
 			shared::read_file_context_from_text(Path::new("num_macro_fix.rs"), original.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -1813,7 +1821,7 @@ use crate::z::Z;
 			shared::read_file_context_from_text(Path::new("import_fix.rs"), original.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-001"));
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-002" && v.fixable));
@@ -1847,7 +1855,7 @@ use std::collections::HashSet;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.is_empty());
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"));
@@ -1881,7 +1889,7 @@ use unicode_segmentation::UnicodeSegmentation;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-002" && v.fixable));
 
@@ -1916,7 +1924,7 @@ pub use add_note::{AddNoteRequest, AddNoteResponse};
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-002"
@@ -1956,7 +1964,7 @@ pub(super) use text::{merge_matched_fields, tokenize_query};
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-002"
@@ -1991,7 +1999,7 @@ use std::collections::HashSet;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-001" && !v.fixable));
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-002" && !v.fixable));
@@ -2008,7 +2016,7 @@ use std::collections::HashSet;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-001"));
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-002" && v.fixable));
@@ -2066,7 +2074,7 @@ mod prelude {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-001"));
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-002" && v.fixable));
@@ -2096,7 +2104,7 @@ use crate::z::Z;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-001" && v.fixable));
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"));
@@ -2142,8 +2150,12 @@ use crate::z::Z;
 		);
 
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import_group_fallback_import009.rs"), original, false)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import_group_fallback_import009.rs"),
+				original,
+				false,
+			)
+			.expect("apply fix passes");
 
 		assert!(applied_count > 0);
 		assert!(rewritten.contains("use std::fmt::Result;\n\nuse crate::z::Z;\n"));
@@ -2166,7 +2178,7 @@ fn sample(value: beta::Gamma) -> beta::Gamma {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-002"
@@ -2198,7 +2210,7 @@ fn sample(value: beta::Gamma) -> beta::Gamma {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-002"
@@ -2225,7 +2237,7 @@ fn sample(value: beta::Gamma) -> beta::Gamma {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let edits_debug = format!("{edits:?}");
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
@@ -2246,7 +2258,7 @@ fn sample(value: beta::Gamma) -> beta::Gamma {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -2267,7 +2279,7 @@ use crate::{grpc::{self, ReferralCode as ProtoReferralCode, VerifyMailCodeReques
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -2294,7 +2306,7 @@ fn sample(mut data: &[u8]) -> usize {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-003"
@@ -2328,7 +2340,7 @@ fn sample(mut data: &[u8], mut sink: Vec<u8>) -> usize {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-003"
@@ -2366,7 +2378,7 @@ fn read_one<R: Read>(mut reader: R) -> usize {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-003"
@@ -2388,7 +2400,7 @@ use serde::Deserialize;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-003"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
@@ -2410,7 +2422,7 @@ struct Payload {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -2433,7 +2445,7 @@ fn noop() {}
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (_violations, edits) = collect_violations(&ctx, true);
+		let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 		let mut rewritten = original.to_owned();
 		let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
@@ -2459,7 +2471,7 @@ fn run() -> Result<()> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
@@ -2493,7 +2505,8 @@ fn run() -> Result<()> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (rewritten_violations, _rewritten_edits) = collect_violations(&rewritten_ctx, true);
+		let (rewritten_violations, _rewritten_edits) =
+			crate::style::collect_violations(&rewritten_ctx, true);
 
 		assert!(!rewritten_violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
@@ -2506,7 +2519,7 @@ fn run() -> Result<()> {
 			_second_pass_applied,
 			_had_import_shortening_edits,
 			_had_let_mut_reorder_edits,
-		) = apply_fix_passes(
+		) = crate::style::apply_fix_passes(
 			Path::new("import003_trait_alias_context_ambiguous.rs"),
 			&rewritten_ctx.text,
 			true,
@@ -2535,7 +2548,7 @@ fn needs_context<T: EyreContext>(value: T) -> T {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-003"
@@ -2570,7 +2583,7 @@ fn should_retry_embed(error: &AiError) -> bool {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-003" && v.message.contains("`AiError`") && v.fixable
@@ -2611,7 +2624,7 @@ fn map_types(
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(
 			violations.iter().any(|v| {
@@ -2655,7 +2668,7 @@ use std::task::Context;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
@@ -2680,7 +2693,7 @@ fn decode<T: serde::Deserialize<'static>>() {}
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -2704,7 +2717,7 @@ use bar::Client;
 			shared::read_file_context_from_text(Path::new("import_ambiguous.rs"), text.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
@@ -2738,7 +2751,7 @@ use crate::{
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
@@ -2758,7 +2771,7 @@ use crate::{store::{self, InsightInsertOutcome}};
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
@@ -2781,7 +2794,7 @@ fn sample() -> usize {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
@@ -2796,7 +2809,716 @@ fn sample() -> usize {
 
 		assert!(applied >= 2);
 		assert!(!rewritten.contains("use crate::math::sum;"));
-		assert!(rewritten.contains("crate::math::sum(1, 2)"));
+		assert!(rewritten.contains("use crate::math;"));
+		assert!(rewritten.contains("math::sum(1, 2)"));
+	}
+
+	#[test]
+	fn import_fix_uses_full_path_when_parent_module_name_is_ambiguous() {
+		let original = r#"
+use other::math;
+use crate::math::sum;
+
+fn sample() -> usize {
+	sum(1, 2)
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_function_fix_ambiguous_module.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use crate::math;"));
+		assert!(rewritten.contains("crate::math::sum(1, 2)"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_shortens_existing_full_path_free_function_call() {
+		let original = r#"
+fn sample() {
+	crate::app::build_auth_state();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("use crate::app;"), "{rewritten}");
+		assert!(rewritten.contains("app::build_auth_state();"), "{rewritten}");
+		assert!(!rewritten.contains("crate::app::build_auth_state();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_keeps_existing_full_path_when_parent_module_name_is_ambiguous() {
+		let original = r#"
+use other::app;
+
+fn sample() {
+	crate::app::build_auth_state();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_ambiguous.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use crate::app;"), "{rewritten}");
+		assert!(rewritten.contains("crate::app::build_auth_state();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_merges_parent_module_import_when_shortening_existing_full_path_call() {
+		let original = r#"
+use crate::{app::AuthState};
+
+fn sample() {
+	let _ = AuthState;
+	crate::app::build_auth_state();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_merge.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("use crate::{app::{self, AuthState}};"), "{rewritten}");
+		assert!(rewritten.contains("app::build_auth_state();"), "{rewritten}");
+		assert!(!rewritten.contains("crate::app::build_auth_state();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_shortens_existing_full_path_call_inside_cfg_test_module() {
+		let original = r#"
+#[cfg(test)]
+mod tests {
+	use crate::app::AuthState;
+
+	#[test]
+	fn sample() {
+		let _ = AuthState;
+		crate::app::build_auth_state();
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_cfg_test.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("\tuse crate::app::{self, AuthState};"), "{rewritten}");
+		assert!(rewritten.contains("\t\tapp::build_auth_state();"), "{rewritten}");
+		assert!(!rewritten.contains("crate::app::build_auth_state();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_shortens_existing_full_path_call_inside_macro_tokens() {
+		let original = r#"
+fn sample() {
+	assert!(crate::app::build_auth_state().is_ok());
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_macro_tokens.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("use crate::app;"), "{rewritten}");
+		assert!(rewritten.contains("assert!(app::build_auth_state().is_ok());"), "{rewritten}");
+		assert!(!rewritten.contains("crate::app::build_auth_state()"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_preserves_turbofish_when_shortening_existing_full_path_call() {
+		let original = r#"
+fn sample() {
+	crate::app::build_auth_state::<AuthState>();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_turbofish.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("use crate::app;"), "{rewritten}");
+		assert!(rewritten.contains("app::build_auth_state::<AuthState>();"), "{rewritten}");
+		assert!(!rewritten.contains("crate::app::build_auth_state::<AuthState>();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_keeps_existing_full_path_when_root_qualified_time_path_would_conflict() {
+		let original = r#"
+fn sample() {
+	let _ = time::OffsetDateTime::UNIX_EPOCH;
+	tokio::time::sleep();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_root_time_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use tokio::time;"), "{rewritten}");
+		assert!(rewritten.contains("tokio::time::sleep();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_keeps_existing_full_path_when_imported_root_time_use_would_conflict() {
+		let original = r#"
+use time::OffsetDateTime;
+
+fn sample() {
+	let _ = OffsetDateTime::UNIX_EPOCH;
+	tokio::time::sleep();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_imported_time_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("use time::OffsetDateTime;"), "{rewritten}");
+		assert!(!rewritten.contains("use tokio::time;"), "{rewritten}");
+		assert!(rewritten.contains("tokio::time::sleep();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_keeps_existing_full_path_when_root_qualified_product_path_would_conflict() {
+		let original = r#"
+fn sample() {
+	let _ = product::Catalog::default();
+	crate::product::build();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_root_product_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(!rewritten.contains("use crate::product;"), "{rewritten}");
+		assert!(rewritten.contains("product::build();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_keeps_existing_full_path_when_imported_root_product_use_would_conflict() {
+		let original = r#"
+use product::Catalog;
+
+fn sample() {
+	let _ = Catalog::default();
+	crate::product::build();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_existing_full_path_function_imported_product_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("use product::Catalog;"), "{rewritten}");
+		assert!(!rewritten.contains("use crate::product;"), "{rewritten}");
+		assert!(rewritten.contains("product::build();"), "{rewritten}");
+	}
+
+	#[test]
+	fn import_fix_rewrites_std_iter_once_to_parent_module_path() {
+		let original = r#"
+#[cfg(test)]
+mod tests {
+	use std::iter::once;
+
+	#[test]
+	fn sample() {
+		let _ = once(1usize);
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(Path::new("import004_std_iter_once.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert!(rewritten.contains("\tuse std::iter;"), "{rewritten}");
+		assert!(rewritten.contains("\t\tlet _ = iter::once("), "{rewritten}");
+		assert!(!rewritten.contains("use std::iter::once;"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_does_not_rewrite_method_calls_through_parent_module_imports() {
+		let original = r#"
+use std::iter;
+
+fn sample() {
+	let ordered = [1usize, 2usize];
+	let _ = ordered.iter().copied().collect::<Vec<_>>();
+	let _ = iter::once(3usize);
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_method_call_parent_module_import.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("ordered.iter().copied()"), "{rewritten}");
+		assert!(!rewritten.contains("ordered.std::iter()"), "{rewritten}");
+		assert!(rewritten.contains("iter::once("), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_does_not_rewrite_method_calls_inside_macro_tokens() {
+		let original = r#"
+use std::iter;
+
+fn sample() {
+	let ordered = [1usize, 2usize];
+	let _ = format!(
+		"{:?}",
+		ordered.iter().map(|entry| entry.saturating_add(1)).collect::<Vec<_>>()
+	);
+	let _ = iter::once(3usize);
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_method_call_inside_macro_tokens.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("ordered.iter().map("), "{rewritten}");
+		assert!(!rewritten.contains("ordered.std::iter()"), "{rewritten}");
+		assert!(rewritten.contains("iter::once("), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_keeps_full_path_when_free_function_import_root_time_use_would_conflict() {
+		let original = r#"
+use time::OffsetDateTime;
+use tokio::time::sleep;
+
+fn sample() {
+	let _ = OffsetDateTime::UNIX_EPOCH;
+	sleep();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_free_function_import_imported_time_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(rewritten.contains("use time::OffsetDateTime;"), "{rewritten}");
+		assert!(!rewritten.contains("use tokio::time;"), "{rewritten}");
+		assert!(!rewritten.contains("use tokio::time::sleep;"), "{rewritten}");
+		assert!(rewritten.contains("tokio::time::sleep();"), "{rewritten}");
+		assert!(!rewritten.contains("\n\ttime::sleep();"), "{rewritten}");
+	}
+
+	#[test]
+	fn cfg_test_module_import_group_and_free_function_rules_apply_inside_tests_module() {
+		let original = r#"
+#[cfg(test)]
+mod tests {
+	use crate::math::sum;
+	use anyhow::Result;
+	use std::collections::HashSet;
+
+	#[test]
+	fn sample() -> Result<()> {
+		let values = HashSet::new();
+		let _ = values;
+		Ok(sum(1, 2))
+	}
+}
+"#;
+		let path = Path::new("cfg_test_module_import_scope_gap.rs");
+		let ctx = shared::read_file_context_from_text(path, original.to_owned())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-001" && v.fixable));
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-002" && v.fixable));
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-004"
+				&& v.message
+					== "Do not import free functions or macros into scope; prefer qualified module paths."
+				&& v.fixable
+		}));
+
+		let (rewritten, applied, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(path, original, true).expect("apply fix passes");
+
+		assert!(applied >= 3);
+
+		let std_use_idx =
+			rewritten.find("use std::collections::HashSet;").expect("std import must remain");
+		let anyhow_use_idx =
+			rewritten.find("use anyhow::Result;").expect("third-party import must remain");
+
+		assert!(std_use_idx < anyhow_use_idx);
+		assert!(rewritten.contains(
+			"use std::collections::HashSet;\n\n\tuse anyhow::Result;\n\n\tuse crate::math;"
+		));
+		assert!(rewritten.contains("Ok(math::sum(1, 2))"));
+		assert!(!rewritten.contains("\tuse crate::math::sum;"));
+	}
+
+	#[test]
+	fn import006_allows_file_top_level_use() {
+		let text = r#"
+use std::collections::BTreeMap;
+
+fn sample() {
+	let _ = BTreeMap::<u8, u8>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_file_top_level.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_allows_inline_module_top_level_use() {
+		let text = r#"
+mod nested {
+	use std::collections::BTreeMap;
+
+	fn sample() {
+		let _ = BTreeMap::<u8, u8>::new();
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_inline_module_top_level.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_reports_function_local_use() {
+		let text = r#"
+fn sample() {
+	use std::collections::BTreeMap;
+
+	let _ = BTreeMap::<u8, u8>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_function_local_violation.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-006"
+				&& v.message == "Use items must appear only at file top level or module top level."
+				&& v.fixable
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_reports_nested_block_local_use() {
+		let text = r#"
+fn sample() {
+	if true {
+		use std::collections::BTreeMap;
+
+		let _ = BTreeMap::<u8, u8>::new();
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_nested_block_violation.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-006"
+				&& v.message == "Use items must appear only at file top level or module top level."
+				&& v.fixable
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_fix_hoists_simple_function_local_use_to_file_scope() {
+		let original = r#"
+fn sample() {
+	use std::collections::BTreeMap;
+
+	let _ = BTreeMap::<u8, u8>::new();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(Path::new("import006_file_scope_fix.rs"), original, true)
+				.expect("apply fix passes");
+
+		assert!(rewritten.contains("use std::collections::BTreeMap;"));
+		assert!(rewritten.contains("use std::collections::BTreeMap;\n\nfn sample()"));
+		assert!(!rewritten.contains("\n\tuse std::collections::BTreeMap;\n"));
+	}
+
+	#[test]
+	fn import006_fix_hoists_simple_function_local_use_to_enclosing_module_scope() {
+		let original = r#"
+mod nested {
+	fn sample() {
+		use std::collections::BTreeMap;
+
+		let _ = BTreeMap::<u8, u8>::new();
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import006_module_scope_fix.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(
+			rewritten.contains("mod nested {\n\tuse std::collections::BTreeMap;"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("\n\tfn sample()"));
+		assert!(!rewritten.contains("\n\t\tuse std::collections::BTreeMap;\n"));
+	}
+
+	#[test]
+	fn import006_fix_deletes_local_use_when_equivalent_module_scope_import_already_exists() {
+		let original = r#"
+mod nested {
+	use std::collections::BTreeMap;
+
+	fn sample() {
+		use std::collections::BTreeMap;
+
+		let _ = BTreeMap::<u8, u8>::new();
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import006_delete_duplicate_local_use.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert_eq!(rewritten.matches("use std::collections::BTreeMap;").count(), 1);
+		assert!(!rewritten.contains("\n\t\tuse std::collections::BTreeMap;\n"));
+	}
+
+	#[test]
+	fn import006_cfg_gated_function_local_use_is_reported_non_fixable() {
+		let text = r#"
+#[cfg(feature = "cli")]
+fn sample() {
+	use std::collections::BTreeMap;
+
+	let _ = BTreeMap::<u8, u8>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_cfg_gated_local_use.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-006"
+				&& v.message == "Use items must appear only at file top level or module top level."
+				&& !v.fixable
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_alias_local_use_is_reported_non_fixable() {
+		let text = r#"
+fn sample() {
+	use std::collections::BTreeMap as Map;
+
+	let _ = Map::<u8, u8>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_alias_local_use.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-006"
+				&& v.message == "Use items must appear only at file top level or module top level."
+				&& !v.fixable
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_glob_local_use_is_reported_non_fixable() {
+		let text = r#"
+fn sample() {
+	use crate::math::*;
+
+	let _ = 1usize;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_glob_local_use.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-006"
+				&& v.message == "Use items must appear only at file top level or module top level."
+				&& !v.fixable
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_leading_comment_local_use_is_reported_non_fixable() {
+		let text = r#"
+fn sample() {
+	// Keep this local until cfg behavior is sorted out.
+	use std::collections::BTreeMap;
+
+	let _ = BTreeMap::<u8, u8>::new();
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_leading_comment_local_use.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-006"
+				&& v.message == "Use items must appear only at file top level or module top level."
+				&& !v.fixable
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_pub_use_conflict_is_reported_non_fixable() {
+		let text = r#"
+pub use crate::first::Thing;
+
+fn sample() {
+	use crate::second::Thing;
+
+	let _ = 1usize;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_pub_use_conflict.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-006"
+				&& v.message == "Use items must appear only at file top level or module top level."
+				&& !v.fixable
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import006_keeps_cfg_test_module_top_level_use_valid() {
+		let text = r#"
+#[cfg(test)]
+mod tests {
+	use std::collections::BTreeMap;
+
+	#[test]
+	fn sample() {
+		let _ = BTreeMap::<u8, u8>::new();
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import006_cfg_test_module_scope.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
 	}
 
 	#[test]
@@ -2814,7 +3536,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
@@ -2824,7 +3546,8 @@ fn sample() {
 
 		assert!(applied >= 2);
 		assert!(!rewritten.contains("use crate::metrics::emit;"));
-		assert!(rewritten.contains("crate::metrics::emit!(\"ok\")"));
+		assert!(rewritten.contains("use crate::metrics;"));
+		assert!(rewritten.contains("metrics::emit!(\"ok\")"));
 	}
 
 	#[test]
@@ -2842,7 +3565,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
@@ -2873,7 +3596,7 @@ fn sample() -> Result<()> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
@@ -2913,7 +3636,7 @@ where
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -2951,7 +3674,7 @@ fn build() -> Result<()> {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -2993,7 +3716,7 @@ fn build() -> Result<()> {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3035,7 +3758,7 @@ fn build() -> Result<()> {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3080,7 +3803,7 @@ where
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
@@ -3106,7 +3829,7 @@ fn send(tx: mpsc::UnboundedSender<u8>) {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3149,7 +3872,7 @@ fn demo(
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3208,7 +3931,7 @@ fn demo(
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3249,7 +3972,7 @@ mod tests {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
@@ -3275,7 +3998,7 @@ fn demo(v: Vec<shared::Violation>) -> Option<shared::Violation> {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3304,7 +4027,7 @@ trait Job {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
@@ -3329,7 +4052,7 @@ where
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
@@ -3348,7 +4071,7 @@ pub fn run() -> std::result::Result<(), String> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
@@ -3364,7 +4087,7 @@ pub enum Error {
 		let ctx = shared::read_file_context_from_text(Path::new("error.rs"), text.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
@@ -3396,7 +4119,7 @@ struct Row;
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3425,7 +4148,7 @@ struct OtherRow;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let import008_violations =
 			violations.iter().filter(|v| v.rule == "RUST-STYLE-IMPORT-008").count();
 		let import008_edits = edits.iter().filter(|e| e.rule == "RUST-STYLE-IMPORT-008").count();
@@ -3453,7 +4176,7 @@ struct Record {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3496,7 +4219,7 @@ fn sample(a: A, aa: b::A) {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
@@ -3527,7 +4250,7 @@ fn build_value() -> Value {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
@@ -3565,7 +4288,7 @@ fn run() {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -3620,7 +4343,7 @@ struct Row;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-011" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-011"));
@@ -3647,7 +4370,7 @@ struct Row;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-011" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-011"));
@@ -3671,7 +4394,7 @@ struct Row;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-011"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-011"));
@@ -3684,8 +4407,12 @@ struct Row;
 struct Row;
 "#;
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import011_after_import008.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import011_after_import008.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
 		assert!(rewritten.lines().any(|line| line.trim() == "use sqlx::FromRow;"));
@@ -3705,8 +4432,12 @@ fn run() {
 }
 "#;
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import011_after_import009.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import011_after_import009.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
 		assert!(!rewritten.contains("use foo::Bar;"));
@@ -3732,7 +4463,7 @@ fn normalize(
 }
 "#;
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_pubfi_ai_usage_grouped_import.rs"),
 				original,
 				true,
@@ -3801,7 +4532,7 @@ fn inference_record_usage_accumulates() {
 }
 "#;
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_pubfi_ai_usage_snippet_idempotence.rs"),
 				original,
 				true,
@@ -3826,7 +4557,7 @@ fn inference_record_usage_accumulates() {
 			repeated_applied_count,
 			_repeated_had_import_shortening_edits,
 			_repeated_had_let_mut_reorder_edits,
-		) = apply_fix_passes(
+		) = crate::style::apply_fix_passes(
 			Path::new("import009_pubfi_ai_usage_snippet_idempotence.rs"),
 			&rewritten,
 			true,
@@ -3857,7 +4588,7 @@ async fn acquire_queue() -> Result<()> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
@@ -3894,13 +4625,13 @@ fn dispatch() -> Result<(), Error> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
 
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_crawler_std_tokio_reqwest_conflict.rs"),
 				original,
 				true,
@@ -3962,7 +4693,7 @@ fn execute(deadline: Instant) -> Result<(), Report> {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		for symbol in ["Error", "Instant", "Result"] {
 			assert!(violations.iter().any(|v| {
@@ -3974,8 +4705,12 @@ fn execute(deadline: Instant) -> Result<(), Report> {
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
 
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import009_pubfi_crawler_dispatcher.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import009_pubfi_crawler_dispatcher.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(applied_count > 0);
 		assert!(!rewritten.contains("error::Error,"));
@@ -4045,7 +4780,7 @@ async fn get_referral_relation(
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		for symbol in ["ReferralCode", "ReferralRelation"] {
 			assert!(violations.iter().any(|v| {
@@ -4055,13 +4790,14 @@ async fn get_referral_relation(
 		}
 
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
-		assert!(
-			edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009" && e.replacement.is_empty())
-		);
 
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import009_pubfi_gateway_service.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import009_pubfi_gateway_service.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(applied_count > 0);
 		assert!(rewritten.contains("Response::new(crate::grpc::ReferralCode {"));
@@ -4119,7 +4855,7 @@ async fn get_referral_relation(
 }
 "#;
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_pubfi_gateway_service_large_use_shape.rs"),
 				original,
 				true,
@@ -4154,7 +4890,7 @@ fn execute(_spec: RequestSpec) -> Result<Response> {
 }
 "#;
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_result_with_import001_conflict.rs"),
 				original,
 				true,
@@ -4257,7 +4993,7 @@ async fn acquire_queue() -> Result<OwnedSemaphorePermit> {
 }
 "#;
 		let (rewritten, applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_pubfi_crawler_result_after_workspace_group.rs"),
 				original,
 				true,
@@ -4285,7 +5021,7 @@ fn run_ops() {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_remove_redundant_same_path_import.rs"),
 				original,
 				true,
@@ -4294,7 +5030,12 @@ fn run_ops() {
 
 		assert!(!rewritten.contains("upsert_structured_fields_tx,"));
 		assert!(!rewritten.contains("use crate::structured_fields::upsert_structured_fields_tx"));
-		assert!(rewritten.contains("crate::structured_fields::upsert_structured_fields_tx();"));
+		assert!(
+			rewritten.contains("use crate::{structured_fields::{self, StructuredFields}};"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("structured_fields::upsert_structured_fields_tx();"));
+		assert!(!rewritten.contains("crate::structured_fields::upsert_structured_fields_tx();"));
 	}
 
 	#[test]
@@ -4312,19 +5053,213 @@ fn run_ops() {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import004_remove_multiple_free_functions.rs"),
 				original,
 				true,
 			)
 			.expect("apply fix passes");
 
-		assert!(rewritten.contains("crate::structured_fields::upsert_structured_fields_tx();"));
-		assert!(rewritten.contains("crate::structured_fields::validate_structured_fields();"));
+		assert!(
+			rewritten.contains("use crate::{structured_fields::{self, StructuredFields}};"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("structured_fields::upsert_structured_fields_tx();"));
+		assert!(rewritten.contains("structured_fields::validate_structured_fields();"));
 		assert!(!rewritten.contains("use crate::structured_fields::upsert_structured_fields_tx"));
 		assert!(!rewritten.contains("use crate::structured_fields::validate_structured_fields"));
 		assert!(!rewritten.contains("upsert_structured_fields_tx,"));
 		assert!(!rewritten.contains("validate_structured_fields,"));
+	}
+
+	#[test]
+	fn import004_rewrites_remaining_free_function_import_when_parent_module_is_already_imported() {
+		let original = r#"
+use crate::{
+	structured_fields::{self, StructuredFields, validate_structured_fields},
+};
+
+fn run_ops() {
+	let _ = StructuredFields::default();
+	structured_fields::upsert_structured_fields_tx();
+	validate_structured_fields();
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_remaining_free_function_with_existing_parent_module.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(
+			rewritten.contains("use crate::{structured_fields::{self, StructuredFields}};"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("structured_fields::upsert_structured_fields_tx();"));
+		assert!(rewritten.contains("structured_fields::validate_structured_fields();"));
+		assert!(!rewritten.contains("crate::structured_fields::validate_structured_fields();"));
+		assert!(!rewritten.contains("validate_structured_fields,"));
+	}
+
+	#[test]
+	fn import_rules_report_cfg_test_module_import_violations() {
+		let text = r#"#[cfg(test)]
+mod tests {
+	use crate::structured_fields::{StructuredFields, upsert_structured_fields_tx};
+	use std::collections::BTreeMap;
+
+	#[test]
+	fn run_ops() {
+		let _ = StructuredFields::default();
+		let _ = BTreeMap::<u8, u8>::new();
+		upsert_structured_fields_tx();
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import_cfg_test_module_violations.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-004"
+				&& v.line == 3
+				&& v.fixable && v.message
+				== "Do not import free functions or macros into scope; prefer qualified module paths."
+		}));
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-001"
+				&& v.line == 4
+				&& v.fixable && v.message
+				== "Import groups must be ordered: std, third-party, self/workspace."
+		}));
+		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
+	}
+
+	#[test]
+	fn import_rules_fix_cfg_test_module_imports() {
+		let original = r#"#[cfg(test)]
+mod tests {
+	use crate::structured_fields::{StructuredFields, upsert_structured_fields_tx};
+	use std::collections::BTreeMap;
+
+	#[test]
+	fn run_ops() {
+		let _ = StructuredFields::default();
+		let _ = BTreeMap::<u8, u8>::new();
+		upsert_structured_fields_tx();
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import_cfg_test_module_fix.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+		let std_use_idx =
+			rewritten.find("use std::collections::BTreeMap;").expect("std import must remain");
+		let crate_use_idx =
+			rewritten.find("use crate::structured_fields").expect("crate import must remain");
+
+		assert!(std_use_idx < crate_use_idx);
+		assert!(
+			rewritten.contains("use std::collections::BTreeMap;\n\n\tuse crate::structured_fields")
+		);
+		assert!(
+			rewritten.contains("\n\tuse crate::structured_fields::{self, StructuredFields};\n"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("\n\t\tstructured_fields::upsert_structured_fields_tx();\n"));
+		assert!(!rewritten.contains(
+			"use crate::structured_fields::{StructuredFields, upsert_structured_fields_tx};"
+		));
+		assert!(!rewritten.contains("use crate::structured_fields::upsert_structured_fields_tx;"));
+
+		let rewritten_ctx = shared::read_file_context_from_text(
+			Path::new("import_cfg_test_module_fix.rs"),
+			rewritten.clone(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&rewritten_ctx, true);
+
+		assert!(!violations.iter().any(|v| {
+			matches!(
+				v.rule,
+				"RUST-STYLE-IMPORT-001" | "RUST-STYLE-IMPORT-002" | "RUST-STYLE-IMPORT-004"
+			)
+		}));
+		assert!(!edits.iter().any(|e| {
+			matches!(
+				e.rule,
+				"RUST-STYLE-IMPORT-001" | "RUST-STYLE-IMPORT-002" | "RUST-STYLE-IMPORT-004"
+			)
+		}));
+	}
+
+	#[test]
+	fn import_rules_fix_cfg_test_module_function_calls_inside_macro_tokens() {
+		let original = r#"#[cfg(test)]
+mod tests {
+	use crate::routes::{effective_token_id, inject_request_id_into_json_body};
+	use uuid::Uuid;
+
+	#[test]
+	fn check_routes() {
+		let request_id =
+			Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").expect("valid uuid");
+		let body = serde_json::json!({"note_id":"abc","status":"ok"}).to_string();
+		let response_body = inject_request_id_into_json_body(body.as_bytes(), &request_id)
+			.expect("Expected request_id field to be injected.");
+		assert!(inject_request_id_into_json_body(body.as_bytes(), &request_id).is_none());
+		assert_eq!(effective_token_id("off", &axum::http::HeaderMap::new()), None);
+		let _ = response_body;
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import_cfg_test_module_macro_token_function_fix.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert_eq!(
+			rewritten
+				.matches("routes::inject_request_id_into_json_body(body.as_bytes(), &request_id)")
+				.count(),
+			2,
+			"Rewritten:\n{rewritten}"
+		);
+		assert!(rewritten.contains("use crate::routes::{self};"), "{rewritten}");
+		assert!(
+			rewritten
+				.contains("routes::effective_token_id(\"off\", &axum::http::HeaderMap::new())")
+		);
+		assert!(!rewritten.contains(
+			"use crate::routes::{effective_token_id, inject_request_id_into_json_body};"
+		));
+
+		let rewritten_ctx = shared::read_file_context_from_text(
+			Path::new("import_cfg_test_module_macro_token_function_fix.rs"),
+			rewritten.clone(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&rewritten_ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
 	}
 
 	#[test]
@@ -4348,7 +5283,7 @@ where
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		eprintln!(
 			"use_items={:?}",
@@ -4389,7 +5324,7 @@ trait Task {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
@@ -4423,7 +5358,7 @@ fn parse_value() -> Result<u8, &'static str> {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (violations, edits) = collect_violations(&ctx, true);
+			let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
@@ -4457,7 +5392,7 @@ fn parse_value() -> Result<u8, &'static str> {
 			)
 			.expect("context")
 			.expect("has ctx");
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -4484,8 +5419,12 @@ fn run() -> Result<()> {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import009_import008_result_cycle.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import009_import008_result_cycle.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(!rewritten.contains("use color_eyre::Result;"));
 		assert!(rewritten.contains("fn display() -> std::fmt::Result"));
@@ -4496,8 +5435,12 @@ fn run() -> Result<()> {
 			_repeated_applied_count,
 			_repeated_had_import_shortening_edits,
 			_repeated_had_let_mut_reorder_edits,
-		) = apply_fix_passes(Path::new("import009_import008_result_cycle.rs"), &rewritten, true)
-			.expect("repeat apply fix passes");
+		) = crate::style::apply_fix_passes(
+			Path::new("import009_import008_result_cycle.rs"),
+			&rewritten,
+			true,
+		)
+		.expect("repeat apply fix passes");
 
 		assert_eq!(repeated.trim_start_matches('\n'), rewritten.trim_start_matches('\n'));
 	}
@@ -4517,7 +5460,7 @@ fn build_payload() -> Value {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let import009_edits = edits
 			.into_iter()
 			.filter(|edit| edit.rule == "RUST-STYLE-IMPORT-009")
@@ -4553,7 +5496,7 @@ fn normalize_error(input: Error) -> Error {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let import009_edits = edits
 			.into_iter()
 			.filter(|edit| edit.rule == "RUST-STYLE-IMPORT-009")
@@ -4593,7 +5536,7 @@ fn normalize_error(input: Error, query: SearchQuery, client: SearchClient) -> Er
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_import008_pubfi_search_error_cycle.rs"),
 				original,
 				true,
@@ -4614,7 +5557,7 @@ fn normalize_error(input: Error, query: SearchQuery, client: SearchClient) -> Er
 			repeated_applied_count,
 			_repeated_had_import_shortening_edits,
 			_repeated_had_let_mut_reorder_edits,
-		) = apply_fix_passes(
+		) = crate::style::apply_fix_passes(
 			Path::new("import009_import008_pubfi_search_error_cycle.rs"),
 			&rewritten,
 			true,
@@ -4642,7 +5585,7 @@ fn validate_percolator_query(query: &serde_json::Value) {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
 		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
@@ -4664,7 +5607,7 @@ fn publish() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009"));
 		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
@@ -4680,12 +5623,14 @@ fn normalize(filter_mode: PercolateFilterMode) {
 }
 "#;
 		let expected = r#"
+use crate::cli;
+
 fn normalize(filter_mode: crate::cli::PercolateFilterMode) {
 	let _ = pubfi_query::PercolateFilterMode::from(filter_mode);
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(
+			crate::style::apply_fix_passes(
 				Path::new("import009_associated_fn_receiver_symbol.rs"),
 				original,
 				true,
@@ -4706,14 +5651,20 @@ fn encrypt(recipients: &[String]) {
 }
 "#;
 		let expected = r#"
+use age;
+
 fn encrypt(recipients: &[String]) {
 	let recipients = recipients.iter().map(|s| age::x25519::Recipient::from_str(s).unwrap());
 	let _ = recipients.map(|r| r as &dyn age::Recipient).count();
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import009_age_recipient_conflict.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import009_age_recipient_conflict.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert_eq!(rewritten.trim_start_matches('\n'), expected.trim_start_matches('\n'));
 	}
@@ -4735,8 +5686,12 @@ fn build_payload() -> Value {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import009_import008_value_cycle.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import009_import008_value_cycle.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert_eq!(rewritten.trim_start_matches('\n'), expected.trim_start_matches('\n'));
 
@@ -4745,8 +5700,12 @@ fn build_payload() -> Value {
 			repeated_applied_count,
 			_repeated_had_import_shortening_edits,
 			_repeated_had_let_mut_reorder_edits,
-		) = apply_fix_passes(Path::new("import009_import008_value_cycle.rs"), &rewritten, true)
-			.expect("repeat apply fix passes");
+		) = crate::style::apply_fix_passes(
+			Path::new("import009_import008_value_cycle.rs"),
+			&rewritten,
+			true,
+		)
+		.expect("repeat apply fix passes");
 
 		assert_eq!(repeated_applied_count, 0);
 		assert_eq!(repeated.trim_start_matches('\n'), rewritten.trim_start_matches('\n'));
@@ -4768,8 +5727,12 @@ fn capture(mut map: HashMap<String, Value>) {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("import009_import008_serde_value_cycle.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("import009_import008_serde_value_cycle.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 
 		assert!(!rewritten.contains("use serde_json::Value;"));
 		assert!(rewritten.contains("fn build_payload() -> serde_json::Value"));
@@ -4781,8 +5744,12 @@ fn capture(mut map: HashMap<String, Value>) {
 			repeated_applied_count,
 			_repeated_had_import_shortening_edits,
 			_repeated_had_let_mut_reorder_edits,
-		) = apply_fix_passes(Path::new("import009_import008_serde_value_cycle.rs"), &rewritten, true)
-			.expect("repeat apply fix passes");
+		) = crate::style::apply_fix_passes(
+			Path::new("import009_import008_serde_value_cycle.rs"),
+			&rewritten,
+			true,
+		)
+		.expect("repeat apply fix passes");
 
 		assert_eq!(repeated_applied_count, 0);
 		assert_eq!(repeated.trim_start_matches('\n'), rewritten.trim_start_matches('\n'));
@@ -4805,7 +5772,7 @@ fn upsert(input: crate::grpc::ReferralCode) -> crate::types::ReferralCode {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
@@ -4838,7 +5805,7 @@ fn upsert(input: crate::grpc::ReferralCode) -> crate::types::ReferralCode {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
@@ -4899,7 +5866,7 @@ fn upsert_referral_code(request: crate::grpc::ReferralCode) -> crate::grpc::Refe
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
@@ -4950,7 +5917,7 @@ fn upsert_referral_code(
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-009" && v.fixable && v.message.contains("`ReferralCode`")
@@ -5005,7 +5972,7 @@ use crate::types::ReferralCode; use crate::types::ReferralRelation;"#;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-009" && v.fixable && v.message.contains("`ReferralCode`")
@@ -5053,7 +6020,7 @@ impl Sample {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-005" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-005"));
@@ -5088,7 +6055,7 @@ struct Sample;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-005" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-005"));
@@ -5142,7 +6109,7 @@ pub async fn run() {}
 			.expect("context") else {
 				break;
 			};
-			let (_violations, edits) = collect_violations(&ctx, true);
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
 
 			if edits.is_empty() {
 				break;
@@ -5178,7 +6145,7 @@ fn sample() {
 			shared::read_file_context_from_text(Path::new("space_same.rs"), original.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Do not insert blank lines within the same statement type."
@@ -5205,7 +6172,7 @@ fn sample() {
 			shared::read_file_context_from_text(Path::new("space_diff.rs"), original.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Insert exactly one blank line between different statement types."
@@ -5234,7 +6201,7 @@ fn sample() {
 		let ctx = shared::read_file_context_from_text(Path::new("space_chain.rs"), text.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Insert exactly one blank line between different statement types."));
@@ -5257,7 +6224,7 @@ fn sample() {
 			shared::read_file_context_from_text(Path::new("space_attr.rs"), original.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-SPACE-003"
@@ -5287,7 +6254,7 @@ fn schema() {
 			shared::read_file_context_from_text(Path::new("space_items_keep.rs"), text.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Do not insert blank lines within the same statement type."));
@@ -5310,7 +6277,7 @@ fn schema() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Insert exactly one blank line between local item declarations."
@@ -5340,7 +6307,7 @@ fn topic_limits() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Do not insert blank lines within constant declaration groups."
@@ -5372,7 +6339,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Do not insert blank lines within the same statement type."
@@ -5408,7 +6375,7 @@ fn pred_strength(pred: &Pred) -> i32 {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Insert exactly one blank line between different statement types."));
@@ -5437,7 +6404,7 @@ fn pred_strength(pred: &Pred) -> i32 {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003"
 			&& v.message == "Do not insert blank lines inside a match pattern alternation."
@@ -5467,7 +6434,7 @@ fn sample(flag: bool) -> i32 {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-SPACE-004"
@@ -5498,7 +6465,7 @@ impl RuntimeEvent {
 		let ctx = shared::read_file_context_from_text(Path::new("mod005.rs"), original.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-005" && v.fixable));
 
@@ -5523,7 +6490,7 @@ pub fn external() -> usize {
 		let ctx = shared::read_file_context_from_text(Path::new("mod002.rs"), original.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-002" && v.fixable));
 
@@ -5552,7 +6519,7 @@ pub fn plan() -> usize {
 		let ctx = shared::read_file_context_from_text(Path::new("mod003.rs"), original.to_owned())
 			.expect("context")
 			.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-003" && v.fixable));
 
@@ -5581,7 +6548,7 @@ const LIMIT: usize = 3;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-001" && v.fixable));
 
@@ -5614,7 +6581,7 @@ define_placeholder! {}
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-001" && v.fixable));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-001"));
@@ -5653,8 +6620,12 @@ pub mod api_code {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("mod001_inline_module_macro_use.rs"), original, true)
-				.expect("apply fix passes");
+			crate::style::apply_fix_passes(
+				Path::new("mod001_inline_module_macro_use.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
 		let compact = rewritten.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
 		let use_pos =
 			compact.find("pubuseself::pubfi::{ERR_A,ERR_B};").expect("has rewritten pub use");
@@ -5688,7 +6659,7 @@ pub mod api_code {
 }
 "#;
 		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
-			apply_fix_passes(Path::new("mod001_hoist_macro_rules.rs"), original, true)
+			crate::style::apply_fix_passes(Path::new("mod001_hoist_macro_rules.rs"), original, true)
 				.expect("apply fix passes");
 		let macro_pos = rewritten.find("macro_rules! def_api_codes").expect("has macro rules");
 		let mod_pos = rewritten.find("pub mod pubfi").expect("has pubfi module");
@@ -5717,7 +6688,7 @@ pub use crate::{
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(
 			violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-001" && v.fixable),
@@ -5755,7 +6726,7 @@ pub mod retry;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-SPACE-003"
@@ -5784,7 +6755,7 @@ pub(crate) mod crypto;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-MOD-002"
@@ -5813,7 +6784,7 @@ pub(crate) mod crypto;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-SPACE-003"
@@ -5841,7 +6812,7 @@ pub fn external() -> usize {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-002" && v.fixable));
 
@@ -5872,7 +6843,7 @@ const INSIGHTS_PER_FEED_LIMIT: usize = 3;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-001" && v.fixable));
 
@@ -5898,7 +6869,7 @@ const SANITIZE_SHRINK_LIMIT: f32 = 0.6;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-001" && v.fixable));
 
@@ -5924,7 +6895,7 @@ pub const PUBLIC_LIMIT: usize = 5;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-002" && v.fixable));
 
@@ -5950,7 +6921,7 @@ pub(crate) const CRATE_LIMIT: usize = 3;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-MOD-002"
@@ -5981,7 +6952,7 @@ pub(crate) const CRATE_LIMIT: usize = 3;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-SPACE-003"
@@ -6005,7 +6976,7 @@ const PROD_PUBLIC_WEB_BASE_URL: &str = "https://pubfi.ai";
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-SPACE-003"
@@ -6042,7 +7013,7 @@ pub async fn run() {}
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-SPACE-003"
@@ -6077,7 +7048,7 @@ fn sample() {
 			shared::read_file_context_from_text(Path::new("space_raw_string.rs"), text.to_owned())
 				.expect("context")
 				.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(
 			!violations
@@ -6104,7 +7075,7 @@ fn classify(ch: char) -> usize {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-004" && v.fixable));
 
@@ -6129,7 +7100,7 @@ type A<'a, T> = B<'a, T>;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 		let matches =
 			violations.iter().filter(|v| v.rule == "RUST-STYLE-TYPE-001").collect::<Vec<_>>();
 
@@ -6151,7 +7122,7 @@ type A<'a, T> = B<'a, T>;
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001"));
 	}
@@ -6177,7 +7148,7 @@ impl Service for Wrapper {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001"));
 	}
@@ -6232,7 +7203,7 @@ fn produce() -> Hidden {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-TYPE-001" && v.fixable));
 
@@ -6272,7 +7243,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let matches =
 			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-002").collect::<Vec<_>>();
 
@@ -6311,7 +7282,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let matches =
 			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-002").collect::<Vec<_>>();
 
@@ -6348,7 +7319,7 @@ fn sample(iter: impl Iterator<Item = Vec<u8>>) {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-002"));
 	}
@@ -6366,7 +7337,7 @@ fn sample(iter: impl Iterator<Item = u8>) {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, _edits) = collect_violations(&ctx, true);
+		let (violations, _edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-002"));
 	}
@@ -6384,7 +7355,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let matches =
 			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-003").collect::<Vec<_>>();
 
@@ -6419,7 +7390,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let matches =
 			violations.iter().filter(|v| v.rule == "RUST-STYLE-GENERICS-003").collect::<Vec<_>>();
 
@@ -6451,7 +7422,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-003"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-003"));
@@ -6470,7 +7441,7 @@ fn sample() {
 		)
 		.expect("context")
 		.expect("has ctx");
-		let (violations, edits) = collect_violations(&ctx, true);
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-GENERICS-003"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-GENERICS-003"));
@@ -6578,15 +7549,12 @@ fn sample() {
 			.duration_since(std::time::UNIX_EPOCH)
 			.expect("current timestamp")
 			.as_nanos();
-		let path = std::env::temp_dir().join(format!(
-			"vstyle-net-change-{}-{}.rs",
-			std::process::id(),
-			nanos
-		));
+		let path =
+			env::temp_dir().join(format!("vstyle-net-change-{}-{}.rs", process::id(), nanos));
 
 		fs::write(&path, "fn sample() {}\n").expect("seed temp file");
 
-		let snapshots = super::collect_file_snapshots(std::slice::from_ref(&path));
+		let snapshots = super::collect_file_snapshots(slice::from_ref(&path));
 
 		assert!(!super::has_net_file_changes(&snapshots));
 
@@ -6603,23 +7571,20 @@ fn sample() {
 			.duration_since(std::time::UNIX_EPOCH)
 			.expect("current timestamp")
 			.as_nanos();
-		let path = std::env::temp_dir().join(format!(
-			"vstyle-noop-round-{}-{}.rs",
-			std::process::id(),
-			nanos
-		));
+		let path =
+			env::temp_dir().join(format!("vstyle-noop-round-{}-{}.rs", process::id(), nanos));
 
 		fs::write(&path, "fn already_clean() {}\n").expect("seed temp file");
-		crate::style::semantic::reset_cache_stats();
+		semantic::reset_cache_stats();
 
 		let summary = super::run_fix_round(
-			std::slice::from_ref(&path),
+			slice::from_ref(&path),
 			&shared::CargoOptions::default(),
 			false,
 			false,
 		)
 		.expect("run no-op fix round");
-		let stats = crate::style::semantic::cache_stats();
+		let stats = semantic::cache_stats();
 
 		assert_eq!(summary.applied_count, 0);
 		assert!(!summary.requires_follow_up_round);

@@ -1,8 +1,8 @@
 use std::{
 	collections::{BTreeMap, BTreeSet},
-	fs,
+	env, fs,
 	path::{Path, PathBuf},
-	process::{Command, Stdio},
+	process::{self, Command, Stdio},
 	sync::{
 		OnceLock,
 		atomic::{AtomicU64, Ordering},
@@ -22,13 +22,13 @@ const CACHE_DIR_SUFFIX: &str = "target/vstyle-cache/semantic";
 static SEMANTIC_CACHE_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
 static SEMANTIC_CACHE_MISS_COUNT: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct SemanticCacheStats {
 	pub(crate) hits: u64,
 	pub(crate) misses: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 struct ImportSuggestion {
 	line: usize,
 	imports: Vec<String>,
@@ -111,7 +111,7 @@ fn max_import_suggestion_rounds() -> usize {
 	static VALUE: OnceLock<usize> = OnceLock::new();
 
 	*VALUE.get_or_init(|| {
-		let Ok(raw) = std::env::var(MAX_IMPORT_SUGGESTION_ROUNDS_ENV) else {
+		let Ok(raw) = env::var(MAX_IMPORT_SUGGESTION_ROUNDS_ENV) else {
 			return DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS;
 		};
 		let trimmed = raw.trim();
@@ -285,7 +285,7 @@ fn semantic_cache_key(
 }
 
 fn semantic_cache_dir(verbose: bool) -> Option<PathBuf> {
-	let base = match std::env::current_dir() {
+	let base = match env::current_dir() {
 		Ok(current) => current,
 		Err(err) => {
 			log_verbose_error(verbose, &format!("Failed to resolve current directory: {err}."));
@@ -325,7 +325,7 @@ fn write_cached_semantic_output(cache_path: &Path, stdout: &str, verbose: bool) 
 	let temp_path = cache_path.with_file_name(format!(
 		".{}.{}.tmp",
 		cache_path.file_name().and_then(|name| name.to_str()).unwrap_or("semantic-cache"),
-		std::process::id()
+		process::id()
 	));
 
 	if let Err(err) = fs::write(&temp_path, stdout) {
@@ -350,7 +350,7 @@ fn file_fingerprint(path: &Path, verbose: bool) -> Result<(PathBuf, String)> {
 	let absolute = if path.is_absolute() {
 		path.to_path_buf()
 	} else {
-		let cwd = std::env::current_dir().map_err(|err| {
+		let cwd = env::current_dir().map_err(|err| {
 			eyre::eyre!("Failed to resolve current directory for cache fingerprint: {err}.")
 		})?;
 
@@ -380,7 +380,7 @@ fn file_fingerprint(path: &Path, verbose: bool) -> Result<(PathBuf, String)> {
 }
 
 fn cargo_lock_fingerprint(verbose: bool) -> Option<String> {
-	let cwd = match std::env::current_dir() {
+	let cwd = match env::current_dir() {
 		Ok(cwd) => cwd,
 		Err(err) => {
 			log_verbose_error(verbose, &format!("Failed to resolve current directory: {err}."));
@@ -696,17 +696,15 @@ mod tests {
 		time::{SystemTime, UNIX_EPOCH},
 	};
 
-	use crate::style::semantic::{
-		ImportSuggestion, apply_missing_import_suggestions, collect_missing_import_suggestions, fs,
-		normalize_path,
-	};
+	use crate::style::semantic::{self, ImportSuggestion, fs};
 
 	#[test]
 	fn extracts_use_suggestions_from_rustc_help_replacement() {
 		let output = r#"{"reason":"compiler-message","message":{"children":[{"level":"help","spans":[{"file_name":"a.rs","line_start":1,"suggested_replacement":"use std::collections::HashMap;\n\n"}]}]}}"#;
-		let suggestions = collect_missing_import_suggestions(output);
-		let imports =
-			suggestions.get(&normalize_path(Path::new("a.rs"))).expect("import suggestions");
+		let suggestions = semantic::collect_missing_import_suggestions(output);
+		let imports = suggestions
+			.get(&semantic::normalize_path(Path::new("a.rs")))
+			.expect("import suggestions");
 
 		assert!(
 			imports
@@ -729,14 +727,15 @@ mod tests {
 			line: 1,
 			imports: vec!["use std::collections::HashMap;".to_owned()],
 		}];
-		let applied =
-			apply_missing_import_suggestions(&path, &suggestions).expect("Apply suggestions.");
+		let applied = semantic::apply_missing_import_suggestions(&path, &suggestions)
+			.expect("Apply suggestions.");
 		let rewritten = fs::read_to_string(&path).expect("Read rewritten file.");
 
 		assert_eq!(applied, 1);
 		assert!(rewritten.contains("use std::collections::HashMap;"));
 
-		let second = apply_missing_import_suggestions(&path, &suggestions).expect("Re-apply.");
+		let second =
+			semantic::apply_missing_import_suggestions(&path, &suggestions).expect("Re-apply.");
 
 		assert_eq!(second, 0);
 	}

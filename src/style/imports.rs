@@ -1,17 +1,19 @@
 use std::{
+	borrow::Cow,
 	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-	fs,
+	fs, iter, mem,
 	path::PathBuf,
 };
 
 use ra_ap_syntax::{
-	AstNode, Edition, SyntaxNode,
+	self, AstNode, Edition, SyntaxNode,
 	ast::{self, HasAttrs, HasName, HasVisibility, Item, Module, Use},
 };
 use regex::Regex;
 
-use crate::style::shared::{
-	self, Edit, FileContext, TopItem, TopKind, Violation, WORKSPACE_IMPORT_ROOTS,
+use crate::style::{
+	fixes,
+	shared::{self, Edit, FileContext, TopItem, TopKind, Violation, WORKSPACE_IMPORT_ROOTS},
 };
 
 type Import009Plan<'a> = (
@@ -21,7 +23,7 @@ type Import009Plan<'a> = (
 	Vec<(&'a TopItem, String, Option<String>)>,
 );
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 struct Import008Candidate {
 	line: usize,
 	start: usize,
@@ -29,6 +31,17 @@ struct Import008Candidate {
 	symbol: String,
 	import_path: String,
 	replacement: String,
+}
+
+#[derive(Clone, Debug)]
+struct Import004QualifiedFunctionCandidate {
+	line: usize,
+	start: usize,
+	end: usize,
+	full_path: String,
+	parent_module_path: String,
+	module_symbol: String,
+	leaf_text: String,
 }
 
 #[derive(Default)]
@@ -46,7 +59,7 @@ struct Import009Context<'a> {
 	qualified_value_paths_by_symbol: &'a HashMap<String, HashSet<String>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 struct Import008UseRecoveryCandidate {
 	line: usize,
 	start_line: usize,
@@ -90,10 +103,39 @@ struct TraitKeepAliveNormalizationState {
 	seen_trait_keys: HashSet<String>,
 }
 
+struct Import006TargetScope {
+	ctx: FileContext,
+	offset: usize,
+	key: usize,
+}
+
+struct Import004ModuleAccessPlan {
+	access_path: String,
+	keep_parent_module_import: bool,
+}
+
+struct ValuePathCandidate {
+	path: ast::Path,
+	name_ref: ast::NameRef,
+	is_record_context: bool,
+}
+
+struct TypePathCandidate {
+	path: ast::Path,
+	name_ref: ast::NameRef,
+	suffix: String,
+}
+
 #[derive(Clone)]
 enum BracedImportSegment {
 	Simple(String),
 	Nested { head: String, children: Vec<String> },
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PathQualificationRequirement {
+	Qualified,
+	Unqualified,
 }
 
 pub(crate) fn check_import_rules(
@@ -136,6 +178,16 @@ pub(crate) fn check_import_rules(
 
 	push_import004_ambiguous_symbol_violations(ctx, violations, &imported_symbol_maps);
 
+	let import004_qualified_path_fixed_lines = apply_import004_qualified_function_path_rule(
+		ctx,
+		violations,
+		edits,
+		emit_edits,
+		&use_runs,
+		&local_module_roots,
+		&imported_symbol_maps.full_paths_by_symbol,
+		true,
+	);
 	let local_defined_symbols = collect_local_defined_symbols(ctx);
 	let qualified_type_paths_by_symbol = collect_qualified_type_paths_by_symbol(ctx);
 	let qualified_value_paths_by_symbol = collect_qualified_value_paths_by_symbol(ctx);
@@ -171,6 +223,7 @@ pub(crate) fn check_import_rules(
 	import_group_skip_lines.extend(import010_fixed_lines);
 	import_group_skip_lines.extend(import007_fixed_lines);
 	import_group_skip_lines.extend(import004_fixed_lines);
+	import_group_skip_lines.extend(import004_qualified_path_fixed_lines);
 	import_group_skip_lines.extend(import009_fixed_lines);
 	import_group_skip_lines.extend(import008_group_skip_lines);
 
@@ -198,6 +251,8 @@ pub(crate) fn check_import_rules(
 		&fixable_import_group_lines,
 		&local_module_roots,
 	);
+	apply_import006_local_use_scope_rule(ctx, violations, edits, emit_edits);
+	check_cfg_test_module_import_rules(ctx, violations, edits, emit_edits);
 }
 
 pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
@@ -239,6 +294,632 @@ pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeS
 		.collect::<BTreeSet<_>>();
 
 	Some(used)
+}
+
+fn apply_import006_local_use_scope_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	let mut pending_paths_by_scope = HashMap::<usize, HashSet<String>>::new();
+
+	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
+		if import006_is_allowed_use_item(&use_item) {
+			continue;
+		}
+
+		let range = use_item.syntax().text_range();
+		let line = shared::line_from_offset(&ctx.line_starts, usize::from(range.start()));
+		let fix_plan =
+			build_import006_fix_plan(ctx, &use_item, &mut pending_paths_by_scope, emit_edits);
+		let fixable = fix_plan.is_some();
+
+		shared::push_violation(
+			violations,
+			ctx,
+			line,
+			"RUST-STYLE-IMPORT-006",
+			"Use items must appear only at file top level or module top level.",
+			fixable,
+		);
+
+		if emit_edits && let Some((delete_edit, insert_edit)) = fix_plan {
+			edits.push(delete_edit);
+
+			if let Some(insert_edit) = insert_edit {
+				edits.push(insert_edit);
+			}
+		}
+	}
+}
+
+fn import006_is_allowed_use_item(use_item: &Use) -> bool {
+	let Some(parent) = use_item.syntax().parent() else {
+		return false;
+	};
+
+	if ra_ap_syntax::SourceFile::cast(parent.clone()).is_some() {
+		return true;
+	}
+
+	let Some(item_list) = ast::ItemList::cast(parent) else {
+		return false;
+	};
+
+	item_list.syntax().parent().and_then(Module::cast).is_some()
+}
+
+fn build_import006_fix_plan(
+	ctx: &FileContext,
+	use_item: &Use,
+	pending_paths_by_scope: &mut HashMap<usize, HashSet<String>>,
+	emit_edits: bool,
+) -> Option<(Edit, Option<Edit>)> {
+	let raw_item = use_item.syntax().text().to_string();
+	let path = extract_use_path_from_text(&raw_item)?;
+
+	if raw_item.contains(" as ")
+		|| path.contains('*')
+		|| path.contains(" as ")
+		|| import006_use_item_has_comments(ctx, use_item)
+		|| import006_use_item_has_cfg_attrs(use_item)
+		|| import006_has_cfg_ancestor(use_item)
+	{
+		return None;
+	}
+
+	let target_scope = import006_target_scope(ctx, use_item)?;
+	let normalized_path = normalize_use_path_for_equivalence(&path);
+	let known_paths = pending_paths_by_scope.entry(target_scope.key).or_default();
+	let path_already_pending = known_paths.contains(&normalized_path);
+	let equivalent_exists = path_already_pending
+		|| import006_target_scope_has_equivalent_path(&target_scope.ctx, &normalized_path);
+
+	if !equivalent_exists && import006_path_conflicts_in_target_scope(&target_scope.ctx, &path) {
+		return None;
+	}
+
+	let delete_edit = import006_delete_local_use_edit(ctx, use_item)?;
+
+	if equivalent_exists {
+		return Some((delete_edit, None));
+	}
+
+	let insert_edit = if emit_edits {
+		import006_insert_scope_use_edit(&target_scope.ctx, &path)
+			.and_then(|edit| import006_translate_scope_edit(ctx, target_scope.offset, edit))
+	} else {
+		import006_insert_scope_use_edit(&target_scope.ctx, &path)
+			.and_then(|edit| import006_translate_scope_edit(ctx, target_scope.offset, edit))
+	};
+	let insert_edit = insert_edit?;
+
+	known_paths.insert(normalized_path);
+
+	Some((delete_edit, Some(insert_edit)))
+}
+
+fn import006_use_item_has_cfg_attrs(use_item: &Use) -> bool {
+	use_item.attrs().any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg("))
+}
+
+fn import006_has_cfg_ancestor(use_item: &Use) -> bool {
+	use_item
+		.syntax()
+		.ancestors()
+		.skip(1)
+		.filter_map(Item::cast)
+		.filter(|item| !matches!(item, Item::Module(_)))
+		.any(|item| {
+			item.attrs()
+				.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg("))
+		})
+}
+
+fn import006_use_item_has_comments(ctx: &FileContext, use_item: &Use) -> bool {
+	let range = use_item.syntax().text_range();
+	let start = usize::from(range.start());
+	let end = usize::from(range.end());
+	let start_line = shared::line_from_offset(&ctx.line_starts, start);
+	let end_line = if end == 0 {
+		start_line
+	} else {
+		shared::line_from_offset(&ctx.line_starts, end.saturating_sub(1))
+	};
+	let line_start = shared::offset_from_line(&ctx.line_starts, start_line).unwrap_or(start);
+	let line_end =
+		shared::offset_from_line(&ctx.line_starts, end_line + 1).unwrap_or(ctx.text.len());
+	let Some(snippet) = ctx.text.get(line_start..line_end) else {
+		return true;
+	};
+
+	if snippet.contains("//") || snippet.contains("/*") || snippet.contains("*/") {
+		return true;
+	}
+
+	let line_idx = start_line.saturating_sub(1);
+
+	while line_idx > 0 {
+		let Some(line) = ctx.lines.get(line_idx - 1) else {
+			break;
+		};
+		let trimmed = line.trim();
+
+		if trimmed.is_empty() {
+			break;
+		}
+		if !import006_is_comment_line(trimmed) {
+			break;
+		}
+
+		return true;
+	}
+
+	false
+}
+
+fn import006_is_comment_line(trimmed: &str) -> bool {
+	trimmed.starts_with("//")
+		|| trimmed.starts_with("/*")
+		|| trimmed.starts_with('*')
+		|| trimmed.starts_with("*/")
+}
+
+fn import006_target_scope(ctx: &FileContext, use_item: &Use) -> Option<Import006TargetScope> {
+	for item_list in use_item.syntax().ancestors().skip(1).filter_map(ast::ItemList::cast) {
+		if item_list.syntax().parent().and_then(Module::cast).is_none() {
+			continue;
+		}
+
+		let (body_start, body_end) = item_list_body_text_range(&item_list)?;
+		let body_text = ctx.text.get(body_start..body_end)?.to_owned();
+		let scope_ctx = shared::read_file_context_from_text(&ctx.path, body_text).ok()??;
+
+		return Some(Import006TargetScope { ctx: scope_ctx, offset: body_start, key: body_start });
+	}
+
+	Some(Import006TargetScope {
+		ctx: shared::read_file_context_from_text(&ctx.path, ctx.text.clone()).ok()??,
+		offset: 0,
+		key: 0,
+	})
+}
+
+fn import006_target_scope_has_equivalent_path(ctx: &FileContext, normalized_path: &str) -> bool {
+	ctx.top_items.iter().any(|item| {
+		item.kind == TopKind::Use
+			&& extract_use_path(ctx, item)
+				.is_some_and(|path| normalize_use_path_for_equivalence(&path) == normalized_path)
+	})
+}
+
+fn import006_path_conflicts_in_target_scope(ctx: &FileContext, path: &str) -> bool {
+	let imported_symbols = imported_symbols_from_use_path(path);
+
+	if imported_symbols.is_empty() {
+		return true;
+	}
+
+	let mut target_use_items = collect_non_pub_use_runs(ctx)
+		.into_iter()
+		.flat_map(|run| run.into_iter())
+		.collect::<Vec<_>>();
+
+	target_use_items.extend(collect_pub_use_runs(ctx).into_iter().flat_map(|run| run.into_iter()));
+
+	let target_maps = collect_imported_symbol_maps(ctx, &target_use_items);
+	let local_defined_symbols = collect_local_defined_symbols(ctx);
+	let target_path = normalize_use_path_for_equivalence(path);
+
+	imported_symbols.into_iter().any(|symbol| {
+		let normalized_symbol = normalize_ident(&symbol);
+
+		if local_defined_symbols.contains(normalized_symbol) {
+			return true;
+		}
+
+		target_maps.symbol_paths.iter().any(|(existing_symbol, paths)| {
+			normalize_ident(existing_symbol) == normalized_symbol
+				&& paths.iter().any(|existing_path| {
+					normalize_use_path_for_equivalence(existing_path) != target_path
+				})
+		})
+	})
+}
+
+fn import006_delete_local_use_edit(ctx: &FileContext, use_item: &Use) -> Option<Edit> {
+	let range = use_item.syntax().text_range();
+	let item_start = usize::from(range.start());
+	let item_end = usize::from(range.end());
+	let start_line = shared::line_from_offset(&ctx.line_starts, item_start);
+	let end_line = if item_end == 0 {
+		start_line
+	} else {
+		shared::line_from_offset(&ctx.line_starts, item_end.saturating_sub(1))
+	};
+
+	if let Some((line_start, line_end)) =
+		import006_full_line_delete_range(ctx, start_line, end_line, item_start, item_end)
+	{
+		return Some(Edit {
+			start: line_start,
+			end: line_end,
+			replacement: String::new(),
+			rule: "RUST-STYLE-IMPORT-006",
+		});
+	}
+
+	Some(Edit {
+		start: item_start,
+		end: item_end,
+		replacement: String::new(),
+		rule: "RUST-STYLE-IMPORT-006",
+	})
+}
+
+fn import006_full_line_delete_range(
+	ctx: &FileContext,
+	start_line: usize,
+	end_line: usize,
+	item_start: usize,
+	item_end: usize,
+) -> Option<(usize, usize)> {
+	let line_start = shared::offset_from_line(&ctx.line_starts, start_line)?;
+	let line_end =
+		shared::offset_from_line(&ctx.line_starts, end_line + 1).unwrap_or(ctx.text.len());
+	let prefix = ctx.text.get(line_start..item_start)?;
+	let suffix = ctx.text.get(item_end..line_end)?;
+
+	if prefix.trim().is_empty() && suffix.trim().is_empty() {
+		Some((line_start, line_end))
+	} else {
+		None
+	}
+}
+
+fn import006_insert_scope_use_edit(ctx: &FileContext, path: &str) -> Option<Edit> {
+	let mut pending_import_paths = BTreeSet::new();
+
+	pending_import_paths.insert(path.to_owned());
+
+	let use_runs = collect_non_pub_use_runs(ctx);
+	let local_module_roots = collect_local_module_roots(ctx);
+	let (edit, _touched_lines) = build_import008_insert_edit(
+		ctx,
+		&use_runs,
+		&local_module_roots,
+		&pending_import_paths,
+		"RUST-STYLE-IMPORT-006",
+	)?;
+
+	Some(Edit { rule: "RUST-STYLE-IMPORT-006", ..edit })
+}
+
+fn import006_scope_insert_indent(ctx: &FileContext, insert_pos: usize) -> Option<String> {
+	if let Some(first_item) = ctx.top_items.first()
+		&& let Some(line_text) = ctx.lines.get(first_item.line.saturating_sub(1))
+	{
+		return Some(
+			line_text.chars().take_while(|ch| matches!(ch, ' ' | '\t')).collect::<String>(),
+		);
+	}
+
+	let line = shared::line_from_offset(&ctx.line_starts, insert_pos);
+	let line_count = ctx.lines.len();
+	let current_line = ctx.lines.get(line)?;
+
+	if current_line.trim().is_empty() {
+		return Some(
+			current_line.chars().take_while(|ch| matches!(ch, ' ' | '\t')).collect::<String>(),
+		);
+	}
+
+	for candidate_line in iter::once(line).chain((line + 1)..line_count).chain((0..line).rev()) {
+		let Some(line_text) = ctx.lines.get(candidate_line) else {
+			continue;
+		};
+
+		if line_text.trim().is_empty() {
+			continue;
+		}
+
+		return Some(
+			line_text.chars().take_while(|ch| matches!(ch, ' ' | '\t')).collect::<String>(),
+		);
+	}
+
+	Some(String::new())
+}
+
+fn import006_indent_insert_block(block: &str, indent: &str) -> String {
+	let mut rewritten = String::with_capacity(block.len() + indent.len());
+
+	for segment in block.split_inclusive('\n') {
+		let line = segment.strip_suffix('\n').unwrap_or(segment);
+
+		if !line.is_empty() {
+			rewritten.push_str(indent);
+			rewritten.push_str(line);
+		}
+		if segment.ends_with('\n') {
+			rewritten.push('\n');
+		}
+	}
+
+	rewritten
+}
+
+fn import006_translate_scope_edit(ctx: &FileContext, offset: usize, edit: Edit) -> Option<Edit> {
+	let start = offset.checked_add(edit.start)?;
+	let end = offset.checked_add(edit.end)?;
+
+	if end > ctx.text.len() || start > end {
+		return None;
+	}
+
+	Some(Edit { start, end, replacement: edit.replacement, rule: edit.rule })
+}
+
+fn check_cfg_test_module_import_rules(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	for module in ctx.source_file.syntax().descendants().filter_map(Module::cast) {
+		if !module_has_cfg_test_attr(&module) {
+			continue;
+		}
+
+		let Some(item_list) = module.item_list() else {
+			continue;
+		};
+		let Some((module_body_start, module_body_end)) = item_list_body_text_range(&item_list)
+		else {
+			continue;
+		};
+		let Some(module_body_text) = ctx.text.get(module_body_start..module_body_end) else {
+			continue;
+		};
+		let Ok(Some(module_ctx)) =
+			shared::read_file_context_from_text(&ctx.path, module_body_text.to_owned())
+		else {
+			continue;
+		};
+		let has_follow_up_group_fix = cfg_test_module_has_follow_up_group_fix(&module_ctx);
+		let mut module_violations = Vec::new();
+		let mut module_edits = Vec::new();
+
+		apply_pub_use_group_rules(
+			&module_ctx,
+			&mut module_violations,
+			&mut module_edits,
+			emit_edits,
+		);
+
+		let use_runs = collect_non_pub_use_runs(&module_ctx);
+		let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
+		let use_item_skip_lines = collect_cfg_test_module_skip_lines(&module_ctx, &use_items);
+		let import004_fixed_lines = apply_use_item_rules(
+			&module_ctx,
+			&mut module_violations,
+			&mut module_edits,
+			emit_edits,
+			&use_items,
+			&use_item_skip_lines,
+			false,
+		);
+		let imported_symbol_maps = collect_imported_symbol_maps(&module_ctx, &use_items);
+
+		push_import004_ambiguous_symbol_violations(
+			&module_ctx,
+			&mut module_violations,
+			&imported_symbol_maps,
+		);
+
+		let local_module_roots = collect_local_module_roots(&module_ctx);
+		let import004_qualified_path_fixed_lines = apply_import004_qualified_function_path_rule(
+			&module_ctx,
+			&mut module_violations,
+			&mut module_edits,
+			emit_edits,
+			&use_runs,
+			&local_module_roots,
+			&imported_symbol_maps.full_paths_by_symbol,
+			false,
+		);
+		let mut import_group_skip_lines = use_item_skip_lines;
+
+		import_group_skip_lines.extend(import004_fixed_lines);
+		import_group_skip_lines.extend(import004_qualified_path_fixed_lines);
+
+		let (planned_import_group_edits, fixable_import_group_lines) = build_import_group_fix_plans(
+			&module_ctx,
+			&use_runs,
+			&import_group_skip_lines,
+			&local_module_roots,
+		);
+
+		if emit_edits {
+			module_edits.extend(planned_import_group_edits);
+		}
+
+		push_import_group_order_spacing_violations(
+			&module_ctx,
+			&mut module_violations,
+			&use_runs,
+			&fixable_import_group_lines,
+			&local_module_roots,
+		);
+
+		violations.extend(module_violations.into_iter().filter_map(|violation| {
+			translate_cfg_test_violation(
+				ctx,
+				&module_ctx,
+				module_body_start,
+				violation,
+				has_follow_up_group_fix,
+			)
+		}));
+
+		if !emit_edits {
+			continue;
+		}
+
+		edits.extend(
+			module_edits
+				.into_iter()
+				.filter_map(|edit| translate_cfg_test_edit(ctx, module_body_start, edit)),
+		);
+	}
+}
+
+fn module_has_cfg_test_attr(module: &Module) -> bool {
+	module
+		.attrs()
+		.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg(test)"))
+}
+
+fn item_list_body_text_range(item_list: &ast::ItemList) -> Option<(usize, usize)> {
+	let range = item_list.syntax().text_range();
+	let start = usize::from(range.start());
+	let end = usize::from(range.end());
+
+	if end <= start + 1 { None } else { Some((start + 1, end - 1)) }
+}
+
+fn collect_cfg_test_module_skip_lines(ctx: &FileContext, use_items: &[&TopItem]) -> HashSet<usize> {
+	let mut skip_lines = HashSet::new();
+
+	for item in use_items {
+		let Some(path) = extract_use_path(ctx, item) else {
+			continue;
+		};
+		let compact_path = compact_path_for_match(&path);
+
+		if compact_path.contains('*')
+			|| compact_path == "super"
+			|| compact_path.starts_with("super::")
+		{
+			skip_lines.insert(item.line);
+		}
+	}
+
+	skip_lines
+}
+
+fn translate_cfg_test_violation(
+	ctx: &FileContext,
+	module_ctx: &FileContext,
+	module_body_start: usize,
+	mut violation: Violation,
+	has_follow_up_group_fix: bool,
+) -> Option<Violation> {
+	let local_line_offset = shared::offset_from_line(&module_ctx.line_starts, violation.line)?;
+	let line = shared::line_from_offset(&ctx.line_starts, module_body_start + local_line_offset);
+
+	if has_follow_up_group_fix
+		&& !violation.fixable
+		&& matches!(violation.rule, "RUST-STYLE-IMPORT-001" | "RUST-STYLE-IMPORT-002")
+	{
+		violation.fixable = true;
+	}
+
+	Some(Violation {
+		file: ctx.path.clone(),
+		line,
+		rule: violation.rule,
+		message: violation.message,
+		fixable: violation.fixable,
+	})
+}
+
+fn translate_cfg_test_edit(
+	ctx: &FileContext,
+	module_body_start: usize,
+	edit: Edit,
+) -> Option<Edit> {
+	let start = module_body_start.checked_add(edit.start)?;
+	let end = module_body_start.checked_add(edit.end)?;
+
+	if end > ctx.text.len() || start > end {
+		return None;
+	}
+
+	Some(Edit { start, end, replacement: edit.replacement, rule: edit.rule })
+}
+
+fn cfg_test_module_has_follow_up_group_fix(ctx: &FileContext) -> bool {
+	let use_runs = collect_non_pub_use_runs(ctx);
+
+	if use_runs.is_empty() {
+		return false;
+	}
+
+	let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
+	let use_item_skip_lines = collect_cfg_test_module_skip_lines(ctx, &use_items);
+	let mut probe_violations = Vec::new();
+	let mut probe_edits = Vec::new();
+
+	apply_use_item_rules(
+		ctx,
+		&mut probe_violations,
+		&mut probe_edits,
+		true,
+		&use_items,
+		&use_item_skip_lines,
+		false,
+	);
+
+	if probe_edits.is_empty() {
+		return false;
+	}
+
+	let mut rewritten = ctx.text.clone();
+	let Ok(applied) = fixes::apply_edits(&mut rewritten, probe_edits) else {
+		return false;
+	};
+
+	if applied == 0 {
+		return false;
+	}
+
+	let Ok(Some(next_ctx)) = shared::read_file_context_from_text(&ctx.path, rewritten) else {
+		return false;
+	};
+	let next_use_runs = collect_non_pub_use_runs(&next_ctx);
+
+	if next_use_runs.is_empty() {
+		return false;
+	}
+
+	let next_use_items =
+		next_use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
+	let next_use_item_skip_lines = collect_cfg_test_module_skip_lines(&next_ctx, &next_use_items);
+	let mut next_probe_violations = Vec::new();
+	let mut next_probe_edits = Vec::new();
+	let next_import004_fixed_lines = apply_use_item_rules(
+		&next_ctx,
+		&mut next_probe_violations,
+		&mut next_probe_edits,
+		false,
+		&next_use_items,
+		&next_use_item_skip_lines,
+		false,
+	);
+	let mut next_import_group_skip_lines = next_use_item_skip_lines;
+
+	next_import_group_skip_lines.extend(next_import004_fixed_lines);
+
+	let (_planned_import_group_edits, fixable_import_group_lines) = build_import_group_fix_plans(
+		&next_ctx,
+		&next_use_runs,
+		&next_import_group_skip_lines,
+		&collect_local_module_roots(&next_ctx),
+	);
+
+	!fixable_import_group_lines.is_empty()
 }
 
 fn apply_import010_no_super_use_rule(
@@ -1785,7 +2466,9 @@ fn apply_import004_free_fn_macro_rule(
 		let mut qualified_symbol_path = String::new();
 		let mut use_item_edit = None;
 
-		if let Some((qualified_path, rewritten_use_path)) = import004_fix_plan(path, &symbol) {
+		if let Some((qualified_path, rewritten_use_path)) =
+			import004_free_fn_fix_plan(ctx, item, path, &symbol)
+		{
 			qualified_symbol_path = qualified_path;
 			fixable = true;
 
@@ -1843,6 +2526,96 @@ fn apply_import004_free_fn_macro_rule(
 	}
 
 	fixed
+}
+
+fn apply_import004_qualified_function_path_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+	use_runs: &[Vec<&TopItem>],
+	local_module_roots: &HashSet<String>,
+	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
+	skip_cfg_test_module_paths: bool,
+) -> HashSet<usize> {
+	let candidates =
+		collect_import004_qualified_function_candidates(ctx, skip_cfg_test_module_paths);
+
+	if candidates.is_empty() {
+		return HashSet::new();
+	}
+
+	let mut touched_lines = HashSet::new();
+	let mut pending_import_paths = BTreeSet::new();
+	let mut planned_access_paths = HashMap::<String, String>::new();
+
+	for candidate in candidates {
+		let Some(module_access_plan) = import004_preferred_module_access_plan(
+			ctx,
+			None,
+			None,
+			&candidate.parent_module_path,
+			&candidate.module_symbol,
+		) else {
+			continue;
+		};
+		let shortened_path = format!("{}::{}", module_access_plan.access_path, candidate.leaf_text);
+
+		if compact_path_for_match(&shortened_path) == compact_path_for_match(&candidate.full_path) {
+			continue;
+		}
+
+		if let Some(existing_parent) = planned_access_paths.get(&module_access_plan.access_path)
+			&& compact_path_for_match(existing_parent)
+				!= compact_path_for_match(&candidate.parent_module_path)
+		{
+			continue;
+		}
+
+		shared::push_violation(
+			violations,
+			ctx,
+			candidate.line,
+			"RUST-STYLE-IMPORT-004",
+			"Prefer parent-module qualified free-function paths when unambiguous.",
+			true,
+		);
+
+		if !emit_edits {
+			continue;
+		}
+
+		edits.push(Edit {
+			start: candidate.start,
+			end: candidate.end,
+			replacement: shortened_path,
+			rule: "RUST-STYLE-IMPORT-004",
+		});
+		touched_lines.insert(candidate.line);
+
+		if module_access_plan.keep_parent_module_import {
+			pending_import_paths.insert(candidate.parent_module_path.clone());
+			planned_access_paths
+				.entry(module_access_plan.access_path)
+				.or_insert(candidate.parent_module_path);
+		}
+	}
+
+	if !emit_edits {
+		return touched_lines;
+	}
+
+	touched_lines.extend(apply_pending_module_import_path_edits(
+		ctx,
+		edits,
+		use_runs,
+		local_module_roots,
+		&pending_import_paths,
+		imported_full_paths_by_symbol,
+		"RUST-STYLE-IMPORT-004",
+	));
+
+	touched_lines
 }
 
 fn symbol_imported_from_std_like_root(path: &str, symbol: &str) -> bool {
@@ -2089,6 +2862,7 @@ fn build_import009_plan<'a>(
 	qualified_type_paths_by_symbol: &HashMap<String, HashSet<String>>,
 	qualified_value_paths_by_symbol: &HashMap<String, HashSet<String>>,
 ) -> Option<Import009Plan<'a>> {
+	let equivalent_qualified_paths = import009_equivalent_qualified_paths(ctx, imported_path);
 	let mut type_rewrites = unqualified_type_path_rewrites(ctx, symbol, imported_path);
 
 	type_rewrites.extend(unqualified_derive_attr_symbol_rewrites(ctx, symbol, imported_path));
@@ -2099,12 +2873,18 @@ fn build_import009_plan<'a>(
 	let has_unqualified_uses = has_unqualified_type_uses || has_unqualified_value_uses;
 	let has_any_qualified_type_path =
 		qualified_type_paths_by_symbol.get(symbol).is_some_and(|paths| !paths.is_empty());
-	let has_conflicting_qualified_value_path = qualified_value_paths_by_symbol
-		.get(symbol)
-		.is_some_and(|paths| paths.iter().any(|path| path != imported_path));
-	let has_qualified_type_same_path = qualified_type_paths_by_symbol
-		.get(symbol)
-		.is_some_and(|paths| paths.contains(imported_path));
+	let has_conflicting_qualified_value_path =
+		qualified_value_paths_by_symbol.get(symbol).is_some_and(|paths| {
+			paths.iter().any(|path| !equivalent_qualified_paths.contains(path.as_str()))
+		});
+	let has_qualified_value_same_path =
+		qualified_value_paths_by_symbol.get(symbol).is_some_and(|paths| {
+			paths.iter().any(|path| equivalent_qualified_paths.contains(path.as_str()))
+		});
+	let has_qualified_type_same_path =
+		qualified_type_paths_by_symbol.get(symbol).is_some_and(|paths| {
+			paths.iter().any(|path| equivalent_qualified_paths.contains(path.as_str()))
+		});
 	let value_uses_record_only =
 		has_unqualified_value_uses && unqualified_value_paths_are_record_only(ctx, symbol);
 	let allow_value_only_type_like_conflict_rewrites = has_unqualified_value_uses
@@ -2117,6 +2897,7 @@ fn build_import009_plan<'a>(
 		&& !has_any_qualified_type_path
 		&& !value_uses_record_only
 		&& !allow_value_only_type_like_conflict_rewrites
+		&& !has_qualified_value_same_path
 	{
 		// Keep IMPORT-009 focused on type ambiguity (plus struct-literal style value paths
 		// and type-like associated value paths).
@@ -2134,9 +2915,10 @@ fn build_import009_plan<'a>(
 	}
 
 	let has_any_qualified_path = !qualified_paths.is_empty();
-	let has_qualified_same_path = qualified_paths.contains(imported_path);
+	let has_qualified_same_path =
+		qualified_paths.iter().any(|path| equivalent_qualified_paths.contains(path.as_str()));
 	let has_conflicting_qualified_path =
-		qualified_paths.iter().any(|qualified_path| qualified_path != imported_path);
+		qualified_paths.iter().any(|path| !equivalent_qualified_paths.contains(path.as_str()));
 	let allow_value_only_record_rewrites =
 		has_unqualified_value_uses && !has_unqualified_type_uses && value_uses_record_only;
 	let allow_value_only_conflicting_qualified_paths = allow_value_only_record_rewrites;
@@ -2182,8 +2964,8 @@ fn build_import009_plan<'a>(
 			continue;
 		}
 
-		let Some((qualified_symbol_path, rewritten_use_path)) = import004_fix_plan(&path, symbol)
-		else {
+		let removal_fix_plan = import004_free_fn_fix_plan(ctx, item, &path, symbol);
+		let Some((qualified_symbol_path, rewritten_use_path)) = removal_fix_plan else {
 			fixable = false;
 
 			break;
@@ -2197,6 +2979,32 @@ fn build_import009_plan<'a>(
 	}
 
 	Some((fixable, type_rewrites, value_rewrites, use_item_plans))
+}
+
+fn import009_equivalent_qualified_paths<'a>(
+	ctx: &FileContext,
+	imported_path: &'a str,
+) -> HashSet<Cow<'a, str>> {
+	let mut paths = HashSet::from([Cow::Borrowed(imported_path)]);
+	let Some((parent_module_path, symbol)) = imported_path.rsplit_once("::") else {
+		return paths;
+	};
+	let Some(module_symbol) = parent_module_path.rsplit("::").next() else {
+		return paths;
+	};
+	let module_symbol = normalize_ident(module_symbol);
+
+	if module_symbol.is_empty() || matches!(module_symbol, "crate" | "self" | "super") {
+		return paths;
+	}
+
+	if let Some(module_access_plan) =
+		import004_preferred_module_access_plan(ctx, None, None, parent_module_path, module_symbol)
+	{
+		paths.insert(Cow::Owned(format!("{}::{}", module_access_plan.access_path, symbol)));
+	}
+
+	paths
 }
 
 fn build_use_item_rewrite_edit(
@@ -2307,22 +3115,15 @@ fn apply_import008_rules(
 	);
 
 	if emit_edits {
-		let (pending_after_merge, merged_lines) = merge_import008_into_existing_module_use_items(
+		import008_group_skip_lines.extend(apply_pending_module_import_path_edits(
 			ctx,
 			edits,
 			use_runs,
+			local_module_roots,
 			&pending_import_paths,
 			imported_full_paths_by_symbol,
-		);
-
-		import008_group_skip_lines.extend(merged_lines);
-
-		if let Some((edit, touched_lines)) =
-			build_import008_insert_edit(ctx, use_runs, local_module_roots, &pending_after_merge)
-		{
-			edits.push(edit);
-			import008_group_skip_lines.extend(touched_lines);
-		}
+			"RUST-STYLE-IMPORT-008",
+		));
 	}
 
 	import008_group_skip_lines
@@ -2821,6 +3622,170 @@ fn ranges_overlap(start: usize, end: usize, other_start: usize, other_end: usize
 	start < other_end && other_start < end
 }
 
+fn collect_import004_qualified_function_candidates(
+	ctx: &FileContext,
+	skip_cfg_test_module_paths: bool,
+) -> Vec<Import004QualifiedFunctionCandidate> {
+	let mut candidates = Vec::new();
+	let mut seen_ranges = HashSet::new();
+
+	collect_import004_qualified_function_call_candidates(
+		ctx,
+		skip_cfg_test_module_paths,
+		&mut candidates,
+		&mut seen_ranges,
+	);
+	collect_import004_qualified_function_macro_candidates(
+		ctx,
+		skip_cfg_test_module_paths,
+		&mut candidates,
+		&mut seen_ranges,
+	);
+
+	candidates
+}
+
+fn collect_import004_qualified_function_call_candidates(
+	ctx: &FileContext,
+	skip_cfg_test_module_paths: bool,
+	candidates: &mut Vec<Import004QualifiedFunctionCandidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+) {
+	for call_expr in ctx.source_file.syntax().descendants().filter_map(ast::CallExpr::cast) {
+		let Some(expr) = call_expr.expr() else {
+			continue;
+		};
+		let Some(path_expr) = ast::PathExpr::cast(expr.syntax().clone()) else {
+			continue;
+		};
+		let Some(path) = path_expr.path() else {
+			continue;
+		};
+
+		if path.qualifier().is_none()
+			|| path_is_qualifier_subpath(&path)
+			|| (skip_cfg_test_module_paths && is_inside_cfg_test_module(&path))
+		{
+			continue;
+		}
+
+		let mut segments = Vec::new();
+
+		if !collect_path_segment_texts(&path, &mut segments) {
+			continue;
+		}
+
+		let Some(leaf_text) = path.segment().map(|segment| segment.syntax().text().to_string())
+		else {
+			continue;
+		};
+		let range = path.syntax().text_range();
+
+		import004_push_qualified_function_candidate(
+			ctx,
+			candidates,
+			seen_ranges,
+			&segments,
+			usize::from(range.start()),
+			usize::from(range.end()),
+			leaf_text,
+		);
+	}
+}
+
+fn collect_import004_qualified_function_macro_candidates(
+	ctx: &FileContext,
+	skip_cfg_test_module_paths: bool,
+	candidates: &mut Vec<Import004QualifiedFunctionCandidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+) {
+	let path_re = Regex::new(
+		r"(?:\b(?:crate|self|super|[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)(?:\s*::\s*(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*)+)",
+	)
+	.expect("Compile import004 qualified macro path regex.");
+
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+		if skip_cfg_test_module_paths && syntax_is_inside_cfg_test_module(macro_call.syntax()) {
+			continue;
+		}
+
+		let Some(token_tree) = macro_call.token_tree() else {
+			continue;
+		};
+		let tree_text = token_tree.syntax().text().to_string();
+		let tree_start = usize::from(token_tree.syntax().text_range().start());
+
+		for found in path_re.find_iter(&tree_text) {
+			if !macro_symbol_has_import004_function_follow(&tree_text, found.end())
+				|| !macro_symbol_is_import009_unqualified(&tree_text, found.start())
+			{
+				continue;
+			}
+
+			let segments = found
+				.as_str()
+				.split("::")
+				.map(str::trim)
+				.filter(|segment| !segment.is_empty())
+				.map(ToOwned::to_owned)
+				.collect::<Vec<_>>();
+			let Some(leaf_text) = segments.last().cloned() else {
+				continue;
+			};
+
+			import004_push_qualified_function_candidate(
+				ctx,
+				candidates,
+				seen_ranges,
+				&segments,
+				tree_start + found.start(),
+				tree_start + found.end(),
+				leaf_text,
+			);
+		}
+	}
+}
+
+fn import004_push_qualified_function_candidate(
+	ctx: &FileContext,
+	candidates: &mut Vec<Import004QualifiedFunctionCandidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+	segments: &[String],
+	start: usize,
+	end: usize,
+	leaf_text: String,
+) {
+	if segments.len() < 3 || start >= end || !seen_ranges.insert((start, end)) {
+		return;
+	}
+
+	let symbol = normalize_ident(&leaf_text).to_owned();
+
+	if symbol.is_empty() || !symbol.chars().next().is_some_and(char::is_lowercase) {
+		return;
+	}
+
+	let parent_module_path = segments[..segments.len() - 1].join("::");
+	let Some(module_symbol) = parent_module_path.rsplit("::").next() else {
+		return;
+	};
+	let module_symbol = normalize_ident(module_symbol).to_owned();
+
+	if module_symbol.is_empty() || !module_symbol.chars().next().is_some_and(char::is_lowercase) {
+		return;
+	}
+
+	candidates.push(Import004QualifiedFunctionCandidate {
+		line: shared::line_from_offset(&ctx.line_starts, start),
+		start,
+		end,
+		full_path: segments.join("::"),
+		parent_module_path,
+		module_symbol,
+		leaf_text,
+	});
+}
+
 fn collect_import008_candidates(ctx: &FileContext) -> Vec<Import008Candidate> {
 	let Ok(derive_path_re) = Regex::new(
 		r"(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*(?:::\s*(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*)+",
@@ -2843,17 +3808,14 @@ fn collect_import008_from_paths(
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
 	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
-		let Some(path) = path_type.path() else {
+		let Some(candidate) = path_type.path().and_then(|path| {
+			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Qualified)
+		}) else {
 			continue;
 		};
-
-		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-
 		let mut segments = Vec::new();
 
-		if !collect_path_segment_texts(&path, &mut segments) {
+		if !collect_path_segment_texts(&candidate.path, &mut segments) {
 			continue;
 		}
 		if segments.len() < 2 {
@@ -2884,11 +3846,12 @@ fn collect_import008_from_paths(
 			continue;
 		}
 
-		let Some(segment) = path.segment() else {
+		let replacement =
+			candidate.path.segment().map(|segment| segment.syntax().text().to_string());
+		let Some(replacement) = replacement else {
 			continue;
 		};
-		let replacement = segment.syntax().text().to_string();
-		let range = path.syntax().text_range();
+		let range = candidate.path.syntax().text_range();
 		let start = usize::from(range.start());
 		let end = usize::from(range.end());
 
@@ -3085,17 +4048,14 @@ fn collect_qualified_type_paths_by_symbol(ctx: &FileContext) -> HashMap<String, 
 	let mut out: HashMap<String, HashSet<String>> = HashMap::new();
 
 	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
-		let Some(path) = path_type.path() else {
+		let Some(candidate) = path_type.path().and_then(|path| {
+			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Qualified)
+		}) else {
 			continue;
 		};
-
-		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-
 		let mut segments = Vec::new();
 
-		if !collect_path_segment_texts(&path, &mut segments) {
+		if !collect_path_segment_texts(&candidate.path, &mut segments) {
 			continue;
 		}
 		if segments.len() < 2 {
@@ -3123,28 +4083,18 @@ fn collect_qualified_value_paths_by_symbol(ctx: &FileContext) -> HashMap<String,
 	let mut out: HashMap<String, HashSet<String>> = HashMap::new();
 
 	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
-		if path_is_qualifier_subpath(&path) {
+		let Some(candidate) = classify_value_path_candidate(
+			ctx,
+			path,
+			PathQualificationRequirement::Qualified,
+			false,
+			true,
+		) else {
 			continue;
-		}
-		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::MacroCall::cast(node).is_some()) {
-			continue;
-		}
-		if !is_value_path_usage(&path) {
-			continue;
-		}
-
+		};
 		let mut segments = Vec::new();
 
-		if !collect_path_segment_texts(&path, &mut segments) {
+		if !collect_path_segment_texts(&candidate.path, &mut segments) {
 			continue;
 		}
 		if segments.len() < 2 {
@@ -3202,6 +4152,98 @@ fn is_value_path_usage(path: &ast::Path) -> bool {
 	})
 }
 
+// Method names are not module/value paths and must never be qualified.
+fn name_ref_is_method_segment(ctx: &FileContext, name_ref: &ast::NameRef) -> bool {
+	let bytes = ctx.text.as_bytes();
+	let mut idx = usize::from(name_ref.syntax().text_range().start());
+
+	while idx > 0 && bytes[idx - 1].is_ascii_whitespace() {
+		idx -= 1;
+	}
+
+	idx > 0 && bytes[idx - 1] == b'.'
+}
+
+fn classify_value_path_candidate(
+	ctx: &FileContext,
+	path: ast::Path,
+	qualification: PathQualificationRequirement,
+	allow_macro_context: bool,
+	skip_qualifier_subpath: bool,
+) -> Option<ValuePathCandidate> {
+	if skip_qualifier_subpath && path_is_qualifier_subpath(&path) {
+		return None;
+	}
+
+	match qualification {
+		PathQualificationRequirement::Qualified if path.qualifier().is_none() => return None,
+		PathQualificationRequirement::Unqualified if path.qualifier().is_some() => return None,
+		_ => {},
+	}
+
+	if is_inside_cfg_test_module(&path) {
+		return None;
+	}
+	if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
+		return None;
+	}
+	if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
+		return None;
+	}
+
+	let macro_context = path.syntax().ancestors().any(|node| ast::MacroCall::cast(node).is_some());
+
+	if macro_context {
+		if !allow_macro_context {
+			return None;
+		}
+	} else if !is_value_path_usage(&path) {
+		return None;
+	}
+
+	let segment = path.segment()?;
+	let name_ref = segment.name_ref()?;
+
+	if name_ref_is_method_segment(ctx, &name_ref) {
+		return None;
+	}
+
+	let is_record_context = path.syntax().ancestors().any(|node| {
+		ast::RecordExpr::cast(node.clone()).is_some() || ast::RecordPat::cast(node).is_some()
+	});
+
+	Some(ValuePathCandidate { path, name_ref, is_record_context })
+}
+
+fn classify_type_path_candidate(
+	ctx: &FileContext,
+	path: ast::Path,
+	qualification: PathQualificationRequirement,
+) -> Option<TypePathCandidate> {
+	match qualification {
+		PathQualificationRequirement::Qualified if path.qualifier().is_none() => return None,
+		PathQualificationRequirement::Unqualified if path.qualifier().is_some() => return None,
+		_ => {},
+	}
+
+	if is_inside_cfg_test_module(&path) {
+		return None;
+	}
+
+	let segment = path.segment()?;
+	let name_ref = segment.name_ref()?;
+
+	if name_ref_is_method_segment(ctx, &name_ref) {
+		return None;
+	}
+
+	let segment_text = segment.syntax().text().to_string();
+	let name_text = name_ref.text().to_string();
+	let suffix = segment_text.strip_prefix(&name_text)?.to_owned();
+
+	Some(TypePathCandidate { path, name_ref, suffix })
+}
+
 fn unqualified_type_path_rewrites(
 	ctx: &FileContext,
 	symbol: &str,
@@ -3210,28 +4252,19 @@ fn unqualified_type_path_rewrites(
 	let mut rewrites = Vec::new();
 
 	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
-		let Some(path) = path_type.path() else {
+		let Some(candidate) = path_type.path().and_then(|path| {
+			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Unqualified)
+		}) else {
 			continue;
 		};
 
-		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-
-		let Some(segment) = path.segment() else {
-			continue;
-		};
-		let Some(name_ref) = segment.name_ref() else {
-			continue;
-		};
-
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
 			continue;
 		}
 
 		rewrites.push((
-			usize::from(name_ref.syntax().text_range().start()),
-			usize::from(name_ref.syntax().text_range().end()),
+			usize::from(candidate.name_ref.syntax().text_range().start()),
+			usize::from(candidate.name_ref.syntax().text_range().end()),
 			qualified_path.to_owned(),
 		));
 	}
@@ -3247,16 +4280,13 @@ fn alias_root_type_path_rewrites(
 	let mut rewrites = Vec::new();
 
 	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
-		let Some(path) = path_type.path() else {
+		let Some(candidate) = path_type.path().and_then(|path| {
+			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Qualified)
+		}) else {
 			continue;
 		};
-
-		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-
 		let Some(replacement) = rewrite_alias_root_path(
-			path.syntax().text().to_string().as_str(),
+			candidate.path.syntax().text().to_string().as_str(),
 			alias,
 			qualified_path,
 		) else {
@@ -3264,8 +4294,8 @@ fn alias_root_type_path_rewrites(
 		};
 
 		rewrites.push((
-			usize::from(path.syntax().text_range().start()),
-			usize::from(path.syntax().text_range().end()),
+			usize::from(candidate.path.syntax().text_range().start()),
+			usize::from(candidate.path.syntax().text_range().end()),
 			replacement,
 		));
 	}
@@ -3298,27 +4328,22 @@ fn alias_root_path_name_ref_rewrites(
 	let mut rewrites = Vec::new();
 	let mut seen = HashSet::new();
 
-	for segment in ctx.source_file.syntax().descendants().filter_map(ast::PathSegment::cast) {
-		let Some(name_ref) = segment.name_ref() else {
+	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+		let Some(candidate) = classify_value_path_candidate(
+			ctx,
+			path,
+			PathQualificationRequirement::Unqualified,
+			false,
+			false,
+		) else {
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text().as_str(), alias) {
-			continue;
-		}
-		if segment.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
+		if !is_same_ident(candidate.name_ref.text().as_str(), alias) {
 			continue;
 		}
 
-		let Some(path) = segment.syntax().ancestors().find_map(ast::Path::cast) else {
-			continue;
-		};
-
-		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-
-		let range = name_ref.syntax().text_range();
+		let range = candidate.name_ref.syntax().text_range();
 		let start = usize::from(range.start());
 		let end = usize::from(range.end());
 
@@ -3460,36 +4485,22 @@ fn unqualified_nongeneric_type_path_rewrites(
 	let mut rewrites = Vec::new();
 
 	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
-		let Some(path) = path_type.path() else {
+		let Some(candidate) = path_type.path().and_then(|path| {
+			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Unqualified)
+		}) else {
 			continue;
 		};
 
-		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
+		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
 			continue;
 		}
-
-		let Some(segment) = path.segment() else {
-			continue;
-		};
-		let Some(name_ref) = segment.name_ref() else {
-			continue;
-		};
-
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
-			continue;
-		}
-
-		let segment_text = segment.syntax().text().to_string();
-		let name_text = name_ref.text().to_string();
-		let suffix = segment_text.strip_prefix(&name_text).unwrap_or_default();
-
-		if !suffix.is_empty() {
+		if !candidate.suffix.is_empty() {
 			continue;
 		}
 
 		rewrites.push((
-			usize::from(path.syntax().text_range().start()),
-			usize::from(path.syntax().text_range().end()),
+			usize::from(candidate.path.syntax().text_range().start()),
+			usize::from(candidate.path.syntax().text_range().end()),
 			qualified_path.to_owned(),
 		));
 	}
@@ -3499,30 +4510,16 @@ fn unqualified_nongeneric_type_path_rewrites(
 
 fn has_unqualified_generic_type_path_use(ctx: &FileContext, symbol: &str) -> bool {
 	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
-		let Some(path) = path_type.path() else {
+		let Some(candidate) = path_type.path().and_then(|path| {
+			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Unqualified)
+		}) else {
 			continue;
 		};
 
-		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
+		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
 			continue;
 		}
-
-		let Some(segment) = path.segment() else {
-			continue;
-		};
-		let Some(name_ref) = segment.name_ref() else {
-			continue;
-		};
-
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
-			continue;
-		}
-
-		let segment_text = segment.syntax().text().to_string();
-		let name_text = name_ref.text().to_string();
-		let suffix = segment_text.strip_prefix(&name_text).unwrap_or_default();
-
-		if !suffix.is_empty() {
+		if !candidate.suffix.is_empty() {
 			return true;
 		}
 	}
@@ -3539,35 +4536,22 @@ fn unqualified_value_path_rewrites(
 	let mut seen_ranges = HashSet::new();
 
 	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
-		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::MacroCall::cast(node).is_some()) {
-			continue;
-		}
-		if !is_value_path_usage(&path) {
-			continue;
-		}
-
-		let Some(segment) = path.segment() else {
-			continue;
-		};
-		let Some(name_ref) = segment.name_ref() else {
+		let Some(candidate) = classify_value_path_candidate(
+			ctx,
+			path,
+			PathQualificationRequirement::Unqualified,
+			false,
+			false,
+		) else {
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
 			continue;
 		}
 
-		let start = usize::from(name_ref.syntax().text_range().start());
-		let end = usize::from(name_ref.syntax().text_range().end());
+		let start = usize::from(candidate.name_ref.syntax().text_range().start());
+		let end = usize::from(candidate.name_ref.syntax().text_range().end());
 
 		if seen_ranges.insert((start, end)) {
 			rewrites.push((start, end, qualified_path.to_owned()));
@@ -3654,7 +4638,10 @@ fn macro_symbol_is_import009_unqualified(text: &str, symbol_start: usize) -> boo
 			continue;
 		}
 
-		return bytes[idx] != b':' && !bytes[idx].is_ascii_alphanumeric() && bytes[idx] != b'_';
+		return bytes[idx] != b':'
+			&& bytes[idx] != b'.'
+			&& !bytes[idx].is_ascii_alphanumeric()
+			&& bytes[idx] != b'_';
 	}
 
 	true
@@ -3664,40 +4651,23 @@ fn unqualified_value_paths_are_record_only(ctx: &FileContext, symbol: &str) -> b
 	let mut saw_matching_path = false;
 
 	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
-		if path.qualifier().is_some() || is_inside_cfg_test_module(&path) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::MacroCall::cast(node).is_some()) {
-			continue;
-		}
-		if !is_value_path_usage(&path) {
-			continue;
-		}
-
-		let Some(segment) = path.segment() else {
-			continue;
-		};
-		let Some(name_ref) = segment.name_ref() else {
+		let Some(candidate) = classify_value_path_candidate(
+			ctx,
+			path,
+			PathQualificationRequirement::Unqualified,
+			false,
+			false,
+		) else {
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
 			continue;
 		}
 
 		saw_matching_path = true;
 
-		let is_record_context = path.syntax().ancestors().any(|node| {
-			ast::RecordExpr::cast(node.clone()).is_some() || ast::RecordPat::cast(node).is_some()
-		});
-
-		if !is_record_context {
+		if !candidate.is_record_context {
 			return false;
 		}
 	}
@@ -3713,25 +4683,17 @@ fn alias_root_value_path_rewrites(
 	let mut rewrites = Vec::new();
 
 	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
-		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
+		let Some(candidate) = classify_value_path_candidate(
+			ctx,
+			path,
+			PathQualificationRequirement::Qualified,
+			true,
+			true,
+		) else {
 			continue;
-		}
-		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
-			continue;
-		}
-		if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
-			continue;
-		}
-
-		let macro_context =
-			path.syntax().ancestors().any(|node| ast::MacroCall::cast(node).is_some());
-
-		if !macro_context && !is_value_path_usage(&path) {
-			continue;
-		}
-
+		};
 		let Some(replacement) = rewrite_alias_root_path(
-			path.syntax().text().to_string().as_str(),
+			candidate.path.syntax().text().to_string().as_str(),
 			alias,
 			qualified_path,
 		) else {
@@ -3739,8 +4701,8 @@ fn alias_root_value_path_rewrites(
 		};
 
 		rewrites.push((
-			usize::from(path.syntax().text_range().start()),
-			usize::from(path.syntax().text_range().end()),
+			usize::from(candidate.path.syntax().text_range().start()),
+			usize::from(candidate.path.syntax().text_range().end()),
 			replacement,
 		));
 	}
@@ -3757,11 +4719,7 @@ fn use_item_imports_symbol_path(path: &str, symbol: &str, import_path: &str) -> 
 }
 
 fn is_inside_cfg_test_module(path: &ast::Path) -> bool {
-	path.syntax().ancestors().filter_map(Module::cast).any(|module| {
-		module
-			.attrs()
-			.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg(test)"))
-	})
+	syntax_is_inside_cfg_test_module(path.syntax())
 }
 
 fn path_is_qualifier_subpath(path: &ast::Path) -> bool {
@@ -3838,6 +4796,14 @@ fn imported_self_full_paths_from_use_path(path: &str) -> HashSet<String> {
 	}
 
 	paths.into_iter().map(|path| path.replace(' ', "")).collect()
+}
+
+fn syntax_is_inside_cfg_test_module(syntax: &SyntaxNode) -> bool {
+	syntax.ancestors().filter_map(Module::cast).any(|module| {
+		module
+			.attrs()
+			.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg(test)"))
+	})
 }
 
 fn collect_self_full_paths_from_use_segment(segment: &str, out: &mut HashSet<String>) -> bool {
@@ -4009,6 +4975,7 @@ fn build_import008_insert_edit(
 	use_runs: &[Vec<&TopItem>],
 	local_module_roots: &HashSet<String>,
 	pending_import_paths: &BTreeSet<String>,
+	rule: &'static str,
 ) -> Option<(Edit, HashSet<usize>)> {
 	if pending_import_paths.is_empty() {
 		return None;
@@ -4053,10 +5020,11 @@ fn build_import008_insert_edit(
 			return None;
 		};
 		let (_, run_end) = run_text_range(ctx, first, last)?;
+		let insert_pos = item_syntax_text_range(ctx, last).map(|(_, end)| end).unwrap_or(run_end);
 		let last_origin =
 			extract_use_path(ctx, last).map(|path| use_origin(&path, local_module_roots));
 		let first_new_origin = grouped.keys().next().copied();
-		let mut replacement = String::new();
+		let mut replacement = String::from("\n");
 
 		if let (Some(last_origin), Some(first_new_origin)) = (last_origin, first_new_origin)
 			&& last_origin != first_new_origin
@@ -4066,8 +5034,14 @@ fn build_import008_insert_edit(
 
 		replacement.push_str(&block);
 
+		if let Some(indent) = import006_scope_insert_indent(ctx, insert_pos)
+			&& !indent.is_empty()
+		{
+			replacement = import006_indent_insert_block(&replacement, &indent);
+		}
+
 		return Some((
-			Edit { start: run_end, end: run_end, replacement, rule: "RUST-STYLE-IMPORT-008" },
+			Edit { start: insert_pos, end: insert_pos, replacement, rule },
 			run.iter().map(|item| item.line).collect::<HashSet<_>>(),
 		));
 	}
@@ -4077,14 +5051,17 @@ fn build_import008_insert_edit(
 		shared::offset_from_line(&ctx.line_starts, insert_line).unwrap_or(ctx.text.len());
 	let mut replacement = block;
 
+	if let Some(indent) = import006_scope_insert_indent(ctx, insert_pos)
+		&& !indent.is_empty()
+	{
+		replacement = import006_indent_insert_block(&replacement, &indent);
+	}
+
 	if !ctx.top_items.is_empty() {
 		replacement.push('\n');
 	}
 
-	Some((
-		Edit { start: insert_pos, end: insert_pos, replacement, rule: "RUST-STYLE-IMPORT-008" },
-		HashSet::new(),
-	))
+	Some((Edit { start: insert_pos, end: insert_pos, replacement, rule }, HashSet::new()))
 }
 
 fn merge_import008_into_existing_module_use_items(
@@ -4093,6 +5070,7 @@ fn merge_import008_into_existing_module_use_items(
 	use_runs: &[Vec<&TopItem>],
 	pending_import_paths: &BTreeSet<String>,
 	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
+	rule: &'static str,
 ) -> (BTreeSet<String>, HashSet<usize>) {
 	if pending_import_paths.is_empty() {
 		return (BTreeSet::new(), HashSet::new());
@@ -4174,7 +5152,7 @@ fn merge_import008_into_existing_module_use_items(
 		if let Some(rewritten) = rewrite_use_item_with_path(raw, &merged_path)
 			&& rewritten != raw
 		{
-			edits.push(Edit { start, end, replacement: rewritten, rule: "RUST-STYLE-IMPORT-008" });
+			edits.push(Edit { start, end, replacement: rewritten, rule });
 			touched_lines.insert(line);
 		}
 	}
@@ -4193,6 +5171,39 @@ fn merge_import008_into_existing_module_use_items(
 	}
 
 	(remaining, touched_lines)
+}
+
+fn apply_pending_module_import_path_edits(
+	ctx: &FileContext,
+	edits: &mut Vec<Edit>,
+	use_runs: &[Vec<&TopItem>],
+	local_module_roots: &HashSet<String>,
+	pending_import_paths: &BTreeSet<String>,
+	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
+	rule: &'static str,
+) -> HashSet<usize> {
+	if pending_import_paths.is_empty() {
+		return HashSet::new();
+	}
+
+	let (pending_after_merge, merged_lines) = merge_import008_into_existing_module_use_items(
+		ctx,
+		edits,
+		use_runs,
+		pending_import_paths,
+		imported_full_paths_by_symbol,
+		rule,
+	);
+	let mut touched_lines = merged_lines;
+
+	if let Some((edit, inserted_lines)) =
+		build_import008_insert_edit(ctx, use_runs, local_module_roots, &pending_after_merge, rule)
+	{
+		edits.push(edit);
+		touched_lines.extend(inserted_lines);
+	}
+
+	touched_lines
 }
 
 fn resolve_import008_merge_target_for_pending_path<'a>(
@@ -4300,10 +5311,14 @@ fn find_use_item_line_importing_full_path(
 		if compact_path == target_compact {
 			return Some(item.line);
 		}
-		if imported_full_paths_from_use_path(&path)
-			.into_iter()
-			.any(|full_path| compact_path_for_match(&full_path) == target_compact)
-		{
+		if imported_full_paths_from_use_path(&path).into_iter().any(|full_path| {
+			let full_path_compact = compact_path_for_match(&full_path);
+
+			full_path_compact == target_compact
+				|| full_path.rsplit_once("::").is_some_and(|(parent_full, _)| {
+					compact_path_for_match(parent_full) == target_compact
+				})
+		}) {
 			containing_line.get_or_insert(item.line);
 		}
 	}
@@ -4343,12 +5358,38 @@ fn merge_single_child_into_use_path_for_root(
 	}
 
 	if let Some(merged) =
+		try_merge_child_into_simple_root_use_path(use_path, &root_compact, child_tail)
+	{
+		return Some(merged);
+	}
+	if let Some(merged) =
 		try_merge_child_into_direct_root_braced_use_path(use_path, &root_compact, child_tail)
 	{
 		return Some(merged);
 	}
 
 	try_merge_child_into_parent_braced_use_path(use_path, root_full, child_tail)
+}
+
+fn try_merge_child_into_simple_root_use_path(
+	use_path: &str,
+	root_compact: &str,
+	child_tail: &str,
+) -> Option<String> {
+	let (prefix, imported_symbol) = simple_import_prefix_symbol(use_path)?;
+
+	if compact_path_for_match(&prefix) != *root_compact {
+		return None;
+	}
+	if is_same_ident(&imported_symbol, child_tail) {
+		return Some(use_path.to_owned());
+	}
+
+	Some(if child_tail == "self" {
+		format!("{prefix}::{{self, {imported_symbol}}}")
+	} else {
+		format!("{prefix}::{{{imported_symbol}, {child_tail}}}")
+	})
 }
 
 fn try_merge_child_into_direct_root_braced_use_path(
@@ -4393,6 +5434,29 @@ fn try_merge_child_into_parent_braced_use_path(
 
 		if compact_path_for_match(trimmed) == root_head_compact {
 			*segment = format!("{root_head}::{{self, {child_tail}}}");
+			matched_root = true;
+			changed = true;
+
+			break;
+		}
+
+		if let Some((head, child)) = trimmed.split_once("::")
+			&& compact_path_for_match(head) == root_head_compact
+			&& !child.contains('{')
+			&& !child.contains('}')
+			&& child != "*"
+		{
+			if is_same_ident(child.trim(), child_tail) {
+				matched_root = true;
+
+				break;
+			}
+
+			*segment = if child_tail == "self" {
+				format!("{head}::{{self, {}}}", child.trim())
+			} else {
+				format!("{head}::{{{}, {child_tail}}}", child.trim())
+			};
 			matched_root = true;
 			changed = true;
 
@@ -4806,7 +5870,8 @@ fn braced_import_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<St
 		module_path,
 		use_module_alias.as_deref(),
 		qualified_symbol_path,
-		kept,
+		kept.clone(),
+		false,
 	)
 }
 
@@ -4990,16 +6055,17 @@ fn build_braced_import_rewritten_path(
 	use_module_alias: Option<&str>,
 	qualified_symbol_path: String,
 	kept: Vec<String>,
+	keep_module_access: bool,
 ) -> Option<(String, Option<String>)> {
 	if kept.is_empty() {
-		if use_module_alias.is_some() {
+		if use_module_alias.is_some() || keep_module_access {
 			return Some((qualified_symbol_path, Some(module_path.to_owned())));
 		}
 
 		return Some((qualified_symbol_path, None));
 	}
 
-	let rewritten_use_path = if use_module_alias.is_some() {
+	let rewritten_use_path = if use_module_alias.is_some() || keep_module_access {
 		let mut kept_no_self = kept;
 
 		kept_no_self.retain(|segment| segment != "self");
@@ -5048,6 +6114,427 @@ fn import004_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<String
 	braced_import_fix_plan(path, symbol)
 }
 
+fn import004_free_fn_fix_plan(
+	ctx: &FileContext,
+	current_item: &TopItem,
+	path: &str,
+	symbol: &str,
+) -> Option<(String, Option<String>)> {
+	let (default_qualified_symbol_path, rewritten_use_path_without_symbol) =
+		import004_fix_plan(path, symbol)?;
+	let Some((parent_module_path, module_symbol)) = import004_parent_module_target(path, symbol)
+	else {
+		return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
+	};
+	let Some(module_access_plan) = import004_preferred_module_access_plan(
+		ctx,
+		Some(current_item),
+		Some(path),
+		&parent_module_path,
+		&module_symbol,
+	) else {
+		return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
+	};
+	let (_, rewritten_use_path_with_parent_module) = import004_fix_plan_with_parent_module(
+		ctx,
+		path,
+		symbol,
+		&parent_module_path,
+		&module_access_plan.access_path,
+	)?;
+	let rewritten_use_path = if module_access_plan.keep_parent_module_import {
+		rewritten_use_path_with_parent_module
+	} else {
+		rewritten_use_path_without_symbol
+	};
+
+	Some((format!("{}::{}", module_access_plan.access_path, symbol), rewritten_use_path))
+}
+
+fn import004_parent_module_target(path: &str, symbol: &str) -> Option<(String, String)> {
+	let mut parent_module_paths = imported_full_paths_from_use_path(path)
+		.into_iter()
+		.filter(|full_path| {
+			symbol_from_full_import_path(full_path)
+				.as_deref()
+				.is_some_and(|leaf| is_same_ident(leaf, symbol))
+		})
+		.filter_map(|full_path| {
+			full_path.rsplit_once("::").map(|(parent_module_path, _)| parent_module_path.to_owned())
+		})
+		.collect::<Vec<_>>();
+
+	parent_module_paths.sort();
+	parent_module_paths.dedup();
+
+	if parent_module_paths.len() != 1 {
+		return None;
+	}
+
+	let parent_module_path = parent_module_paths.into_iter().next()?;
+	let module_symbol = parent_module_path.rsplit("::").next()?.trim().to_owned();
+
+	if module_symbol.is_empty() || matches!(module_symbol.as_str(), "crate" | "self" | "super") {
+		return None;
+	}
+
+	Some((parent_module_path, normalize_ident(&module_symbol).to_owned()))
+}
+
+fn import004_preferred_module_access_plan(
+	ctx: &FileContext,
+	current_item: Option<&TopItem>,
+	current_use_path: Option<&str>,
+	parent_module_path: &str,
+	module_symbol: &str,
+) -> Option<Import004ModuleAccessPlan> {
+	if let Some(alias) = module_alias_from_parent_path(parent_module_path) {
+		return Some(Import004ModuleAccessPlan {
+			access_path: alias,
+			keep_parent_module_import: true,
+		});
+	}
+
+	let compact_parent_module_path = compact_path_for_match(parent_module_path);
+	let mut keep_parent_module_import = true;
+
+	if current_use_path.is_some_and(|path| {
+		import004_use_path_imports_parent_module(path, &compact_parent_module_path)
+	}) {
+		keep_parent_module_import = false;
+	}
+
+	for item in &ctx.top_items {
+		let Some(other_path) = item.use_path.clone().or_else(|| extract_use_path(ctx, item)) else {
+			if item.kind != TopKind::Use
+				&& item.name.as_deref().is_some_and(|name| is_same_ident(name, module_symbol))
+			{
+				return None;
+			}
+
+			continue;
+		};
+		let is_current_item = current_item
+			.is_some_and(|current_item| use_item_lock_key(item) == use_item_lock_key(current_item));
+
+		if item.kind != TopKind::Use {
+			if item.name.as_deref().is_some_and(|name| is_same_ident(name, module_symbol)) {
+				return None;
+			}
+
+			continue;
+		}
+		if import004_use_path_imports_parent_module(&other_path, &compact_parent_module_path) {
+			keep_parent_module_import = false;
+
+			if is_current_item {
+				continue;
+			}
+		}
+		if is_current_item {
+			continue;
+		}
+		if import004_use_path_conflicts_with_parent_module(
+			&other_path,
+			&compact_parent_module_path,
+			module_symbol,
+		) {
+			return None;
+		}
+	}
+
+	if keep_parent_module_import
+		&& import004_has_conflicting_root_qualified_path_usage(
+			ctx,
+			module_symbol,
+			&compact_parent_module_path,
+		) {
+		return None;
+	}
+
+	Some(Import004ModuleAccessPlan {
+		access_path: module_symbol.to_owned(),
+		keep_parent_module_import,
+	})
+}
+
+fn import004_use_path_imports_parent_module(path: &str, parent_module_path: &str) -> bool {
+	imported_full_paths_from_use_path(path)
+		.into_iter()
+		.any(|full_path| compact_path_for_match(&full_path) == parent_module_path)
+		|| imported_self_full_paths_from_use_path(path)
+			.into_iter()
+			.any(|full_path| compact_path_for_match(&full_path) == parent_module_path)
+}
+
+fn import004_use_path_conflicts_with_parent_module(
+	path: &str,
+	parent_module_path: &str,
+	module_symbol: &str,
+) -> bool {
+	imported_full_paths_from_use_path(path).into_iter().any(|full_path| {
+		import004_imported_full_path_conflicts_with_parent_module(
+			&full_path,
+			parent_module_path,
+			module_symbol,
+		)
+	}) || imported_self_full_paths_from_use_path(path).into_iter().any(|full_path| {
+		import004_imported_self_path_conflicts_with_parent_module(
+			&full_path,
+			parent_module_path,
+			module_symbol,
+		)
+	})
+}
+
+fn import004_imported_full_path_conflicts_with_parent_module(
+	full_path: &str,
+	parent_module_path: &str,
+	module_symbol: &str,
+) -> bool {
+	let compact_full_path = compact_path_for_match(full_path);
+
+	if compact_full_path == parent_module_path
+		|| compact_full_path.starts_with(&format!("{parent_module_path}::"))
+	{
+		return false;
+	}
+
+	import004_root_module_symbol_matches_conflicting_path(&compact_full_path, module_symbol)
+		|| symbol_from_full_import_path(&compact_full_path)
+			.as_deref()
+			.is_some_and(|symbol| is_same_ident(symbol, module_symbol))
+}
+
+fn import004_imported_self_path_conflicts_with_parent_module(
+	full_path: &str,
+	parent_module_path: &str,
+	module_symbol: &str,
+) -> bool {
+	let compact_full_path = compact_path_for_match(full_path);
+
+	if compact_full_path == parent_module_path
+		|| compact_full_path.starts_with(&format!("{parent_module_path}::"))
+	{
+		return false;
+	}
+
+	import004_root_module_symbol_matches_conflicting_path(&compact_full_path, module_symbol)
+		|| compact_full_path
+			.rsplit("::")
+			.next()
+			.is_some_and(|segment| is_same_ident(segment, module_symbol))
+}
+
+fn import004_root_module_symbol_matches_conflicting_path(path: &str, module_symbol: &str) -> bool {
+	path.trim_start_matches(':')
+		.split("::")
+		.next()
+		.is_some_and(|root| !root.is_empty() && is_same_ident(root, module_symbol))
+}
+
+fn import004_has_conflicting_root_qualified_path_usage(
+	ctx: &FileContext,
+	module_symbol: &str,
+	parent_module_path: &str,
+) -> bool {
+	import004_has_conflicting_root_qualified_ast_path_usage(ctx, module_symbol, parent_module_path)
+		|| import004_has_conflicting_root_qualified_macro_path_usage(
+			ctx,
+			module_symbol,
+			parent_module_path,
+		)
+}
+
+fn import004_has_conflicting_root_qualified_ast_path_usage(
+	ctx: &FileContext,
+	module_symbol: &str,
+	parent_module_path: &str,
+) -> bool {
+	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+		if path_is_qualifier_subpath(&path)
+			|| path.qualifier().is_none()
+			|| !import004_is_in_current_scope(path.syntax())
+		{
+			continue;
+		}
+		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
+			continue;
+		}
+
+		let mut segments = Vec::new();
+
+		if !collect_path_segment_texts(&path, &mut segments) || segments.len() < 2 {
+			continue;
+		}
+		if !segments.first().is_some_and(|root| is_same_ident(root, module_symbol)) {
+			continue;
+		}
+
+		let compact_full_path = compact_path_for_match(&segments.join("::"));
+
+		if compact_full_path == parent_module_path
+			|| compact_full_path.starts_with(&format!("{parent_module_path}::"))
+		{
+			continue;
+		}
+
+		return true;
+	}
+
+	false
+}
+
+fn import004_has_conflicting_root_qualified_macro_path_usage(
+	ctx: &FileContext,
+	module_symbol: &str,
+	parent_module_path: &str,
+) -> bool {
+	let path_re = Regex::new(
+		r"(?:\b(?:crate|self|super|[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)(?:\s*::\s*(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*)+)",
+	)
+	.expect("Compile import004 root conflict macro path regex.");
+
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+		if !import004_is_in_current_scope(macro_call.syntax()) {
+			continue;
+		}
+
+		let Some(token_tree) = macro_call.token_tree() else {
+			continue;
+		};
+		let tree_text = token_tree.syntax().text().to_string();
+
+		for found in path_re.find_iter(&tree_text) {
+			if !macro_symbol_is_import009_unqualified(&tree_text, found.start()) {
+				continue;
+			}
+
+			let segments = found
+				.as_str()
+				.split("::")
+				.map(str::trim)
+				.filter(|segment| !segment.is_empty())
+				.collect::<Vec<_>>();
+
+			if segments.len() < 2
+				|| !segments.first().is_some_and(|root| is_same_ident(root, module_symbol))
+			{
+				continue;
+			}
+
+			let compact_full_path = compact_path_for_match(&segments.join("::"));
+
+			if compact_full_path == parent_module_path
+				|| compact_full_path.starts_with(&format!("{parent_module_path}::"))
+			{
+				continue;
+			}
+
+			return true;
+		}
+	}
+
+	false
+}
+
+fn import004_is_in_current_scope(syntax: &SyntaxNode) -> bool {
+	!syntax.ancestors().any(|node| Module::cast(node).is_some())
+}
+
+fn import004_fix_plan_with_parent_module(
+	ctx: &FileContext,
+	path: &str,
+	symbol: &str,
+	parent_module_path: &str,
+	module_access: &str,
+) -> Option<(String, Option<String>)> {
+	if let Some((prefix, imported_symbol)) = simple_import_prefix_symbol(path)
+		&& is_same_ident(&imported_symbol, symbol)
+	{
+		return Some((format!("{module_access}::{imported_symbol}"), Some(prefix)));
+	}
+
+	import004_braced_fix_plan_with_parent_module(
+		ctx,
+		path,
+		symbol,
+		parent_module_path,
+		module_access,
+	)
+}
+
+fn import004_braced_fix_plan_with_parent_module(
+	ctx: &FileContext,
+	path: &str,
+	symbol: &str,
+	parent_module_path: &str,
+	module_access: &str,
+) -> Option<(String, Option<String>)> {
+	let (_default_qualified_symbol_path, rewritten_use_path_without_symbol) =
+		braced_import_fix_plan(path, symbol)?;
+	let rewritten_use_path = match rewritten_use_path_without_symbol {
+		Some(path_without_symbol) => Some(import004_merge_parent_module_use_path(
+			ctx,
+			&path_without_symbol,
+			parent_module_path,
+		)?),
+		None => Some(parent_module_path.to_owned()),
+	};
+
+	Some((format!("{module_access}::{symbol}"), rewritten_use_path))
+}
+
+fn import004_merge_parent_module_use_path(
+	ctx: &FileContext,
+	path_without_symbol: &str,
+	parent_module_path: &str,
+) -> Option<String> {
+	if import004_use_path_imports_parent_module(
+		path_without_symbol,
+		&compact_path_for_match(parent_module_path),
+	) {
+		return Some(path_without_symbol.to_owned());
+	}
+
+	let (prefix, close, mut segments) = parse_braced_path_parts_allow_alias(path_without_symbol)?;
+	let parent_segment = import004_parent_module_relative_segment(&prefix, parent_module_path)?;
+
+	if !segments
+		.iter()
+		.any(|segment| compact_path_for_match(segment) == compact_path_for_match(&parent_segment))
+	{
+		segments.insert(0, parent_segment);
+	}
+
+	let combined_path =
+		format!("{prefix}{}{}", segments.join(", "), &path_without_symbol[close..=close]);
+
+	Some(
+		normalize_mixed_self_child_use_path_preserve_self(ctx, &combined_path)
+			.unwrap_or(combined_path),
+	)
+}
+
+fn import004_parent_module_relative_segment(
+	braced_prefix: &str,
+	parent_module_path: &str,
+) -> Option<String> {
+	let prefix_module_path =
+		braced_prefix.trim_end_matches('{').trim().trim_end_matches("::").trim();
+	let compact_prefix_module_path = compact_path_for_match(prefix_module_path);
+	let compact_parent_module_path = compact_path_for_match(parent_module_path);
+
+	if compact_prefix_module_path == compact_parent_module_path {
+		return Some("self".to_owned());
+	}
+
+	let relative =
+		compact_parent_module_path.strip_prefix(&format!("{compact_prefix_module_path}::"))?.trim();
+
+	if relative.is_empty() { None } else { Some(relative.to_owned()) }
+}
+
 fn module_alias_from_parent_path(path: &str) -> Option<String> {
 	if !path.starts_with("super::") {
 		return None;
@@ -5058,6 +6545,7 @@ fn module_alias_from_parent_path(path: &str) -> Option<String> {
 
 fn unqualified_function_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize, usize)> {
 	let mut ranges = Vec::new();
+	let mut seen_ranges = HashSet::new();
 
 	for call_expr in ctx.source_file.syntax().descendants().filter_map(ast::CallExpr::cast) {
 		let Some(expr) = call_expr.expr() else {
@@ -5085,13 +6573,81 @@ fn unqualified_function_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usi
 			continue;
 		}
 
-		ranges.push((
+		let range = (
 			usize::from(path.syntax().text_range().start()),
 			usize::from(path.syntax().text_range().end()),
-		));
+		);
+
+		if seen_ranges.insert(range) {
+			ranges.push(range);
+		}
+	}
+	for range in unqualified_macro_token_function_call_ranges(ctx, symbol) {
+		if seen_ranges.insert(range) {
+			ranges.push(range);
+		}
 	}
 
 	ranges
+}
+
+fn unqualified_macro_token_function_call_ranges(
+	ctx: &FileContext,
+	symbol: &str,
+) -> Vec<(usize, usize)> {
+	let symbol_re = Regex::new(&format!(r"\b{}\b", regex::escape(symbol)))
+		.expect("Compile import004 macro function regex.");
+	let mut ranges = Vec::new();
+
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+		let Some(token_tree) = macro_call.token_tree() else {
+			continue;
+		};
+		let tree_text = token_tree.syntax().text().to_string();
+		let tree_start = usize::from(token_tree.syntax().text_range().start());
+
+		for found in symbol_re.find_iter(&tree_text) {
+			let symbol_start = found.start();
+			let symbol_end = found.end();
+
+			if !macro_symbol_has_import004_function_follow(&tree_text, symbol_end)
+				|| !macro_symbol_is_import009_unqualified(&tree_text, symbol_start)
+			{
+				continue;
+			}
+
+			ranges.push((tree_start + symbol_start, tree_start + symbol_end));
+		}
+	}
+
+	ranges
+}
+
+fn macro_symbol_has_import004_function_follow(text: &str, symbol_end: usize) -> bool {
+	let bytes = text.as_bytes();
+	let mut idx = symbol_end;
+
+	while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+		idx += 1;
+	}
+
+	if idx >= bytes.len() {
+		return false;
+	}
+	if bytes[idx] == b'(' {
+		return true;
+	}
+	if idx + 1 >= bytes.len() || bytes[idx] != b':' || bytes[idx + 1] != b':' {
+		return false;
+	}
+
+	idx += 2;
+
+	while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+		idx += 1;
+	}
+
+	idx < bytes.len() && bytes[idx] == b'<'
 }
 
 fn unqualified_macro_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize, usize)> {
@@ -5189,6 +6745,21 @@ fn split_top_level_csv(text: &str) -> Vec<String> {
 }
 
 fn normalize_mixed_self_child_use_path(ctx: &FileContext, path: &str) -> Option<String> {
+	normalize_mixed_self_child_use_path_with_options(ctx, path, false)
+}
+
+fn normalize_mixed_self_child_use_path_preserve_self(
+	ctx: &FileContext,
+	path: &str,
+) -> Option<String> {
+	normalize_mixed_self_child_use_path_with_options(ctx, path, true)
+}
+
+fn normalize_mixed_self_child_use_path_with_options(
+	ctx: &FileContext,
+	path: &str,
+	force_keep_self: bool,
+) -> Option<String> {
 	let (prefix, close, segments) = parse_braced_path_parts_allow_alias(path)?;
 	let root = prefix
 		.trim()
@@ -5203,8 +6774,14 @@ fn normalize_mixed_self_child_use_path(ctx: &FileContext, path: &str) -> Option<
 		.unwrap_or_default();
 	let allow_drop_unused_self = matches!(root, "crate" | "self" | "super");
 	let (groups, parsed_heads) = build_mixed_use_groups(&segments);
-	let rewritten =
-		rewrite_mixed_use_segments(ctx, &segments, &groups, &parsed_heads, allow_drop_unused_self)?;
+	let rewritten = rewrite_mixed_use_segments(
+		ctx,
+		&segments,
+		&groups,
+		&parsed_heads,
+		allow_drop_unused_self,
+		force_keep_self,
+	)?;
 	let rewritten_path = format!("{prefix}{}{}", rewritten.join(", "), &path[close..=close]);
 
 	if rewritten_path == path { None } else { Some(rewritten_path) }
@@ -5298,6 +6875,7 @@ fn rewrite_mixed_use_segments(
 	groups: &HashMap<String, MixedUseGroup>,
 	parsed_heads: &[Option<String>],
 	allow_drop_unused_self: bool,
+	force_keep_self: bool,
 ) -> Option<Vec<String>> {
 	let mut emit = vec![true; segments.len()];
 	let mut merged = false;
@@ -5340,7 +6918,7 @@ fn rewrite_mixed_use_segments(
 		}
 
 		let children = dedup_mixed_group_children(group);
-		let keep_self = symbol_is_referenced_outside_use(ctx, &head);
+		let keep_self = force_keep_self || symbol_is_referenced_outside_use(ctx, &head);
 		let combined = if keep_self {
 			format!("{head}::{{self, {}}}", children.join(", "))
 		} else {
@@ -5434,7 +7012,7 @@ fn collect_non_pub_use_runs(ctx: &FileContext) -> Vec<Vec<&TopItem>> {
 			continue;
 		}
 		if !current.is_empty() {
-			runs.push(std::mem::take(&mut current));
+			runs.push(mem::take(&mut current));
 		}
 	}
 
@@ -5456,7 +7034,7 @@ fn collect_pub_use_runs(ctx: &FileContext) -> Vec<Vec<&TopItem>> {
 			continue;
 		}
 		if !current.is_empty() {
-			runs.push(std::mem::take(&mut current));
+			runs.push(mem::take(&mut current));
 		}
 	}
 

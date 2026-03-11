@@ -1,5 +1,5 @@
 use std::{
-	fs,
+	env, fs,
 	path::PathBuf,
 	process::Command,
 	time::{SystemTime, UNIX_EPOCH},
@@ -7,7 +7,7 @@ use std::{
 
 fn create_temp_crate_root() -> PathBuf {
 	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Clock.").as_nanos();
-	let root = std::env::temp_dir().join(format!("vstyle-pub-use-self-group-{}", stamp));
+	let root = env::temp_dir().join(format!("vstyle-pub-use-self-group-{}", stamp));
 	let _ = fs::remove_dir_all(&root);
 
 	fs::create_dir_all(root.join("src")).expect("Create src.");

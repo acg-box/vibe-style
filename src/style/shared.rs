@@ -1,6 +1,6 @@
 use std::{
 	collections::HashSet,
-	fs,
+	env, fs,
 	path::{Path, PathBuf},
 	process::Command,
 	sync::LazyLock,
@@ -14,7 +14,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-pub(crate) const STYLE_RULE_IDS: [&str; 34] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 35] = [
 	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
@@ -27,6 +27,7 @@ pub(crate) const STYLE_RULE_IDS: [&str; 34] = [
 	"RUST-STYLE-IMPORT-003",
 	"RUST-STYLE-IMPORT-004",
 	"RUST-STYLE-IMPORT-005",
+	"RUST-STYLE-IMPORT-006",
 	"RUST-STYLE-IMPORT-007",
 	"RUST-STYLE-IMPORT-008",
 	"RUST-STYLE-IMPORT-009",
@@ -86,7 +87,7 @@ pub(crate) static WORKSPACE_IMPORT_ROOTS: LazyLock<HashSet<String>> = LazyLock::
 	roots
 });
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Violation {
 	pub(crate) file: PathBuf,
 	pub(crate) line: usize,
@@ -107,7 +108,7 @@ impl Violation {
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Edit {
 	pub(crate) start: usize,
 	pub(crate) end: usize,
@@ -115,7 +116,7 @@ pub(crate) struct Edit {
 	pub(crate) rule: &'static str,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct RunSummary {
 	pub(crate) file_count: usize,
 	pub(crate) violation_count: usize,
@@ -124,7 +125,7 @@ pub(crate) struct RunSummary {
 	pub(crate) output_lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct CargoOptions {
 	pub(crate) workspace: bool,
 	pub(crate) packages: Vec<String>,
@@ -133,7 +134,7 @@ pub(crate) struct CargoOptions {
 	pub(crate) no_default_features: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct TopItem {
 	pub(crate) kind: TopKind,
 	pub(crate) name: Option<String>,
@@ -162,7 +163,7 @@ pub(crate) struct FileContext {
 	pub(crate) top_items: Vec<TopItem>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum TopKind {
 	Mod,
 	Use,
@@ -282,8 +283,7 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 		return Ok(Vec::new());
 	}
 
-	let cwd =
-		std::env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
+	let cwd = env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
 	let mut files = Vec::new();
 
 	for relative in git_files {
@@ -302,8 +302,7 @@ pub(crate) fn package_names_for_files(files: &[PathBuf]) -> Result<Option<Vec<St
 		return Ok(Some(Vec::new()));
 	}
 
-	let cwd =
-		std::env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
+	let cwd = env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
 	let mut cmd = MetadataCommand::new();
 
 	cmd.no_deps();

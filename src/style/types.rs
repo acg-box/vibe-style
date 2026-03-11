@@ -18,7 +18,7 @@ enum AliasGenericParam {
 	Type(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct TypeAliasRenameFix {
 	pub(crate) alias: String,
 	pub(crate) target: String,

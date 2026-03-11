@@ -1,4 +1,7 @@
-use std::{io::IsTerminal, process::ExitCode};
+use std::{
+	io::{self, IsTerminal},
+	process::ExitCode,
+};
 
 use clap::{
 	Args, Parser, Subcommand,
@@ -57,7 +60,7 @@ impl Cli {
 			},
 			Command::Tune { strict, cargo } => {
 				let summary =
-					style::run_fix(&cargo.as_options(), verbose, std::io::stderr().is_terminal())?;
+					style::run_fix(&cargo.as_options(), verbose, io::stderr().is_terminal())?;
 
 				print_summary(&summary, true);
 				print_semantic_cache_stats(verbose);
@@ -104,7 +107,7 @@ enum Command {
 	Coverage,
 }
 
-#[derive(Debug, Clone, Args)]
+#[derive(Clone, Debug, Args)]
 struct CargoCliOptions {
 	/// Check all packages in the workspace.
 	#[arg(long)]
@@ -172,8 +175,9 @@ fn styles() -> Styles {
 
 #[cfg(test)]
 mod tests {
-	use crate::cli::{Cli, Command};
 	use clap::Parser;
+
+	use crate::cli::{Cli, Command};
 
 	#[test]
 	fn parses_curate_subcommand() {
