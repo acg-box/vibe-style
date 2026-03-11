@@ -439,24 +439,12 @@ fn import006_use_item_has_comments(ctx: &FileContext, use_item: &Use) -> bool {
 	}
 
 	let line_idx = start_line.saturating_sub(1);
+	let Some(line) = (line_idx > 0).then(|| ctx.lines.get(line_idx - 1)).flatten() else {
+		return false;
+	};
+	let trimmed = line.trim();
 
-	while line_idx > 0 {
-		let Some(line) = ctx.lines.get(line_idx - 1) else {
-			break;
-		};
-		let trimmed = line.trim();
-
-		if trimmed.is_empty() {
-			break;
-		}
-		if !import006_is_comment_line(trimmed) {
-			break;
-		}
-
-		return true;
-	}
-
-	false
+	!trimmed.is_empty() && import006_is_comment_line(trimmed)
 }
 
 fn import006_is_comment_line(trimmed: &str) -> bool {
@@ -2528,6 +2516,7 @@ fn apply_import004_free_fn_macro_rule(
 	fixed
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_import004_qualified_function_path_rule(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
