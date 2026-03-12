@@ -208,6 +208,28 @@ VSTYLE_BENCH_PROFILE=release cargo make bench-release-vstyle
 source of truth because it routes through `cargo vstyle curate --workspace` and can resolve to an
 installed subcommand outside the locally built binary under test.
 
+### Semantic benchmark
+
+Use the semantic-specific harness when a change targets `src/style/semantic.rs` or semantic
+validation fallback behavior:
+
+```sh
+cargo make bench-semantic-vstyle
+```
+
+This harness builds the local release binary once, creates a disposable Git-tracked fixture crate
+based on the `tests/let_mut_reorder.rs` semantic-validation shape, generates a local `Cargo.lock`,
+and runs `vstyle tune --verbose` twice:
+
+- a cold run after clearing `target/vstyle-cache/semantic`
+- a warm rerun after restoring the original fixture sources while keeping the cache directory
+
+Use this semantic benchmark to judge `XY-95`-style work; do not compare semantic-path changes only
+against the self-host no-op benchmark above.
+
+The current semantic-path baseline and follow-up history live in
+`docs/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`.
+
 ## Configuration
 
 There is currently no user configuration file.
