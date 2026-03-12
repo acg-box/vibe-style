@@ -12,6 +12,7 @@ const NUMERIC_SUFFIXES: [&str; 14] = [
 	"usize", "isize", "u128", "i128", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8", "f64",
 	"f32",
 ];
+
 #[derive(Debug, Default)]
 struct ArgSplitState {
 	paren: i32,
@@ -108,13 +109,17 @@ pub(crate) fn check_expect_unwrap(
 	}
 
 	for method_call in ctx.source_file.syntax().descendants().filter_map(MethodCallExpr::cast) {
+		let Some(name) = method_call.name_ref().map(|name| name.text().to_string()) else {
+			continue;
+		};
+
+		if !matches!(name.as_str(), "unwrap" | "expect") {
+			continue;
+		}
 		if method_call_in_test_context(&method_call) {
 			continue;
 		}
 
-		let Some(name) = method_call.name_ref().map(|name| name.text().to_string()) else {
-			continue;
-		};
 		let line = method_call_line(ctx, &method_call);
 
 		match name.as_str() {
