@@ -173,6 +173,32 @@ files inside that package scope.
 CI runs `vstyle curate` (read-only verification) to keep feedback fast and deterministic.
 Use `vstyle tune` locally when you want to apply safe automatic fixes (for example, via `cargo make lint-fix`).
 
+### Release benchmark
+
+Release-performance acceptance is based on the locally built `vstyle` binary, not on an installed
+`cargo-vstyle` subcommand and not on debug-profile timings.
+
+Use the checked-in harness:
+
+```sh
+cargo make bench-release-vstyle
+```
+
+By default the harness builds the shipping `final-release` profile from `Cargo.toml` and runs both
+`vstyle curate --workspace` and `vstyle tune --workspace --verbose` inside a disposable Git
+worktree at the current commit. This keeps `tune` from rewriting the primary checkout while still
+preserving `git ls-files` semantics for file discovery.
+
+To compare the plain `release` profile diagnostically:
+
+```sh
+VSTYLE_BENCH_PROFILE=release cargo make bench-release-vstyle
+```
+
+`cargo make lint-vstyle` remains the repo-native style gate, but it is not the release benchmark
+source of truth because it routes through `cargo vstyle curate --workspace` and can resolve to an
+installed subcommand outside the locally built binary under test.
+
 ## Configuration
 
 There is currently no user configuration file.

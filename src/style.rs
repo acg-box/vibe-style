@@ -16,7 +16,7 @@ pub(crate) use shared::{CargoOptions, RunSummary};
 
 use std::{
 	collections::{BTreeMap, BTreeSet},
-	fs,
+	fs, mem,
 	path::{Path, PathBuf},
 };
 
@@ -37,11 +37,55 @@ struct FileFixOutcome {
 	path: PathBuf,
 	original_text: Option<String>,
 	rewritten_text: Option<String>,
-	fallback_without_import_shortening: Option<String>,
-	had_import_shortening_edits: bool,
+	import_fallback_source_text: Option<String>,
 	had_let_mut_reorder_edits: bool,
 	had_type_alias_rename_edits: bool,
 	applied_count: usize,
+}
+
+#[derive(Debug)]
+struct ImportFallbackPlan {
+	path: PathBuf,
+	source_text: String,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FileViolationCounts {
+	violation_count: usize,
+	unfixable_count: usize,
+}
+
+#[derive(Debug)]
+struct FileCheckOutcome {
+	path: PathBuf,
+	violations: Vec<Violation>,
+}
+
+#[derive(Debug)]
+struct CheckState {
+	counts_by_file: BTreeMap<PathBuf, FileViolationCounts>,
+	violation_count: usize,
+	unfixable_count: usize,
+}
+impl CheckState {
+	fn fixable_count(&self) -> usize {
+		self.violation_count.saturating_sub(self.unfixable_count)
+	}
+
+	fn apply_updates(&mut self, updates: BTreeMap<PathBuf, FileViolationCounts>) {
+		for (path, counts) in updates {
+			let previous = self.counts_by_file.insert(path, counts).unwrap_or_default();
+
+			self.violation_count = self
+				.violation_count
+				.saturating_sub(previous.violation_count)
+				.saturating_add(counts.violation_count);
+			self.unfixable_count = self
+				.unfixable_count
+				.saturating_sub(previous.unfixable_count)
+				.saturating_add(counts.unfixable_count);
+		}
+	}
 }
 
 #[derive(Debug, Default)]
@@ -50,10 +94,11 @@ struct TypeAliasRenamePlan {
 	definition_edits: BTreeMap<PathBuf, Vec<Edit>>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct FixRoundSummary {
 	applied_count: usize,
 	requires_follow_up_round: bool,
+	changed_files: Vec<PathBuf>,
 }
 
 struct SemanticValidationFallbacks<'a> {
@@ -62,48 +107,16 @@ struct SemanticValidationFallbacks<'a> {
 	baseline_error_files: &'a BTreeSet<PathBuf>,
 	verbose: bool,
 	progress: bool,
-	import_fallbacks: &'a BTreeMap<PathBuf, (PathBuf, String)>,
+	import_fallbacks: &'a BTreeMap<PathBuf, ImportFallbackPlan>,
 	changed_originals: &'a BTreeMap<PathBuf, (PathBuf, String)>,
 	let_mut_reorder_files: &'a BTreeMap<PathBuf, ()>,
 	type_alias_rename_files: &'a BTreeMap<PathBuf, ()>,
 }
 
 pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
-	let files = shared::resolve_files(cargo_options)?;
-	let mut violations: Vec<Violation> = Vec::new();
+	let (summary, _state) = run_check_with_state(cargo_options)?;
 
-	for batch in files.chunks(FILE_BATCH_SIZE) {
-		let batch_results = batch
-			.par_iter()
-			.map(|file| -> Result<Vec<Violation>> {
-				let Some(ctx) = shared::read_file_context(file)? else {
-					return Ok(Vec::new());
-				};
-				let (found, _edits) = collect_violations(&ctx, false);
-
-				Ok(found)
-			})
-			.collect::<Vec<_>>();
-
-		for result in batch_results {
-			violations.extend(result?);
-		}
-	}
-
-	violations
-		.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)).then(a.rule.cmp(b.rule)));
-
-	let unfixable_count = violations.iter().filter(|v| !v.fixable).count();
-	let output_lines = violations.into_iter().map(|v| v.format()).collect::<Vec<_>>();
-	let violation_count = output_lines.len();
-
-	Ok(RunSummary {
-		file_count: files.len(),
-		violation_count,
-		unfixable_count,
-		applied_fix_count: 0,
-		output_lines,
-	})
+	Ok(summary)
 }
 
 pub(crate) fn run_fix(
@@ -113,10 +126,9 @@ pub(crate) fn run_fix(
 ) -> Result<RunSummary> {
 	semantic::reset_cache_stats();
 
+	let (initial_checked, mut check_state) = run_check_with_state(cargo_options)?;
 	let mut total_applied = 0_usize;
-	let mut checked = run_check(cargo_options)?;
-	let mut previous_fixable_count =
-		checked.violation_count.saturating_sub(checked.unfixable_count);
+	let mut previous_fixable_count = check_state.fixable_count();
 	let mut non_decreasing_rounds = 0_usize;
 
 	for round in 0..MAX_TUNE_ROUNDS {
@@ -137,16 +149,24 @@ pub(crate) fn run_fix(
 		let scope_summaries = run_fix_rounds_for_scopes(&fix_round_scopes, verbose, progress)?;
 		let mut applied_this_round = 0_usize;
 		let mut requires_follow_up_round = false;
+		let mut changed_files = BTreeSet::<PathBuf>::new();
 
 		for scope_summary in scope_summaries {
 			applied_this_round += scope_summary.applied_count;
 			requires_follow_up_round |= scope_summary.requires_follow_up_round;
+
+			changed_files.extend(scope_summary.changed_files);
 		}
 
 		total_applied += applied_this_round;
-		checked = run_check(cargo_options)?;
 
-		let fixable_count = checked.violation_count.saturating_sub(checked.unfixable_count);
+		let changed_files = changed_files.into_iter().collect::<Vec<_>>();
+
+		if !changed_files.is_empty() {
+			refresh_check_state_for_files(&changed_files, &mut check_state)?;
+		}
+
+		let fixable_count = check_state.fixable_count();
 		let needs_follow_up_round =
 			requires_follow_up_round || fixable_count < previous_fixable_count;
 		let (should_stop, next_non_decreasing_rounds) = should_stop_tune_round(
@@ -174,6 +194,10 @@ pub(crate) fn run_fix(
 		previous_fixable_count = fixable_count;
 	}
 
+	let mut checked = if total_applied > 0 { run_check(cargo_options)? } else { initial_checked };
+
+	checked.applied_fix_count = total_applied;
+
 	Ok(RunSummary {
 		file_count: checked.file_count,
 		violation_count: checked.violation_count,
@@ -191,6 +215,44 @@ pub(crate) fn print_coverage() {
 	for rule in shared::STYLE_RULE_IDS {
 		println!("{rule}\timplemented");
 	}
+}
+
+fn run_check_with_state(cargo_options: &CargoOptions) -> Result<(RunSummary, CheckState)> {
+	let files = shared::resolve_files(cargo_options)?;
+	let outcomes = collect_check_outcomes(&files)?;
+	let mut violations: Vec<Violation> = Vec::new();
+	let mut counts_by_file = BTreeMap::<PathBuf, FileViolationCounts>::new();
+
+	for outcome in outcomes {
+		let counts = FileViolationCounts {
+			violation_count: outcome.violations.len(),
+			unfixable_count: outcome
+				.violations
+				.iter()
+				.filter(|violation| !violation.fixable)
+				.count(),
+		};
+
+		counts_by_file.insert(outcome.path.clone(), counts);
+		violations.extend(outcome.violations);
+	}
+
+	violations
+		.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)).then(a.rule.cmp(b.rule)));
+
+	let unfixable_count = violations.iter().filter(|v| !v.fixable).count();
+	let output_lines = violations.into_iter().map(|v| v.format()).collect::<Vec<_>>();
+	let violation_count = output_lines.len();
+	let summary = RunSummary {
+		file_count: files.len(),
+		violation_count,
+		unfixable_count,
+		applied_fix_count: 0,
+		output_lines,
+	};
+	let state = CheckState { counts_by_file, violation_count, unfixable_count };
+
+	Ok((summary, state))
 }
 
 fn should_stop_tune_round(
@@ -316,7 +378,7 @@ fn run_fix_round(
 	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan)?;
 	let changed_files = changed_file_paths(&outcomes_all);
 	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
-	let mut import_fallbacks: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
+	let mut import_fallbacks: BTreeMap<PathBuf, ImportFallbackPlan> = BTreeMap::new();
 	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
 	let mut let_mut_reorder_files: BTreeMap<PathBuf, ()> = BTreeMap::new();
 	let mut type_alias_rename_files: BTreeMap<PathBuf, ()> = BTreeMap::new();
@@ -329,19 +391,14 @@ fn run_fix_round(
 			changed_originals
 				.insert(normalize_path(&outcome.path), (outcome.path.clone(), original_text));
 		}
-
-		if outcome.had_import_shortening_edits
-			&& let Some(fallback) = outcome.fallback_without_import_shortening
-		{
+		if let Some(source_text) = outcome.import_fallback_source_text {
 			let normalized = normalize_path(&outcome.path);
 
-			import_fallbacks.insert(normalized.clone(), (outcome.path.clone(), fallback));
-
-			if outcome.had_let_mut_reorder_edits {
-				let_mut_reorder_files.insert(normalized, ());
-			}
+			import_fallbacks
+				.insert(normalized, ImportFallbackPlan { path: outcome.path.clone(), source_text });
 		}
-		if outcome.had_let_mut_reorder_edits && !outcome.had_import_shortening_edits {
+
+		if outcome.had_let_mut_reorder_edits {
 			let_mut_reorder_files.insert(normalize_path(&outcome.path), ());
 		}
 		if outcome.had_type_alias_rename_edits {
@@ -397,19 +454,28 @@ fn run_fix_round(
 		type_alias_rename_files: &type_alias_rename_files,
 	})?;
 
+	let net_changed_files = changed_files_since_snapshot(&round_start_snapshot);
+
 	// Count this round as no-op when all edits are eventually rolled back.
-	if total_applied > 0 && !has_net_file_changes(&round_start_snapshot) {
+	if total_applied > 0 && net_changed_files.is_empty() {
 		return Ok(FixRoundSummary::default());
 	}
 
-	let requires_follow_up_round =
-		if semantic_applied > 0 { has_fixable_violations_in_files(files)? } else { false };
+	let requires_follow_up_round = if semantic_applied > 0 && !net_changed_files.is_empty() {
+		has_fixable_violations_in_files(&net_changed_files)?
+	} else {
+		false
+	};
 
 	if progress {
 		eprintln!("vstyle tune: [{scope_label}] applied {} fix(es) this round.", total_applied);
 	}
 
-	Ok(FixRoundSummary { applied_count: total_applied, requires_follow_up_round })
+	Ok(FixRoundSummary {
+		applied_count: total_applied,
+		requires_follow_up_round,
+		changed_files: net_changed_files,
+	})
 }
 
 fn fix_scope_label(cargo_options: &CargoOptions) -> String {
@@ -427,7 +493,7 @@ fn fix_scope_label(cargo_options: &CargoOptions) -> String {
 fn apply_post_semantic_cleanup(
 	files: &[PathBuf],
 	semantic_phase_start_snapshot: &BTreeMap<PathBuf, String>,
-	import_fallbacks: &mut BTreeMap<PathBuf, (PathBuf, String)>,
+	import_fallbacks: &mut BTreeMap<PathBuf, ImportFallbackPlan>,
 	changed_originals: &mut BTreeMap<PathBuf, (PathBuf, String)>,
 	let_mut_reorder_files: &mut BTreeMap<PathBuf, ()>,
 ) -> Result<usize> {
@@ -463,12 +529,10 @@ fn apply_post_semantic_cleanup(
 		applied_total += applied;
 
 		if had_import_shortening_edits {
-			let (fallback, _applied, _had_import_shortening, _) =
-				apply_fix_passes(path, &after_semantic, false)?;
-
-			if fallback != rewritten {
-				import_fallbacks.insert(normalized.clone(), (path.clone(), fallback));
-			}
+			import_fallbacks.insert(
+				normalized.clone(),
+				ImportFallbackPlan { path: path.clone(), source_text: after_semantic.clone() },
+			);
 		}
 		if had_let_mut_reorder_edits {
 			let_mut_reorder_files.insert(normalized, ());
@@ -490,10 +554,20 @@ fn collect_file_snapshots(files: &[PathBuf]) -> BTreeMap<PathBuf, String> {
 	snapshots
 }
 
-fn has_net_file_changes(snapshots: &BTreeMap<PathBuf, String>) -> bool {
+fn changed_files_since_snapshot(snapshots: &BTreeMap<PathBuf, String>) -> Vec<PathBuf> {
 	snapshots
 		.iter()
-		.any(|(path, before)| fs::read_to_string(path).is_ok_and(|after| after != *before))
+		.filter_map(|(path, before)| {
+			fs::read_to_string(path)
+				.ok()
+				.and_then(|after| (after != *before).then_some(path.clone()))
+		})
+		.collect::<Vec<_>>()
+}
+
+#[cfg(test)]
+fn has_net_file_changes(snapshots: &BTreeMap<PathBuf, String>) -> bool {
+	!changed_files_since_snapshot(snapshots).is_empty()
 }
 
 fn has_fixable_violations_in_files(files: &[PathBuf]) -> Result<bool> {
@@ -548,30 +622,37 @@ fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) ->
 			continue;
 		}
 
-		if let Some((path, fallback)) = ctx.import_fallbacks.get(normalized) {
-			if let Some((_, original_text)) = ctx.changed_originals.get(normalized)
-				&& ctx.let_mut_reorder_files.contains_key(normalized)
-			{
-				fs::write(path, original_text)?;
+		if let Some((path, original_text)) = ctx.changed_originals.get(normalized)
+			&& ctx.let_mut_reorder_files.contains_key(normalized)
+		{
+			fs::write(path, original_text)?;
 
-				handled.insert(normalized.clone(), ());
+			handled.insert(normalized.clone(), ());
 
-				eprintln!(
-					"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
-					path.display()
-				);
+			eprintln!(
+				"Skipped RUST-STYLE-LET-001 reorder in {} due to failed semantic validation.",
+				path.display()
+			);
 
+			continue;
+		}
+		if let Some(import_fallback) = ctx.import_fallbacks.get(normalized) {
+			let fallback =
+				compute_import_fallback(&import_fallback.path, &import_fallback.source_text)?;
+			let current_text = fs::read_to_string(&import_fallback.path).unwrap_or_default();
+
+			if fallback == current_text {
 				continue;
 			}
 
-			fs::write(path, fallback)?;
+			fs::write(&import_fallback.path, fallback)?;
 
 			handled.insert(normalized.clone(), ());
 
 			if ctx.verbose {
 				eprintln!(
 					"Applied import-shortening fallback in {} due to failed semantic validation.",
-					path.display()
+					import_fallback.path.display()
 				);
 			}
 		}
@@ -634,7 +715,7 @@ fn apply_type_alias_rename_plan(
 	}
 
 	let mut text = initial_text.to_owned();
-	let Some(ctx) = shared::read_file_context_from_text(path, text.clone())? else {
+	let Some(ctx) = shared::read_file_context_from_text(path, mem::take(&mut text))? else {
 		return Ok((text, 0, false));
 	};
 	let mut edits = Vec::<Edit>::new();
@@ -648,6 +729,7 @@ fn apply_type_alias_rename_plan(
 
 	edits.extend(usage_edits);
 
+	let mut text = ctx.text;
 	let applied = fixes::apply_edits(&mut text, edits)?;
 
 	Ok((text, applied, applied > 0))
@@ -670,8 +752,7 @@ fn collect_fix_outcomes(
 							path: file.clone(),
 							original_text: None,
 							rewritten_text: None,
-							fallback_without_import_shortening: None,
-							had_import_shortening_edits: false,
+							import_fallback_source_text: None,
 							had_let_mut_reorder_edits: false,
 							had_type_alias_rename_edits: false,
 							applied_count: 0,
@@ -684,24 +765,14 @@ fn collect_fix_outcomes(
 					apply_fix_passes(file, &base_text, true)?;
 				let did_change = text != original_text;
 				let applied_count = if did_change { type_alias_applied + pass_applied } else { 0 };
-				let fallback_without_import_shortening =
-					if had_import_shortening_edits && did_change {
-						let (fallback_base, _fallback_type_applied, _fallback_type_edits) =
-							apply_type_alias_rename_plan(file, &original_text, type_alias_plan)?;
-						let (fallback, _fallback_applied, _fallback_import_edits, _) =
-							apply_fix_passes(file, &fallback_base, false)?;
-
-						(text != fallback).then_some(fallback)
-					} else {
-						None
-					};
+				let import_fallback_source_text =
+					(had_import_shortening_edits && did_change).then_some(base_text);
 
 				Ok(FileFixOutcome {
 					path: file.clone(),
 					original_text: if did_change { Some(original_text) } else { None },
 					rewritten_text: if did_change { Some(text) } else { None },
-					fallback_without_import_shortening,
-					had_import_shortening_edits,
+					import_fallback_source_text,
 					had_let_mut_reorder_edits,
 					had_type_alias_rename_edits,
 					applied_count,
@@ -758,11 +829,12 @@ fn apply_fix_passes(
 	while pass < MAX_FIX_PASSES {
 		pass += 1;
 
-		let Some(ctx) = shared::read_file_context_from_text(path, text.clone())? else {
+		let Some(ctx) = shared::read_file_context_from_text(path, mem::take(&mut text))? else {
 			break;
 		};
 		let (_violations, mut edits) =
 			collect_violations_with_import_shortening(&ctx, true, with_import_shortening);
+		let mut current_text = ctx.text;
 
 		if with_import_shortening {
 			if edits.iter().any(|edit| is_import_shortening_rule(edit.rule)) {
@@ -775,19 +847,93 @@ fn apply_fix_passes(
 			had_let_mut_reorder_edits = true;
 		}
 		if edits.is_empty() {
+			text = current_text;
+
 			break;
 		}
 
-		let applied = fixes::apply_edits(&mut text, edits)?;
+		let applied = fixes::apply_edits(&mut current_text, edits)?;
 
 		if applied == 0 {
+			text = current_text;
+
 			break;
 		}
 
 		applied_count += applied;
+		text = current_text;
 	}
 
 	Ok((text, applied_count, had_import_shortening_edits, had_let_mut_reorder_edits))
+}
+
+fn compute_import_fallback(path: &Path, source_text: &str) -> Result<String> {
+	let (fallback, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+		apply_fix_passes(path, source_text, false)?;
+
+	Ok(fallback)
+}
+
+fn collect_check_outcomes(files: &[PathBuf]) -> Result<Vec<FileCheckOutcome>> {
+	let mut outcomes_all = Vec::<FileCheckOutcome>::new();
+
+	for batch in files.chunks(FILE_BATCH_SIZE) {
+		let outcomes = batch
+			.par_iter()
+			.map(|file| -> Result<FileCheckOutcome> {
+				let violations = if let Some(ctx) = shared::read_file_context(file)? {
+					let (found, _edits) = collect_violations(&ctx, false);
+
+					found
+				} else {
+					Vec::new()
+				};
+
+				Ok(FileCheckOutcome { path: file.clone(), violations })
+			})
+			.collect::<Vec<_>>();
+
+		for outcome in outcomes {
+			outcomes_all.push(outcome?);
+		}
+	}
+
+	Ok(outcomes_all)
+}
+
+fn collect_file_violation_counts(
+	files: &[PathBuf],
+) -> Result<BTreeMap<PathBuf, FileViolationCounts>> {
+	let outcomes = collect_check_outcomes(files)?;
+	let mut counts_by_file = BTreeMap::<PathBuf, FileViolationCounts>::new();
+
+	for outcome in outcomes {
+		counts_by_file.insert(
+			outcome.path,
+			FileViolationCounts {
+				violation_count: outcome.violations.len(),
+				unfixable_count: outcome
+					.violations
+					.iter()
+					.filter(|violation| !violation.fixable)
+					.count(),
+			},
+		);
+	}
+
+	Ok(counts_by_file)
+}
+
+fn refresh_check_state_for_files(files: &[PathBuf], check_state: &mut CheckState) -> Result<()> {
+	if files.is_empty() {
+		return Ok(());
+	}
+
+	let updated_counts = collect_file_violation_counts(files)?;
+
+	check_state.apply_updates(updated_counts);
+
+	Ok(())
 }
 
 fn is_import_shortening_rule(rule: &str) -> bool {
@@ -2161,6 +2307,40 @@ use crate::z::Z;
 		assert!(rewritten.contains("use std::fmt::Result;\n\nuse crate::z::Z;\n"));
 		assert!(rewritten.contains("fn parse() -> Result<()> {\n\tOk(())\n}\n"));
 		assert!(rewritten.contains("use std::fmt::Result;"));
+	}
+
+	#[test]
+	fn collect_fix_outcomes_stores_lazy_import_fallback_source_text() {
+		let nanos = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("current timestamp")
+			.as_nanos();
+		let path =
+			env::temp_dir().join(format!("vstyle-lazy-fallback-{}-{}.rs", process::id(), nanos));
+		let original =
+			"use std::fmt::Result;\n\nfn parse() -> std::fmt::Result<()> {\n\tOk(())\n}\n";
+
+		fs::write(&path, original).expect("seed temp file");
+
+		let outcomes = super::collect_fix_outcomes(
+			slice::from_ref(&path),
+			&super::TypeAliasRenamePlan::default(),
+		)
+		.expect("collect fix outcomes");
+		let outcome = outcomes.first().expect("one outcome");
+
+		assert!(outcome.rewritten_text.is_some());
+		assert_eq!(outcome.import_fallback_source_text.as_deref(), Some(original));
+
+		let fallback = super::compute_import_fallback(
+			&path,
+			outcome.import_fallback_source_text.as_deref().expect("fallback source"),
+		)
+		.expect("compute fallback");
+
+		assert_eq!(fallback, original);
+
+		let _ = fs::remove_file(&path);
 	}
 
 	#[test]
@@ -7563,6 +7743,53 @@ fn sample() {
 		assert!(super::has_net_file_changes(&snapshots));
 
 		let _ = fs::remove_file(&path);
+	}
+
+	#[test]
+	fn refresh_check_state_for_changed_files_updates_fixable_totals() {
+		let nanos = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("current timestamp")
+			.as_nanos();
+		let violating_path =
+			env::temp_dir().join(format!("vstyle-check-state-a-{}-{}.rs", process::id(), nanos));
+		let clean_path =
+			env::temp_dir().join(format!("vstyle-check-state-b-{}-{}.rs", process::id(), nanos));
+		let files = vec![violating_path.clone(), clean_path.clone()];
+
+		fs::write(&violating_path, "fn sample() {\n\tlet value = 10f32;\n}\n")
+			.expect("seed violating file");
+		fs::write(&clean_path, "fn sample() {\n\tlet value = 10_f32;\n}\n")
+			.expect("seed clean file");
+
+		let counts_by_file = super::collect_file_violation_counts(&files).expect("initial counts");
+		let violation_count =
+			counts_by_file.values().map(|counts| counts.violation_count).sum::<usize>();
+		let unfixable_count =
+			counts_by_file.values().map(|counts| counts.unfixable_count).sum::<usize>();
+		let mut check_state =
+			super::CheckState { counts_by_file, violation_count, unfixable_count };
+
+		assert_eq!(check_state.fixable_count(), 1);
+
+		fs::write(&violating_path, "fn sample() {\n\tlet value = 10_f32;\n}\n")
+			.expect("fix violating file");
+		super::refresh_check_state_for_files(slice::from_ref(&violating_path), &mut check_state)
+			.expect("refresh changed file counts");
+
+		assert_eq!(check_state.fixable_count(), 0);
+		assert_eq!(check_state.violation_count, 0);
+		assert_eq!(
+			check_state
+				.counts_by_file
+				.get(&violating_path)
+				.expect("updated violating file counts")
+				.violation_count,
+			0
+		);
+
+		let _ = fs::remove_file(&violating_path);
+		let _ = fs::remove_file(&clean_path);
 	}
 
 	#[test]

@@ -173,7 +173,15 @@ args = [
 # Meta
 # | task   | type      | cwd |
 # | ------ | --------- | --- |
+# | bench-release-vstyle | command | |
 # | checks | composite |     |
+
+[tasks.bench-release-vstyle]
+workspace = false
+command = "bash"
+args = [
+	"scripts/bench-release-vstyle.sh",
+]
 
 [tasks.checks]
 workspace = false
