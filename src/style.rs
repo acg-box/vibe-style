@@ -286,18 +286,16 @@ fn resolve_fix_round_scopes(cargo_options: &CargoOptions) -> Result<Vec<FixRound
 		return Ok(vec![(files, cargo_options.clone())]);
 	}
 
-	let Some(packages) = shared::package_names_for_files(&files)? else {
+	let Some(files_by_package) = shared::package_file_map_for_files(&files)? else {
 		return Ok(vec![(files, cargo_options.clone())]);
 	};
 	let mut scopes = Vec::new();
 
-	for package in packages {
+	for (package, scoped_files) in files_by_package {
 		let mut scoped_options = cargo_options.clone();
 
 		scoped_options.workspace = false;
 		scoped_options.packages = vec![package];
-
-		let scoped_files = shared::resolve_files(&scoped_options)?;
 
 		if scoped_files.is_empty() {
 			continue;
@@ -996,7 +994,7 @@ fn violation_signature(violation: &Violation) -> (usize, &'static str, &str, boo
 #[cfg(test)]
 mod tests {
 	use std::{
-		collections::BTreeMap,
+		collections::{BTreeMap, BTreeSet},
 		env, fs,
 		path::{Path, PathBuf},
 		process, slice,
@@ -7684,11 +7682,19 @@ fn sample() {
 	#[test]
 	fn resolve_fix_round_scopes_workspace_splits_to_package_scopes() {
 		let cargo_options = shared::CargoOptions { workspace: true, ..Default::default() };
+		let workspace_files =
+			shared::resolve_files(&cargo_options).expect("resolve workspace files");
 		let scopes = super::resolve_fix_round_scopes(&cargo_options).expect("resolve fix scopes");
+		let scoped_files = scopes
+			.iter()
+			.flat_map(|(files, _options)| files.iter().cloned())
+			.collect::<BTreeSet<_>>();
+		let workspace_files = workspace_files.into_iter().collect::<BTreeSet<_>>();
 
 		assert!(!scopes.is_empty());
 		assert!(scopes.iter().all(|(files, options)| !files.is_empty() && !options.workspace));
 		assert!(scopes.iter().all(|(_, options)| !options.packages.is_empty()));
+		assert_eq!(scoped_files, workspace_files);
 	}
 
 	#[test]

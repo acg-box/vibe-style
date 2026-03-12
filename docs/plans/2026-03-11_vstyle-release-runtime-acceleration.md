@@ -32,7 +32,7 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 ## Execution State
 
 - Last Updated: 2026-03-12
-- Next Checkpoint: Task 5
+- Next Checkpoint: Task 7
 - Blockers: None.
 
 ## Decision Notes
@@ -45,6 +45,8 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 - 2026-03-12: Task 2 landed the low-risk lazy-fallback and reduced-string-churn cleanup. On this host, two immediate `final-release` reruns stayed near baseline (`4.38s` and `4.32s` tune vs `4.35s` initial baseline), so Task 3 remains the next higher-leverage checkpoint.
 - 2026-03-12: Task 3 replaced intermediate full-workspace rechecks with incremental per-file refreshes plus a final full pass. On this host, repeated `final-release` reruns dropped `tune` from the `4.35s` baseline to `2.89s`, `2.93s`, and `2.87s`, so the fix engine checkpoint is materially successful and Task 4 is now the next runtime target.
 - 2026-03-12: Task 4 collapsed repeated import-rule analysis into shared per-file state across import rules and cfg-test follow-up scans. On this host, `final-release` reruns landed at `2.98s`, `2.88s`, and `2.92s` tune, which stays inside the prior `2.87s` to `2.93s` band, so the checkpoint is structurally complete but runtime-neutral and Task 5 is now the next target.
+- 2026-03-12: Task 5 module/quality scan-fusion and regex-hoist experiments were benchmarked but not retained. The reverted fresh baseline measured `2.99s` tune, and the exploratory runs stayed in the `2.95s` to `3.07s` range, so that checkpoint remains queued rather than landed.
+- 2026-03-12: Fresh no-op release benchmarks still do not enter semantic validation (`Semantic cache: 0 hit(s), 0 miss(es)`), so Task 6 narrowed to discovery-path reuse only. Caching workspace metadata and tracked-file discovery, then reusing grouped package scopes, moved `final-release tune` to `2.84s`, `2.93s`, `2.93s`, and `2.95s` versus the fresh post-revert `2.99s` baseline, which is a modest improvement without justifying semantic-path work yet.
 
 ## Implementation Outline
 
@@ -214,11 +216,11 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
-`module` and `quality` checks reuse more per-file state, perform fewer descendant walks, and avoid recompiling regexes in hot paths.
+Fresh module/quality optimization experiments did not produce a keepable release-runtime checkpoint, so broader scan fusion remains queued and no Task 5 code changes were retained.
 
 **Files**
 
@@ -228,9 +230,9 @@ pending
 
 **Changes**
 
-1. Hoist reusable regexes and parser helpers into static initialization where they are currently rebuilt repeatedly in hot code paths.
-2. Fuse repeated descendant scans when the same syntax walk feeds multiple checks in `module` or `quality`.
-3. Avoid repeated string extraction from identical syntax nodes when the same derived text is reused across checks.
+1. Benchmark module/quality scan-fusion and regex-hoist candidates against the existing Task 3/4 `final-release tune` band.
+2. Retain only semantic-preserving changes that beat the current no-op release benchmark; otherwise revert and record the result.
+3. Leave broader module/quality follow-ups queued if they do not beat the current release band.
 
 **Verification**
 
@@ -251,24 +253,24 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
-Release-benchmark evidence determines whether semantic-path and discovery-path optimizations belong in the same execution wave or should remain queued follow-ups.
+Release-benchmark evidence showed that the current no-op `tune` workload still benefits from file/package discovery reuse, while semantic validation remains out of the measured path and stays queued.
 
 **Files**
 
-- Modify: `src/style/semantic.rs`
 - Modify: `src/style/shared.rs`
 - Modify: `src/style.rs`
+- Review: `src/style/semantic.rs`
 - Review: `docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
 
 **Changes**
 
-1. Compare post-Task-5 release benchmark output to determine whether `run_semantic_cargo_check`, semantic cache-key hashing, `resolve_files`, or `package_names_for_files` still contribute enough runtime to justify immediate work.
-2. If they do, reduce duplicate semantic `cargo check` invocations and repeated tracked-file fingerprinting, then add invocation-scoped file/package discovery caches.
-3. If they do not, keep `XY-95` and/or `XY-92` open with measured evidence and stop instead of burning time on low-yield cleanup.
+1. Use fresh post-Task-5 release benchmarks to determine whether semantic validation or discovery work still contributes enough runtime to justify immediate action.
+2. Keep semantic-path work queued when the benchmark does not enter semantic validation, instead of broadening the checkpoint without evidence.
+3. Land a narrow discovery-path reuse checkpoint by caching workspace metadata and tracked-file discovery, then grouping workspace files by package directly instead of rediscovering each package scope separately.
 
 **Verification**
 

@@ -1,12 +1,12 @@
 use std::{
-	collections::HashSet,
+	collections::{BTreeMap, HashSet},
 	env, fs,
 	path::{Path, PathBuf},
 	process::Command,
-	sync::LazyLock,
+	sync::{LazyLock, Mutex},
 };
 
-use cargo_metadata::{MetadataCommand, TargetKind};
+use cargo_metadata::{MetadataCommand, Package, TargetKind};
 use color_eyre::{Result, eyre};
 use ra_ap_syntax::{
 	AstNode, Edition, SourceFile, TextRange,
@@ -87,6 +87,11 @@ pub(crate) static WORKSPACE_IMPORT_ROOTS: LazyLock<HashSet<String>> = LazyLock::
 	roots
 });
 
+static GIT_RS_FILES_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, Vec<PathBuf>>>> =
+	LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static WORKSPACE_LAYOUT_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, WorkspaceLayout>>> =
+	LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
 #[derive(Clone, Debug)]
 pub(crate) struct Violation {
 	pub(crate) file: PathBuf,
@@ -163,6 +168,19 @@ pub(crate) struct FileContext {
 	pub(crate) top_items: Vec<TopItem>,
 }
 
+#[derive(Clone, Debug)]
+struct WorkspacePackageInfo {
+	name: String,
+	snake_name: String,
+	root: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceLayout {
+	workspace_packages: Vec<WorkspacePackageInfo>,
+	default_roots: Vec<PathBuf>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum TopKind {
 	Mod,
@@ -198,58 +216,29 @@ pub(crate) fn push_violation(
 
 pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>> {
 	let git_files = git_ls_files_rs()?;
-	let mut cmd = MetadataCommand::new();
-
-	cmd.no_deps();
-
-	let metadata = cmd.exec().map_err(|err| eyre::eyre!("Failed to run cargo metadata: {err}."))?;
-	let workspace_member_ids = metadata.workspace_members.iter().cloned().collect::<HashSet<_>>();
-	let workspace_packages = metadata
-		.packages
-		.iter()
-		.filter(|package| workspace_member_ids.contains(&package.id))
-		.collect::<Vec<_>>();
+	let workspace_layout = workspace_layout()?;
 	let mut selected_roots = HashSet::new();
 
 	if cargo_options.workspace {
-		for package in &workspace_packages {
-			let manifest = PathBuf::from(package.manifest_path.as_str());
-			let Some(root) = manifest.parent() else {
-				continue;
-			};
-
-			selected_roots.insert(normalize_path(root));
+		for package in &workspace_layout.workspace_packages {
+			selected_roots.insert(package.root.clone());
 		}
 	}
 	if !cargo_options.workspace && cargo_options.packages.is_empty() {
-		let default_packages = if metadata.workspace_default_members.is_available() {
-			metadata.workspace_default_packages()
-		} else if let Some(root_package) = metadata.root_package() {
-			vec![root_package]
-		} else {
-			metadata.workspace_packages()
-		};
-
-		for package in default_packages {
-			let manifest = PathBuf::from(package.manifest_path.as_str());
-			let Some(root) = manifest.parent() else {
-				continue;
-			};
-
-			selected_roots.insert(normalize_path(root));
+		for root in &workspace_layout.default_roots {
+			selected_roots.insert(root.clone());
 		}
 	}
 	if !cargo_options.packages.is_empty() {
 		let mut missing = cargo_options.packages.iter().cloned().collect::<HashSet<_>>();
 
-		for package in &workspace_packages {
+		for package in &workspace_layout.workspace_packages {
 			let package_name = package.name.as_str();
-			let package_name_snake = package_name.replace('-', "_");
 			let mut matched = false;
 
 			for requested in &cargo_options.packages {
 				let requested_snake = requested.replace('-', "_");
-				let hit = requested == package_name || requested_snake == package_name_snake;
+				let hit = requested == package_name || requested_snake == package.snake_name;
 
 				if hit {
 					missing.remove(requested);
@@ -259,12 +248,7 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 			}
 
 			if matched {
-				let manifest = PathBuf::from(package.manifest_path.as_str());
-				let Some(root) = manifest.parent() else {
-					continue;
-				};
-
-				selected_roots.insert(normalize_path(root));
+				selected_roots.insert(package.root.clone());
 			}
 		}
 
@@ -283,7 +267,7 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 		return Ok(Vec::new());
 	}
 
-	let cwd = env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
+	let cwd = current_dir_normalized()?;
 	let mut files = Vec::new();
 
 	for relative in git_files {
@@ -297,64 +281,39 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 	Ok(files)
 }
 
+pub(crate) fn package_file_map_for_files(
+	files: &[PathBuf],
+) -> Result<Option<BTreeMap<String, Vec<PathBuf>>>> {
+	if files.is_empty() {
+		return Ok(Some(BTreeMap::new()));
+	}
+
+	let cwd = current_dir_normalized()?;
+	let workspace_layout = workspace_layout()?;
+	let mut packages = BTreeMap::<String, Vec<PathBuf>>::new();
+
+	for file in files {
+		let abs = normalize_path(&cwd.join(file));
+		let Some(package) = workspace_package_for_path(&workspace_layout, &abs) else {
+			return Ok(None);
+		};
+
+		packages.entry(package.name.clone()).or_default().push(file.clone());
+	}
+
+	Ok(Some(packages))
+}
+
 pub(crate) fn package_names_for_files(files: &[PathBuf]) -> Result<Option<Vec<String>>> {
 	if files.is_empty() {
 		return Ok(Some(Vec::new()));
 	}
 
-	let cwd = env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
-	let mut cmd = MetadataCommand::new();
+	let Some(packages) = package_file_map_for_files(files)? else {
+		return Ok(None);
+	};
 
-	cmd.no_deps();
-
-	let metadata = cmd.exec().map_err(|err| eyre::eyre!("Failed to run cargo metadata: {err}."))?;
-	let workspace_member_ids = metadata.workspace_members.iter().cloned().collect::<HashSet<_>>();
-	// Longest root prefix match wins, so nested packages resolve correctly.
-	let mut packages = metadata
-		.packages
-		.into_iter()
-		.filter(|package| workspace_member_ids.contains(&package.id))
-		.filter_map(|package| {
-			let manifest = PathBuf::from(package.manifest_path.as_str());
-			let root = manifest.parent()?.to_path_buf();
-
-			Some((normalize_path(&root), package.name.to_string()))
-		})
-		.collect::<Vec<_>>();
-
-	packages.sort_by(|left, right| {
-		let left_len = left.0.as_os_str().to_string_lossy().len();
-		let right_len = right.0.as_os_str().to_string_lossy().len();
-
-		right_len.cmp(&left_len)
-	});
-
-	let mut selected = HashSet::<String>::new();
-
-	for file in files {
-		let abs = normalize_path(&cwd.join(file));
-		let mut hit = None;
-
-		for (root, name) in &packages {
-			if abs.starts_with(root) {
-				hit = Some(name.clone());
-
-				break;
-			}
-		}
-
-		let Some(name) = hit else {
-			return Ok(None);
-		};
-
-		selected.insert(name);
-	}
-
-	let mut out = selected.into_iter().collect::<Vec<_>>();
-
-	out.sort();
-
-	Ok(Some(out))
+	Ok(Some(packages.into_keys().collect()))
 }
 
 pub(crate) fn read_file_context(path: &Path) -> Result<Option<FileContext>> {
@@ -484,6 +443,14 @@ pub(crate) fn strip_string_and_line_comment(line: &str, mut in_str: bool) -> (St
 }
 
 fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
+	let cwd = current_dir_normalized()?;
+
+	if let Some(files) =
+		GIT_RS_FILES_CACHE.lock().expect("Lock git ls-files cache.").get(&cwd).cloned()
+	{
+		return Ok(files);
+	}
+
 	let output = Command::new("git")
 		.args(["ls-files", "*.rs"])
 		.output()
@@ -502,7 +469,89 @@ fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
 		}
 	}
 
+	GIT_RS_FILES_CACHE.lock().expect("Lock git ls-files cache.").insert(cwd, files.clone());
+
 	Ok(files)
+}
+
+fn workspace_layout() -> Result<WorkspaceLayout> {
+	let cwd = current_dir_normalized()?;
+
+	if let Some(layout) =
+		WORKSPACE_LAYOUT_CACHE.lock().expect("Lock workspace layout cache.").get(&cwd).cloned()
+	{
+		return Ok(layout);
+	}
+
+	let mut cmd = MetadataCommand::new();
+
+	cmd.no_deps();
+
+	let metadata = cmd.exec().map_err(|err| eyre::eyre!("Failed to run cargo metadata: {err}."))?;
+	let workspace_member_ids = metadata.workspace_members.iter().cloned().collect::<HashSet<_>>();
+	let mut workspace_packages = metadata
+		.packages
+		.iter()
+		.filter(|package| workspace_member_ids.contains(&package.id))
+		.filter_map(workspace_package_info)
+		.collect::<Vec<_>>();
+
+	workspace_packages.sort_by(|left, right| {
+		let left_len = left.root.as_os_str().to_string_lossy().len();
+		let right_len = right.root.as_os_str().to_string_lossy().len();
+
+		right_len.cmp(&left_len)
+	});
+
+	let default_packages = if metadata.workspace_default_members.is_available() {
+		metadata.workspace_default_packages()
+	} else if let Some(root_package) = metadata.root_package() {
+		vec![root_package]
+	} else {
+		metadata.workspace_packages()
+	};
+	let mut default_roots =
+		default_packages.into_iter().filter_map(workspace_package_root).collect::<Vec<_>>();
+
+	default_roots.sort();
+	default_roots.dedup();
+
+	let layout = WorkspaceLayout { workspace_packages, default_roots };
+
+	WORKSPACE_LAYOUT_CACHE
+		.lock()
+		.expect("Lock workspace layout cache.")
+		.insert(cwd, layout.clone());
+
+	Ok(layout)
+}
+
+fn workspace_package_info(package: &Package) -> Option<WorkspacePackageInfo> {
+	let name = package.name.to_string();
+	let snake_name = name.replace('-', "_");
+	let root = workspace_package_root(package)?;
+
+	Some(WorkspacePackageInfo { name, snake_name, root })
+}
+
+fn workspace_package_root(package: &Package) -> Option<PathBuf> {
+	let manifest = PathBuf::from(package.manifest_path.as_str());
+	let root = manifest.parent()?;
+
+	Some(normalize_path(root))
+}
+
+fn workspace_package_for_path<'a>(
+	layout: &'a WorkspaceLayout,
+	absolute: &Path,
+) -> Option<&'a WorkspacePackageInfo> {
+	layout.workspace_packages.iter().find(|package| absolute.starts_with(&package.root))
+}
+
+fn current_dir_normalized() -> Result<PathBuf> {
+	let cwd = env::current_dir().map_err(|err| eyre::eyre!("Failed to resolve cwd: {err}."))?;
+
+	Ok(normalize_path(&cwd))
 }
 
 fn normalize_path(path: &Path) -> PathBuf {

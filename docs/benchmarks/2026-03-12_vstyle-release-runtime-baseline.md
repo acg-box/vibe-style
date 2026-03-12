@@ -161,3 +161,75 @@ runtime win.
 | --- | --- | ---: | ---: | ---: |
 | `vstyle curate --workspace` | `0` | `1.44` | `4.19` | `0.05` |
 | `vstyle tune --workspace --verbose` | `0` | `2.92` | `8.48` | `0.11` |
+
+## Post-Task-5 Decision
+
+Task 5 explored module/quality scan fusion and regex-hoist candidates, but the fresh release runs did
+not beat the existing Task 3/4 band reliably enough to keep. Those experiments were reverted before
+continuing, and the post-revert rerun became the fresh baseline for Task 6.
+
+- Experimental `final-release tune` range before revert: `2.95s` to `3.07s`
+- Decision: do not retain the Task 5 patch set; keep module/quality follow-ups queued
+
+### Post-revert `final-release` baseline
+
+- Benchmark date (UTC): `2026-03-12T10:06:12Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T100612Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.46` | `4.29` | `0.06` |
+| `vstyle tune --workspace --verbose` | `0` | `2.99` | `8.55` | `0.12` |
+
+## Post-Task-6 Checkpoint
+
+Task 6 stayed evidence-gated. The current self-host benchmark is still a no-op `tune`
+(`Checked 21 file(s). Applied 0 fix(es). Semantic cache: 0 hit(s), 0 miss(es).`), so semantic
+follow-ups remain queued. The landed checkpoint only targets discovery-path reuse by caching
+workspace metadata and tracked-file discovery, then grouping workspace files into per-package
+scopes directly instead of rediscovering each package scope separately.
+
+On this host, that narrowed checkpoint moved `final-release tune` from the fresh `2.99s`
+post-revert baseline to one faster rerun at `2.84s`, two follow-up reruns at `2.93s`, and a final
+post-gate rerun at `2.95s`. That is best treated as a modest discovery-path improvement rather than
+a new major step-change.
+
+### `final-release` rerun 1
+
+- Benchmark date (UTC): `2026-03-12T10:14:53Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T101453Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.48` | `4.37` | `0.07` |
+| `vstyle tune --workspace --verbose` | `0` | `2.84` | `8.41` | `0.09` |
+
+### `final-release` rerun 2
+
+- Benchmark date (UTC): `2026-03-12T10:15:31Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T101531Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.46` | `4.31` | `0.06` |
+| `vstyle tune --workspace --verbose` | `0` | `2.93` | `8.49` | `0.09` |
+
+### `final-release` rerun 3
+
+- Benchmark date (UTC): `2026-03-12T10:15:46Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T101546Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.50` | `4.34` | `0.06` |
+| `vstyle tune --workspace --verbose` | `0` | `2.93` | `8.63` | `0.10` |
+
+### `final-release` rerun 4 (post-pre-commit state)
+
+- Benchmark date (UTC): `2026-03-12T10:19:13Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T101913Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.47` | `4.36` | `0.06` |
+| `vstyle tune --workspace --verbose` | `0` | `2.95` | `8.66` | `0.10` |
