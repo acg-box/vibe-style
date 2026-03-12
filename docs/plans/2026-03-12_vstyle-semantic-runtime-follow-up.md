@@ -15,6 +15,21 @@ the change.
 - Keep the Linear execution record aligned around `XY-95` and its parent performance stream in
   `XY-90`.
 
+## Assumptions
+
+- Semantic-path acceptance remains tied to the locally built `final-release` binary and a semantic-positive fixture.
+- The linked semantic benchmark record remains the supporting evidence for this lane.
+
+## Steps
+
+1. Create and baseline a semantic-positive benchmark harness.
+2. Change semantic validation only if the measured path justifies the code churn.
+3. Re-run repo-native gates and semantic benchmarks before closing the lane.
+
+## Status
+
+- Closed execution record. The semantic lane is complete and the retained checkpoint is documented below.
+
 ## Non-goals
 
 - Reopening the closed self-host release-runtime wave in

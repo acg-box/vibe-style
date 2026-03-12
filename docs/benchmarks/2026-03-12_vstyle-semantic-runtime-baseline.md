@@ -1,5 +1,28 @@
 # vstyle Semantic Runtime Baseline
 
+## Goal
+
+Preserve the first semantic-positive benchmark evidence for the semantic runtime follow-up lane.
+
+## Record Scope
+
+This record captures the checked-in semantic benchmark baseline and later retained reruns for the
+owning semantic follow-up plan.
+
+## Assumptions
+
+- These measurements are point-in-time host-dependent evidence, not normative behavior.
+- The owning plan is `docs/plans/2026-03-12_vstyle-semantic-runtime-follow-up.md`.
+
+## Steps
+
+1. Use the harness and verification commands recorded below to reproduce or compare this lane.
+2. Read this file together with the owning plan instead of treating it as a primary routing entrypoint.
+
+## Status
+
+- Archived supporting record for the owning semantic follow-up plan.
+
 ## Scope
 
 Task 1 baseline for the semantic runtime follow-up plan. This records the first reproducible

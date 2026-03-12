@@ -12,6 +12,21 @@ release self-host benchmark without reopening the already-closed broad scan-fusi
   and `src/style/quality.rs`.
 - Keep Linear aligned around `XY-97` and its parent runtime stream in `XY-90`.
 
+## Assumptions
+
+- The post-`XY-95` self-host `final-release` baseline remains the comparison point for this lane.
+- Only narrow, independently explainable module/quality changes are eligible to stay landed.
+
+## Steps
+
+1. Refresh the checked-in self-host release baseline.
+2. Isolate one narrow module/quality hotspot at a time.
+3. Keep or revert the candidate based on repeated release reruns and repo-native gates.
+
+## Status
+
+- Done. The narrowed checkpoint was evaluated and the retained result is recorded below.
+
 ## Non-goals
 
 - Re-running the previously reverted broad module/quality scan-fusion experiment.

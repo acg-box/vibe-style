@@ -2,6 +2,23 @@
 
 Purpose: Document which style rules are primarily AST-backed versus layout-backed, and where semantic (compiler) signals are involved.
 
+Status: normative
+
+Read this when:
+
+- You need the repository's authoritative backend classification for a style rule.
+- You are changing execution, benchmarking, or review logic that depends on backend type.
+
+Not this document:
+
+- This document does not change rule semantics.
+- This document is not a benchmark note, troubleshooting guide, or execution plan.
+
+Defines:
+
+- The backend-class definitions used by this repository.
+- The backend classification for each listed style rule.
+
 This document is normative for documentation purposes only. It does not change rule semantics.
 
 ## Definitions

@@ -86,6 +86,7 @@ args = [
 	"vstyle",
 	"curate",
 	"--workspace",
+	"--all-features"
 ]
 
 [tasks.lint-fix-vstyle]
@@ -95,6 +96,7 @@ args = [
 	"vstyle",
 	"tune",
 	"--workspace",
+	"--all-features",
 	"--strict",
 ]
 

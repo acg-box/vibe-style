@@ -14,6 +14,21 @@ now that the spacing regex-hoist checkpoint already landed elsewhere.
 - Remove any ambiguous "still pending" execution state from the drafted
   `XY-100` lane.
 
+## Assumptions
+
+- The actual kept code change for this topic is `bb4fae5` / `XY-99`, not a separate `XY-100` checkpoint.
+- The linked benchmark notes remain archived evidence for the drafted lane only.
+
+## Steps
+
+1. Preserve the draft lane and prototype measurements for traceability.
+2. Point future readers to the already-landed `XY-99` source of truth.
+3. Keep this plan closed unless a genuinely new spacing delta appears later.
+
+## Status
+
+- Archived execution record. The drafted lane is closed as covered by the landed `XY-99` work.
+
 ## Non-goals
 
 - Re-implementing the spacing regex-hoist under a second issue.

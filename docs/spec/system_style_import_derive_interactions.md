@@ -2,7 +2,23 @@
 
 Purpose: Define the normative interaction between `RUST-STYLE-IMPORT-008`, `RUST-STYLE-IMPORT-009`, and `RUST-STYLE-IMPORT-011` when the same `#[derive(...)]` attribute is eligible for more than one rule.
 
-Audience: This document is written for implementers and reviewers of `vstyle`.
+Status: normative
+
+Read this when:
+
+- You are changing or reviewing derive-path rewrite behavior in `vstyle`.
+- You need to know how `IMPORT-008`, `IMPORT-009`, and `IMPORT-011` compose across fix passes.
+
+Not this document:
+
+- This document does not redefine the standalone meaning of `RUST-STYLE-IMPORT-008`,
+  `RUST-STYLE-IMPORT-009`, or `RUST-STYLE-IMPORT-011`.
+- This document is not a benchmark note, migration guide, or implementation plan.
+
+Defines:
+
+- The required interaction contract between these three derive-related rules.
+- The required sequencing when overlapping derive edits would otherwise conflict.
 
 ## Scope
 

@@ -1,5 +1,28 @@
 # vstyle Module and Quality Runtime Follow-up
 
+## Goal
+
+Preserve the benchmark evidence for the narrowed `XY-97` module/quality follow-up lane.
+
+## Record Scope
+
+This record captures the fresh post-`XY-95` self-host release baseline and the evaluated narrowed
+candidate for the owning follow-up plan.
+
+## Assumptions
+
+- These measurements are point-in-time host-dependent evidence, not normative behavior.
+- The owning plan is `docs/plans/2026-03-12_vstyle-module-quality-follow-up.md`.
+
+## Steps
+
+1. Use the harness and verification commands recorded below to reproduce or compare this lane.
+2. Read this file together with the owning plan instead of treating it as a primary routing entrypoint.
+
+## Status
+
+- Archived supporting record for the owning follow-up plan.
+
 ## Scope
 
 Task 1 baseline for the narrowed `XY-97` follow-up lane. This records the fresh post-`XY-95`
