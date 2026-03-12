@@ -189,6 +189,15 @@ By default the harness builds the shipping `final-release` profile from `Cargo.t
 worktree at the current commit. This keeps `tune` from rewriting the primary checkout while still
 preserving `git ls-files` semantics for file discovery.
 
+Treat the checked-in self-host benchmark as a release-path regression guard, not as a universal
+microbenchmark for every hotspot. On the current workspace it is usually a no-op `tune`; if
+`--verbose` reports `Semantic cache: 0 hit(s), 0 miss(es)`, that run did not enter semantic
+validation and should not be used to judge semantic-path changes in `src/style/semantic.rs`.
+Use a semantic-positive workload before drawing conclusions about semantic validation performance.
+
+The current baseline and checkpoint history live in
+`docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`.
+
 To compare the plain `release` profile diagnostically:
 
 ```sh

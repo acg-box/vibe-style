@@ -32,7 +32,7 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 ## Execution State
 
 - Last Updated: 2026-03-12
-- Next Checkpoint: Task 7
+- Next Checkpoint: None. This execution wave is closed; remaining follow-ups stay queued in Linear.
 - Blockers: None.
 
 ## Decision Notes
@@ -47,6 +47,7 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 - 2026-03-12: Task 4 collapsed repeated import-rule analysis into shared per-file state across import rules and cfg-test follow-up scans. On this host, `final-release` reruns landed at `2.98s`, `2.88s`, and `2.92s` tune, which stays inside the prior `2.87s` to `2.93s` band, so the checkpoint is structurally complete but runtime-neutral and Task 5 is now the next target.
 - 2026-03-12: Task 5 module/quality scan-fusion and regex-hoist experiments were benchmarked but not retained. The reverted fresh baseline measured `2.99s` tune, and the exploratory runs stayed in the `2.95s` to `3.07s` range, so that checkpoint remains queued rather than landed.
 - 2026-03-12: Fresh no-op release benchmarks still do not enter semantic validation (`Semantic cache: 0 hit(s), 0 miss(es)`), so Task 6 narrowed to discovery-path reuse only. Caching workspace metadata and tracked-file discovery, then reusing grouped package scopes, moved `final-release tune` to `2.84s`, `2.93s`, `2.93s`, and `2.95s` versus the fresh post-revert `2.99s` baseline, which is a modest improvement without justifying semantic-path work yet.
+- 2026-03-12: Task 7 closed the current execution wave. README guidance now explains how to interpret the self-host no-op benchmark versus semantic-path workloads, the benchmark doc records the before/after release history, `XY-92` is done, and `XY-95`/`XY-97` remain queued as measured follow-ups.
 
 ## Implementation Outline
 
@@ -295,11 +296,11 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
-The repository and Linear stream show the final release-performance evidence, the execution path is reproducible, and the next session can resume without re-triage.
+The repository and Linear stream now show the current release-performance evidence, the execution path is reproducible, and the next session can resume from queued follow-ups without re-triage.
 
 **Files**
 
