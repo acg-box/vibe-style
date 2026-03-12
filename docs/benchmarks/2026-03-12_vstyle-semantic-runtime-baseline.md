@@ -53,3 +53,51 @@ semantic-positive benchmark run from the checked-in harness.
 - This checkpoint only adds the benchmark harness and docs, so the binary version string still
   reflects the last Rust-code build metadata refresh. Use the benchmark workload commit and log
   directory as the authoritative Task 1 identity.
+
+## Post-Task-2 Checkpoint
+
+Task 2 reused the baseline semantic output for import-suggestion handling and skipped the
+post-validation semantic rerun when no semantic edits occurred. On the current semantic-positive
+fixture, that removes two redundant semantic-path cache lookups from the cold path while preserving
+the warm-cache behavior.
+
+- Binary source state: local Task 2 working tree on top of `77fb038`
+- Acceptance signal: cold semantic cache stats moved from `2` hits / `1` miss to `0` hits / `1`
+  miss, while the warm rerun now reports `1` hit / `0` misses.
+
+### `final-release` rerun 1
+
+- Benchmark date (UTC): `2026-03-12T10:51:22Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench-semantic/20260312T105122Z-final-release`
+
+| Run | Exit | Real (s) | User (s) | Sys (s) | Cache Hits | Cache Misses |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Cold `vstyle tune --verbose` | `0` | `0.18` | `0.13` | `0.07` | `0` | `1` |
+| Warm `vstyle tune --verbose` | `0` | `0.08` | `0.06` | `0.02` | `1` | `0` |
+
+### `final-release` rerun 2
+
+- Benchmark date (UTC): `2026-03-12T10:52:38Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench-semantic/20260312T105238Z-final-release`
+
+| Run | Exit | Real (s) | User (s) | Sys (s) | Cache Hits | Cache Misses |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Cold `vstyle tune --verbose` | `0` | `0.19` | `0.12` | `0.07` | `0` | `1` |
+| Warm `vstyle tune --verbose` | `0` | `0.08` | `0.06` | `0.02` | `1` | `0` |
+
+### `final-release` rerun 3 (post-pre-commit state)
+
+- Benchmark date (UTC): `2026-03-12T10:55:22Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench-semantic/20260312T105522Z-final-release`
+
+| Run | Exit | Real (s) | User (s) | Sys (s) | Cache Hits | Cache Misses |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Cold `vstyle tune --verbose` | `0` | `0.19` | `0.12` | `0.07` | `0` | `1` |
+| Warm `vstyle tune --verbose` | `0` | `0.08` | `0.06` | `0.02` | `1` | `0` |
+
+## Closeout
+
+`XY-95` now has a semantic-positive benchmark, a commit-backed optimization, and an end-to-end test
+that locks the cold/warm semantic cache counts on the `let_mut_reorder` fixture. This lane can
+close as done unless a future semantic workload reveals a different hotspot than duplicate
+semantic-check reuse.

@@ -105,6 +105,7 @@ struct SemanticValidationFallbacks<'a> {
 	files: &'a [PathBuf],
 	semantic_cargo_options: &'a CargoOptions,
 	baseline_error_files: &'a BTreeSet<PathBuf>,
+	post_error_files: Option<&'a BTreeSet<PathBuf>>,
 	verbose: bool,
 	progress: bool,
 	import_fallbacks: &'a BTreeMap<PathBuf, ImportFallbackPlan>,
@@ -418,15 +419,21 @@ fn run_fix_round(
 		eprintln!("vstyle tune: [{scope_label}] running semantic validation.");
 	}
 
-	let baseline_error_files = semantic::collect_compiler_error_files(
+	let (baseline_stdout, baseline_error_files) =
+		semantic::collect_compiler_error_files_with_output(
+			&changed_files,
+			&semantic_cargo_options,
+			verbose,
+			progress,
+		)?;
+	let semantic_phase_start_snapshot = collect_file_snapshots(&changed_files);
+	let semantic_applied = semantic::apply_semantic_fixes(
 		&changed_files,
 		&semantic_cargo_options,
+		Some(baseline_stdout),
 		verbose,
 		progress,
 	)?;
-	let semantic_phase_start_snapshot = collect_file_snapshots(&changed_files);
-	let semantic_applied =
-		semantic::apply_semantic_fixes(&changed_files, &semantic_cargo_options, verbose, progress)?;
 
 	total_applied += semantic_applied;
 
@@ -444,6 +451,7 @@ fn run_fix_round(
 		files: &changed_files,
 		semantic_cargo_options: &semantic_cargo_options,
 		baseline_error_files: &baseline_error_files,
+		post_error_files: (semantic_applied == 0).then_some(&baseline_error_files),
 		verbose,
 		progress,
 		import_fallbacks: &import_fallbacks,
@@ -588,12 +596,19 @@ fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) ->
 		return Ok(());
 	}
 
-	let post_error_files = semantic::collect_compiler_error_files(
-		ctx.files,
-		ctx.semantic_cargo_options,
-		ctx.verbose,
-		ctx.progress,
-	)?;
+	let computed_post_error_files;
+	let post_error_files = if let Some(post_error_files) = ctx.post_error_files {
+		post_error_files
+	} else {
+		computed_post_error_files = semantic::collect_compiler_error_files(
+			ctx.files,
+			ctx.semantic_cargo_options,
+			ctx.verbose,
+			ctx.progress,
+		)?;
+
+		&computed_post_error_files
+	};
 	let new_errors =
 		post_error_files.difference(ctx.baseline_error_files).cloned().collect::<Vec<_>>();
 	let mut handled = BTreeMap::<PathBuf, ()>::new();

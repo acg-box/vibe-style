@@ -37,6 +37,7 @@ struct ImportSuggestion {
 pub(crate) fn apply_semantic_fixes(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
+	initial_stdout: Option<String>,
 	verbose: bool,
 	progress: bool,
 ) -> Result<usize> {
@@ -46,9 +47,13 @@ pub(crate) fn apply_semantic_fixes(
 
 	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
 	let mut applied_total = 0_usize;
+	let mut next_stdout = initial_stdout;
 
 	for _ in 0..max_import_suggestion_rounds() {
-		let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
+		let stdout = match next_stdout.take() {
+			Some(stdout) => stdout,
+			None => run_semantic_cargo_check(cargo_options, files, verbose, progress)?,
+		};
 		let suggestions = collect_missing_import_suggestions(&stdout);
 		let mut applied_round = 0_usize;
 
@@ -70,21 +75,32 @@ pub(crate) fn apply_semantic_fixes(
 	Ok(applied_total)
 }
 
+pub(crate) fn collect_compiler_error_files_with_output(
+	files: &[PathBuf],
+	cargo_options: &CargoOptions,
+	verbose: bool,
+	progress: bool,
+) -> Result<(String, BTreeSet<PathBuf>)> {
+	if files.is_empty() {
+		return Ok((String::new(), BTreeSet::new()));
+	}
+
+	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
+	let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
+	let all = collect_compiler_error_files_from_output(&stdout);
+	let compiler_error_files =
+		all.into_iter().filter(|path| tracked.contains(path)).collect::<BTreeSet<_>>();
+
+	Ok((stdout, compiler_error_files))
+}
+
 pub(crate) fn collect_compiler_error_files(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
 	verbose: bool,
 	progress: bool,
 ) -> Result<BTreeSet<PathBuf>> {
-	if files.is_empty() {
-		return Ok(BTreeSet::new());
-	}
-
-	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
-	let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
-	let all = collect_compiler_error_files_from_output(&stdout);
-
-	Ok(all.into_iter().filter(|path| tracked.contains(path)).collect())
+	Ok(collect_compiler_error_files_with_output(files, cargo_options, verbose, progress)?.1)
 }
 
 pub(crate) fn cache_stats() -> SemanticCacheStats {

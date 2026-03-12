@@ -97,3 +97,88 @@ pub fn closure_carries_binding() {
 		"did not expect a semantic validation skip diagnostic for the unfixable fixture"
 	);
 }
+
+#[test]
+fn let_mut_reorder_reuses_semantic_output_across_cold_and_warm_runs() {
+	let temp_dir = create_temp_crate_root();
+	let safe_source = r#"
+pub fn safe_case() -> usize {
+	let mut mutable_value = 1usize;
+	let immutable_value = 2usize;
+	mutable_value + immutable_value
+}
+"#;
+	let unsafe_source = r#"
+pub fn closure_carries_binding() {
+	let mut value = String::from("value");
+	let _trace = format!("{}\n", value);
+	let deferred = || value;
+	let _ = deferred();
+}
+"#;
+
+	fs::write(temp_dir.join("src/safe.rs"), safe_source).expect("write safe source");
+	fs::write(temp_dir.join("src/unsafe.rs"), unsafe_source).expect("write unsafe source");
+
+	let output =
+		Command::new("git").current_dir(&temp_dir).args(["init"]).output().expect("git init");
+
+	assert!(output.status.success());
+
+	let status = Command::new("git")
+		.current_dir(&temp_dir)
+		.args(["add", "Cargo.toml", "src/main.rs", "src/safe.rs", "src/unsafe.rs"])
+		.output()
+		.expect("git add");
+
+	assert!(status.status.success());
+
+	let status = Command::new("cargo")
+		.current_dir(&temp_dir)
+		.arg("generate-lockfile")
+		.output()
+		.expect("cargo generate-lockfile");
+
+	assert!(status.status.success());
+
+	let cold = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--verbose"])
+		.output()
+		.expect("run cold vstyle");
+
+	assert!(cold.status.success());
+
+	let cold_output = format!(
+		"{}{}",
+		String::from_utf8_lossy(&cold.stdout),
+		String::from_utf8_lossy(&cold.stderr)
+	);
+
+	assert!(
+		cold_output.contains("Semantic cache: 0 hit(s), 1 miss(es)."),
+		"expected one cold semantic miss, output: {cold_output}"
+	);
+
+	fs::write(temp_dir.join("src/safe.rs"), safe_source).expect("restore safe source");
+	fs::write(temp_dir.join("src/unsafe.rs"), unsafe_source).expect("restore unsafe source");
+
+	let warm = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--verbose"])
+		.output()
+		.expect("run warm vstyle");
+
+	assert!(warm.status.success());
+
+	let warm_output = format!(
+		"{}{}",
+		String::from_utf8_lossy(&warm.stdout),
+		String::from_utf8_lossy(&warm.stderr)
+	);
+
+	assert!(
+		warm_output.contains("Semantic cache: 1 hit(s), 0 miss(es)."),
+		"expected one warm semantic hit, output: {warm_output}"
+	);
+}

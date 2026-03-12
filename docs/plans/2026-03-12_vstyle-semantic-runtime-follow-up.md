@@ -35,15 +35,12 @@ the change.
 
 ## Open Questions
 
-- Should `XY-95` close on cold semantic-path wins only, or require both cold and warm reruns to
-  improve?
-- If semantic cache-key generation remains dominant after cold-path tuning, should that follow-up
-  stay inside `XY-95` or split into a narrower issue?
+- None.
 
 ## Execution State
 
 - Last Updated: 2026-03-12
-- Next Checkpoint: Task 2
+- Next Checkpoint: None. This semantic lane is closed.
 - Blockers: None.
 
 ## Decision Notes
@@ -57,6 +54,12 @@ the change.
   README guidance, and the first semantic baseline. On this host, the initial `final-release` run
   measured `0.26s` cold (`2` hits, `1` miss) and `0.15s` warm (`3` hits, `0` misses), so Task 2
   should focus on reducing duplicated semantic work inside the cold path.
+- 2026-03-12: Task 2 reused the baseline semantic output for missing-import handling and skipped the
+  post-validation semantic rerun when no semantic edits occurred. On this host, `final-release`
+  reruns moved the cold semantic fixture from `0.26s` to `0.18s` and `0.19s`, and the warm rerun
+  from `0.15s` to `0.08s`, while semantic cache stats tightened from `2` hits / `1` miss to `0`
+  hits / `1` miss cold and `1` hit / `0` misses warm. The new integration test in
+  `tests/let_mut_reorder.rs` locks those counts, so the lane can close as done.
 
 ## Implementation Outline
 
@@ -123,7 +126,7 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
@@ -164,7 +167,7 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
