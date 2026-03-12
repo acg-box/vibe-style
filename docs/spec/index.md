@@ -1,29 +1,29 @@
 # Spec Index
 
-Purpose: Route agents to normative documents that define what must be true in this repository.
+Purpose: Route agents to normative documents that define repository truth.
 
-Question this index answers: "what must be true?"
+Question this index answers: "what must remain true?"
 
 ## Use this index when
 
-- You need the authoritative contract, invariant, required behavior, or classification for a
-  repository concept.
-- You are changing implementation behavior and need to confirm the governing truth first.
-- You need the document that other guides or plans should defer to instead of restating.
+- You need an invariant, contract, schema, enum, state model, interface, or required
+  behavior.
+- You are deciding whether code or data is correct.
+- A guide says "see the governing spec" and you need the authoritative source.
 
 ## Do not use this index when
 
-- You need a runbook, migration sequence, validation flow, or troubleshooting procedure.
-- You need a temporary execution plan or in-flight draft.
-- You need a dated benchmark record or execution artifact; follow the owning plan to the linked
-  supporting record instead.
+- You need step-by-step instructions, maintenance actions, migrations, or incident
+  response.
+- You need a planning-tool artifact or a saved execution plan under `docs/plans/`.
+- You want rationale only, without an authoritative contract.
 
 ## What belongs in `docs/spec/`
 
-- Contracts, invariants, and required behavior.
-- Normative classifications that other code or docs must agree with.
-- Interaction rules between repository concepts when those interactions affect correctness.
-- Stable repository truth that should outlive one execution lane or benchmark run.
+- Contracts and invariants.
+- Data shapes, canonical field names, enums, defaults, units, and limits.
+- State transitions and protocol rules.
+- Behavior that tests, code, or operators should treat as authoritative.
 
 ## Spec document contract
 
@@ -35,24 +35,19 @@ Start each spec with a compact routing header:
 - `Not this document`
 - `Defines`
 
-Then write the body for verification:
+Then keep the body explicit:
 
-- State the required truth directly.
-- Keep scope boundaries explicit.
-- Link to guides or plans for procedure instead of embedding runbooks here.
-- Use examples only when they clarify the contract.
+- Prefer concrete nouns over pronouns.
+- Separate facts from rationale.
+- Include canonical names exactly as code or data uses them.
+- Include a small example when it removes ambiguity.
+- Link to related guides instead of embedding procedures.
 
 ## Structure policy
 
-- Keep one authoritative topic per spec file.
-- Prefer descriptive `snake_case` names that reflect the topic instead of rigid prefix schemes.
-- Add links from `docs/index.md` or `docs/guide/index.md` when a procedure depends on the spec.
-- Benchmark notes and plan history do not belong in `docs/spec/` even when they describe measured
-  behavior.
-
-## Specs
-
-- `docs/spec/system_style_rule_backends.md` for the normative backend classification of style
-  rules.
-- `docs/spec/system_style_import_derive_interactions.md` for the normative interaction between
-  `IMPORT-008`, `IMPORT-009`, and `IMPORT-011` on `#[derive(...)]`.
+- Prefer shallow paths while the spec set is small.
+- Add subfolders only when they mirror stable system boundaries or materially reduce
+  ambiguity.
+- Do not require fixed filename prefixes up front.
+- Choose names for topic clarity and retrieval quality, not visual uniformity.
+- If a guide depends on a spec, the guide links back to the governing spec.

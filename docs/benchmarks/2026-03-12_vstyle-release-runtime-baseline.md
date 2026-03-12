@@ -1,28 +1,5 @@
 # vstyle Release Runtime Baseline
 
-## Goal
-
-Preserve the first reproducible release-only benchmark evidence for the release-runtime acceleration lane.
-
-## Record Scope
-
-This record captures the checked-in harness baseline and later checkpoint reruns for the owning
-release-runtime plan.
-
-## Assumptions
-
-- These measurements are point-in-time host-dependent evidence, not normative behavior.
-- The owning plan is `docs/plans/2026-03-11_vstyle-release-runtime-acceleration.md`.
-
-## Steps
-
-1. Use the harness and verification commands recorded below to reproduce or compare this lane.
-2. Read this file together with the owning plan instead of treating it as a primary routing entrypoint.
-
-## Status
-
-- Archived supporting record for the owning release-runtime plan.
-
 ## Scope
 
 Task 1 baseline for the release-runtime acceleration plan. This records the first reproducible

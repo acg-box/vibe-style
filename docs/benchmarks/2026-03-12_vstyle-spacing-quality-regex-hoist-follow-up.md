@@ -1,28 +1,5 @@
 # vstyle Spacing and Quality Regex Hoist Follow-up
 
-## Goal
-
-Preserve the historical benchmark evidence for the drafted `XY-101` spacing-and-quality follow-up lane.
-
-## Record Scope
-
-This record captures the archived broader regex-hoist baseline that now survives only as supporting
-evidence for the owning follow-up plan.
-
-## Assumptions
-
-- These measurements are point-in-time host-dependent evidence, not normative behavior.
-- The owning plan is `docs/plans/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`.
-
-## Steps
-
-1. Use this file only as historical evidence for the owning plan.
-2. Refresh the baseline from current `main` before resuming any future execution.
-
-## Status
-
-- Archived supporting record for a queued follow-up note.
-
 ## Scope
 
 Archived baseline for the drafted `XY-101` broader regex-hoist follow-up,

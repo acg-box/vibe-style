@@ -14,21 +14,6 @@ quality-side regex-hoist after the spacing-side work already landed elsewhere.
 - Keep Linear aligned around `XY-101` as a submitted but not yet executed
   follow-up lane.
 
-## Assumptions
-
-- The preserved benchmark note is historical evidence only and not a fresh acceptance baseline.
-- Any resumed work must stay limited to remaining quality-side regex helpers.
-
-## Steps
-
-1. Preserve the original benchmark evidence and scope boundaries.
-2. If resumed later, refresh the baseline from current `main`.
-3. Re-evaluate only the remaining quality-side checkpoint instead of reopening the broader experiment.
-
-## Status
-
-- Queued follow-up note. This remains a durable draft for possible future work, not an active lane.
-
 ## Non-goals
 
 - Reopening the closed `XY-90` runtime-acceleration wave as one monolithic lane.

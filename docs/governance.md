@@ -20,21 +20,15 @@ The split between `spec` and `guide` is by task shape, not by reader type.
 | --- | --- | --- | --- | --- |
 | Spec | `docs/spec/` | What must be true? | Contracts, schemas, invariants, required behavior | Any behavior or schema change |
 | Guide | `docs/guide/` | What should I do? | Runbooks, migrations, validation, troubleshooting | Any procedure or operational change |
-| Plan | `docs/plans/` | What are we considering or executing right now? | Temporary plans and exploratory notes | As needed; may drift |
-
-Supporting benchmark records may also live under `docs/benchmarks/` in this repository when a
-plan needs a durable evidence artifact. These records are subordinate to one owning plan, are not
-a fourth primary lane, and should use the plan-style header because they are execution records.
+| Plan artifacts | `docs/plans/` | Which saved plan artifact should a planning tool or execution workflow use? | Tool-managed planning outputs | As emitted or updated by the relevant tool |
 
 ## Placement rules
 
 - If a document defines correctness, it belongs in `docs/spec/`.
 - If a document defines actions, it belongs in `docs/guide/`.
-- If a document is temporary, exploratory, or expected to drift, it belongs in
-  `docs/plans/`.
-- If a dated benchmark note exists only to preserve execution evidence for a plan, it may live in
-  `docs/benchmarks/` and should be linked from that owning plan instead of routed as a primary
-  entrypoint.
+- Do not treat `docs/plans/` as a general-purpose docs bucket.
+- Use `docs/plans/` only for artifacts produced or consumed by planning tools or
+  workflows that explicitly depend on saved plan files.
 - Do not duplicate the same authoritative content across documents. Link to the source
   of truth instead.
 - A guide may summarize why a step exists, but normative statements still live in the
@@ -59,14 +53,6 @@ Guide header:
 - `Inputs` or `Preconditions`
 - `Depends on`
 - `Outputs` or `Verification`
-
-Plan header:
-
-- `Goal`
-- `Scope`
-- `Assumptions`
-- `Steps`
-- `Status`
 
 ## Structure rules
 
@@ -93,7 +79,8 @@ When answering a repository question:
    - "What must be true?" -> `docs/spec/index.md`
    - "What should I do?" -> `docs/guide/index.md`
 3. Read `Makefile.toml` when the task depends on repository automation or named tasks.
-4. Use `docs/plans/` only when the task explicitly concerns an in-flight plan or draft.
+4. Use `docs/plans/` only when the task explicitly concerns a saved plan artifact used by
+   a planning tool or execution workflow.
 
 ## Update workflow
 
@@ -103,3 +90,5 @@ When answering a repository question:
   boundary explicit.
 - When a guide starts carrying normative content, move that content into spec and link
   to it.
+- Do not impose local document-header requirements on files under `docs/plans/`; those
+  files are owned by the planning tool or workflow that created them.

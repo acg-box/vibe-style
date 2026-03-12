@@ -16,21 +16,6 @@ with a fresh before/after comparison.
 - Keep Linear aligned around `XY-99` and the existing runtime-acceleration
   project.
 
-## Assumptions
-
-- The checked-in self-host `final-release` benchmark remains the acceptance signal for this lane.
-- The change stays valuable only if it preserves behavior and holds up under repeated reruns.
-
-## Steps
-
-1. Refresh the post-`388f09e` release baseline.
-2. Hoist only the clearly reused static regexes in `src/style/spacing.rs`.
-3. Re-run repo-native gates and repeated release benchmarks before keeping the checkpoint.
-
-## Status
-
-- Done. The spacing regex-hoist checkpoint is landed and its evidence remains below.
-
 ## Non-goals
 
 - Changing spacing-rule semantics or expanding the lane into broader spacing-rule

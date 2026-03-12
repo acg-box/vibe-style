@@ -1,27 +1,5 @@
 # vstyle Spacing Regex Hoist
 
-## Goal
-
-Preserve the benchmark evidence for the narrowed `XY-99` spacing regex-hoist checkpoint.
-
-## Record Scope
-
-This record captures the fresh baseline and kept reruns for the owning spacing regex-hoist plan.
-
-## Assumptions
-
-- These measurements are point-in-time host-dependent evidence, not normative behavior.
-- The owning plan is `docs/plans/2026-03-12_vstyle-spacing-regex-hoist.md`.
-
-## Steps
-
-1. Use the recorded harness and verification commands to reproduce or compare this checkpoint.
-2. Read this file together with the owning plan instead of treating it as a primary routing entrypoint.
-
-## Status
-
-- Archived supporting record for the landed `XY-99` checkpoint.
-
 ## Scope
 
 Task 1 baseline for the narrowed `XY-99` follow-up lane. This records the fresh

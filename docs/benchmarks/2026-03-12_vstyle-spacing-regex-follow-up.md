@@ -1,28 +1,5 @@
 # vstyle Spacing Regex Runtime Follow-up
 
-## Goal
-
-Preserve the prototype benchmark evidence for the drafted `XY-100` spacing follow-up lane.
-
-## Record Scope
-
-This record captures prototype runs that remained historical evidence after the actual spacing
-checkpoint landed elsewhere.
-
-## Assumptions
-
-- These measurements are point-in-time host-dependent evidence, not normative behavior.
-- The owning plan is `docs/plans/2026-03-12_vstyle-spacing-regex-follow-up.md`.
-
-## Steps
-
-1. Use this file only to understand the drafted lane's historical evidence.
-2. Route current execution to the already-landed `XY-99` plan and benchmark instead.
-
-## Status
-
-- Archived supporting record for a closed draft lane.
-
 ## Scope
 
 Archived prototype notes for the drafted `XY-100` spacing follow-up. These runs

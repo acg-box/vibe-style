@@ -10,21 +10,6 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 - Optimize the highest-leverage runtime hot paths in `src/style.rs`, `src/style/imports.rs`, `src/style/module.rs`, `src/style/quality.rs`, `src/style/shared.rs`, and `src/style/semantic.rs`.
 - Keep the current Linear stream aligned with execution checkpoints: `XY-90` through `XY-97`.
 
-## Assumptions
-
-- Release-binary measurements remain the only acceptance signal for this lane.
-- The linked benchmark notes under `docs/benchmarks/` remain the supporting evidence for each kept checkpoint.
-
-## Steps
-
-1. Establish or refresh the release-only benchmark harness and baseline.
-2. Execute one narrow runtime checkpoint at a time against the hottest measured path.
-3. Re-run repo-native gates and release benchmarks before updating the plan state.
-
-## Status
-
-- Closed execution record. The main runtime wave is complete and only follow-up lanes remain queued elsewhere.
-
 ## Non-goals
 
 - Optimizing debug/profile-development timings as an end in itself.
