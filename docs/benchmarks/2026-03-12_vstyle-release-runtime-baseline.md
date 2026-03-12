@@ -120,3 +120,44 @@ baseline to repeated `2.89s` and `2.93s` runs.
 | --- | --- | ---: | ---: | ---: |
 | `vstyle curate --workspace` | `0` | `1.40` | `4.20` | `0.06` |
 | `vstyle tune --workspace --verbose` | `0` | `2.87` | `8.47` | `0.11` |
+
+## Post-Task-4 Checkpoint
+
+Task 4 introduced shared per-file import analysis so IMPORT-004/008/009/011 and cfg-test
+follow-up checks can reuse `use` runs, symbol maps, and qualified path maps instead of rebuilding
+the same AST-derived state repeatedly. On this host, end-to-end `tune` stayed within the existing
+Task 3 noise band, so this checkpoint is best treated as structural groundwork rather than a new
+runtime win.
+
+- Binary source state: local Task 4 working tree on top of `9b2d59e`
+- Benchmark workload commit: `9b2d59ef5e980791555c19f18f8e5a5c70f96a8d` (`9b2d59e`)
+
+### `final-release` rerun 1
+
+- Benchmark date (UTC): `2026-03-12T09:34:59Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T093459Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.40` | `4.09` | `0.05` |
+| `vstyle tune --workspace --verbose` | `0` | `2.98` | `8.51` | `0.11` |
+
+### `final-release` rerun 2
+
+- Benchmark date (UTC): `2026-03-12T09:36:40Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T093640Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.40` | `4.19` | `0.06` |
+| `vstyle tune --workspace --verbose` | `0` | `2.88` | `8.32` | `0.10` |
+
+### `final-release` rerun 3
+
+- Benchmark date (UTC): `2026-03-12T09:39:24Z`
+- Log directory: `/Users/xavier/code/trusted/y/hack-ink/vibe-style/.worktrees/vstyle-release-runtime-acceleration/target/vstyle-bench/20260312T093924Z-final-release`
+
+| Command | Exit | Real (s) | User (s) | Sys (s) |
+| --- | --- | ---: | ---: | ---: |
+| `vstyle curate --workspace` | `0` | `1.44` | `4.19` | `0.05` |
+| `vstyle tune --workspace --verbose` | `0` | `2.92` | `8.48` | `0.11` |

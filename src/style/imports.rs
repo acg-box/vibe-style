@@ -51,12 +51,31 @@ struct ImportedSymbolMaps {
 	full_paths_by_symbol: HashMap<String, HashSet<String>>,
 }
 
-struct Import009Context<'a> {
-	use_items: &'a [&'a TopItem],
-	maps: &'a ImportedSymbolMaps,
-	local_defined_symbols: &'a HashSet<String>,
-	qualified_type_paths_by_symbol: &'a HashMap<String, HashSet<String>>,
-	qualified_value_paths_by_symbol: &'a HashMap<String, HashSet<String>>,
+struct UseItemAnalysis<'a> {
+	item: &'a TopItem,
+	path: String,
+	imported_symbols: Vec<String>,
+	imported_symbol_set: HashSet<String>,
+	imported_self_full_paths: HashSet<String>,
+	imported_full_paths: Vec<String>,
+}
+
+struct ImportAnalysis<'a> {
+	use_runs: Vec<Vec<&'a TopItem>>,
+	use_item_analyses: Vec<UseItemAnalysis<'a>>,
+	use_item_analysis_by_key: HashMap<(usize, usize), usize>,
+	local_module_roots: HashSet<String>,
+	local_defined_symbols: HashSet<String>,
+	imported_symbol_maps: ImportedSymbolMaps,
+	qualified_type_paths_by_symbol: HashMap<String, HashSet<String>>,
+	qualified_value_paths_by_symbol: HashMap<String, HashSet<String>>,
+}
+impl<'a> ImportAnalysis<'a> {
+	fn use_item_analysis(&self, item: &TopItem) -> Option<&UseItemAnalysis<'a>> {
+		let idx = *self.use_item_analysis_by_key.get(&use_item_lock_key(item))?;
+
+		self.use_item_analyses.get(idx)
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -159,7 +178,7 @@ pub(crate) fn check_import_rules(
 		return;
 	}
 
-	let local_module_roots = collect_local_module_roots(ctx);
+	let analysis = build_import_analysis(ctx, use_runs, use_items);
 	let mut use_item_skip_lines = HashSet::new();
 
 	use_item_skip_lines.extend(import010_fixed_lines.iter().copied());
@@ -170,54 +189,27 @@ pub(crate) fn check_import_rules(
 		violations,
 		edits,
 		emit_edits,
-		&use_items,
+		&analysis.use_item_analyses,
 		&use_item_skip_lines,
 		with_import_shortening,
 	);
-	let imported_symbol_maps = collect_imported_symbol_maps(ctx, &use_items);
 
-	push_import004_ambiguous_symbol_violations(ctx, violations, &imported_symbol_maps);
+	push_import004_ambiguous_symbol_violations(ctx, violations, &analysis.imported_symbol_maps);
 
 	let import004_qualified_path_fixed_lines = apply_import004_qualified_function_path_rule(
 		ctx,
 		violations,
 		edits,
 		emit_edits,
-		&use_runs,
-		&local_module_roots,
-		&imported_symbol_maps.full_paths_by_symbol,
+		&analysis.use_runs,
+		&analysis.local_module_roots,
+		&analysis.imported_symbol_maps.full_paths_by_symbol,
 		true,
 	);
-	let local_defined_symbols = collect_local_defined_symbols(ctx);
-	let qualified_type_paths_by_symbol = collect_qualified_type_paths_by_symbol(ctx);
-	let qualified_value_paths_by_symbol = collect_qualified_value_paths_by_symbol(ctx);
-	let import009_ctx = Import009Context {
-		use_items: &use_items,
-		maps: &imported_symbol_maps,
-		local_defined_symbols: &local_defined_symbols,
-		qualified_type_paths_by_symbol: &qualified_type_paths_by_symbol,
-		qualified_value_paths_by_symbol: &qualified_value_paths_by_symbol,
-	};
-	let import009_fixed_lines = apply_import009_rules(
-		ctx,
-		violations,
-		edits,
-		emit_edits,
-		&import009_ctx,
-		&use_item_skip_lines,
-	);
-	let import008_group_skip_lines = apply_import008_rules(
-		ctx,
-		violations,
-		edits,
-		emit_edits,
-		&use_runs,
-		&local_module_roots,
-		&local_defined_symbols,
-		&imported_symbol_maps.full_paths_by_symbol,
-		&qualified_type_paths_by_symbol,
-		&qualified_value_paths_by_symbol,
-	);
+	let import009_fixed_lines =
+		apply_import009_rules(ctx, violations, edits, emit_edits, &analysis, &use_item_skip_lines);
+	let import008_group_skip_lines =
+		apply_import008_rules(ctx, violations, edits, emit_edits, &analysis);
 	let mut import_group_skip_lines = HashSet::new();
 
 	import_group_skip_lines.extend(import010_fixed_lines);
@@ -232,13 +224,13 @@ pub(crate) fn check_import_rules(
 		violations,
 		edits,
 		emit_edits,
-		&local_module_roots,
-		&local_defined_symbols,
-		&imported_symbol_maps.full_paths_by_symbol,
+		&analysis.local_module_roots,
+		&analysis.local_defined_symbols,
+		&analysis.imported_symbol_maps.full_paths_by_symbol,
 	);
 
 	let (planned_import_group_edits, fixable_import_group_lines) =
-		build_import_group_fix_plans(ctx, &use_runs, &import_group_skip_lines, &local_module_roots);
+		build_import_group_fix_plans(ctx, &analysis, &import_group_skip_lines);
 
 	if emit_edits {
 		edits.extend(planned_import_group_edits);
@@ -247,9 +239,9 @@ pub(crate) fn check_import_rules(
 	push_import_group_order_spacing_violations(
 		ctx,
 		violations,
-		&use_runs,
+		&analysis.use_runs,
 		&fixable_import_group_lines,
-		&local_module_roots,
+		&analysis.local_module_roots,
 	);
 	apply_import006_local_use_scope_rule(ctx, violations, edits, emit_edits);
 	check_cfg_test_module_import_rules(ctx, violations, edits, emit_edits);
@@ -294,6 +286,59 @@ pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeS
 		.collect::<BTreeSet<_>>();
 
 	Some(used)
+}
+
+fn build_import_analysis<'a>(
+	ctx: &FileContext,
+	use_runs: Vec<Vec<&'a TopItem>>,
+	use_items: Vec<&'a TopItem>,
+) -> ImportAnalysis<'a> {
+	let use_item_analyses = collect_use_item_analyses(ctx, &use_items);
+	let use_item_analysis_by_key = use_item_analyses
+		.iter()
+		.enumerate()
+		.map(|(idx, analysis)| (use_item_lock_key(analysis.item), idx))
+		.collect::<HashMap<_, _>>();
+
+	ImportAnalysis {
+		imported_symbol_maps: collect_imported_symbol_maps(&use_item_analyses),
+		local_defined_symbols: collect_local_defined_symbols(ctx),
+		local_module_roots: collect_local_module_roots(ctx),
+		qualified_type_paths_by_symbol: collect_qualified_type_paths_by_symbol(ctx),
+		qualified_value_paths_by_symbol: collect_qualified_value_paths_by_symbol(ctx),
+		use_item_analysis_by_key,
+		use_item_analyses,
+		use_runs,
+	}
+}
+
+fn collect_use_item_analyses<'a>(
+	ctx: &FileContext,
+	use_items: &[&'a TopItem],
+) -> Vec<UseItemAnalysis<'a>> {
+	let mut analyses = Vec::with_capacity(use_items.len());
+
+	for item in use_items {
+		let Some(path) = extract_use_path(ctx, item) else {
+			continue;
+		};
+		let imported_symbols = imported_symbols_from_use_path(&path);
+		let imported_symbol_set = imported_symbols
+			.iter()
+			.map(|symbol| normalize_ident(symbol).to_owned())
+			.collect::<HashSet<_>>();
+
+		analyses.push(UseItemAnalysis {
+			imported_full_paths: imported_full_paths_from_use_path(&path),
+			imported_self_full_paths: imported_self_full_paths_from_use_path(&path),
+			imported_symbol_set,
+			imported_symbols,
+			item,
+			path,
+		});
+	}
+
+	analyses
 }
 
 fn apply_import006_local_use_scope_rule(
@@ -496,7 +541,8 @@ fn import006_path_conflicts_in_target_scope(ctx: &FileContext, path: &str) -> bo
 
 	target_use_items.extend(collect_pub_use_runs(ctx).into_iter().flat_map(|run| run.into_iter()));
 
-	let target_maps = collect_imported_symbol_maps(ctx, &target_use_items);
+	let target_use_item_analyses = collect_use_item_analyses(ctx, &target_use_items);
+	let target_maps = collect_imported_symbol_maps(&target_use_item_analyses);
 	let local_defined_symbols = collect_local_defined_symbols(ctx);
 	let target_path = normalize_use_path_for_equivalence(path);
 
@@ -688,33 +734,32 @@ fn check_cfg_test_module_import_rules(
 
 		let use_runs = collect_non_pub_use_runs(&module_ctx);
 		let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
-		let use_item_skip_lines = collect_cfg_test_module_skip_lines(&module_ctx, &use_items);
+		let analysis = build_import_analysis(&module_ctx, use_runs, use_items);
+		let use_item_skip_lines = collect_cfg_test_module_skip_lines(&analysis.use_item_analyses);
 		let import004_fixed_lines = apply_use_item_rules(
 			&module_ctx,
 			&mut module_violations,
 			&mut module_edits,
 			emit_edits,
-			&use_items,
+			&analysis.use_item_analyses,
 			&use_item_skip_lines,
 			false,
 		);
-		let imported_symbol_maps = collect_imported_symbol_maps(&module_ctx, &use_items);
 
 		push_import004_ambiguous_symbol_violations(
 			&module_ctx,
 			&mut module_violations,
-			&imported_symbol_maps,
+			&analysis.imported_symbol_maps,
 		);
 
-		let local_module_roots = collect_local_module_roots(&module_ctx);
 		let import004_qualified_path_fixed_lines = apply_import004_qualified_function_path_rule(
 			&module_ctx,
 			&mut module_violations,
 			&mut module_edits,
 			emit_edits,
-			&use_runs,
-			&local_module_roots,
-			&imported_symbol_maps.full_paths_by_symbol,
+			&analysis.use_runs,
+			&analysis.local_module_roots,
+			&analysis.imported_symbol_maps.full_paths_by_symbol,
 			false,
 		);
 		let mut import_group_skip_lines = use_item_skip_lines;
@@ -722,12 +767,8 @@ fn check_cfg_test_module_import_rules(
 		import_group_skip_lines.extend(import004_fixed_lines);
 		import_group_skip_lines.extend(import004_qualified_path_fixed_lines);
 
-		let (planned_import_group_edits, fixable_import_group_lines) = build_import_group_fix_plans(
-			&module_ctx,
-			&use_runs,
-			&import_group_skip_lines,
-			&local_module_roots,
-		);
+		let (planned_import_group_edits, fixable_import_group_lines) =
+			build_import_group_fix_plans(&module_ctx, &analysis, &import_group_skip_lines);
 
 		if emit_edits {
 			module_edits.extend(planned_import_group_edits);
@@ -736,9 +777,9 @@ fn check_cfg_test_module_import_rules(
 		push_import_group_order_spacing_violations(
 			&module_ctx,
 			&mut module_violations,
-			&use_runs,
+			&analysis.use_runs,
 			&fixable_import_group_lines,
-			&local_module_roots,
+			&analysis.local_module_roots,
 		);
 
 		violations.extend(module_violations.into_iter().filter_map(|violation| {
@@ -777,20 +818,17 @@ fn item_list_body_text_range(item_list: &ast::ItemList) -> Option<(usize, usize)
 	if end <= start + 1 { None } else { Some((start + 1, end - 1)) }
 }
 
-fn collect_cfg_test_module_skip_lines(ctx: &FileContext, use_items: &[&TopItem]) -> HashSet<usize> {
+fn collect_cfg_test_module_skip_lines(use_item_analyses: &[UseItemAnalysis<'_>]) -> HashSet<usize> {
 	let mut skip_lines = HashSet::new();
 
-	for item in use_items {
-		let Some(path) = extract_use_path(ctx, item) else {
-			continue;
-		};
-		let compact_path = compact_path_for_match(&path);
+	for use_item_analysis in use_item_analyses {
+		let compact_path = compact_path_for_match(&use_item_analysis.path);
 
 		if compact_path.contains('*')
 			|| compact_path == "super"
 			|| compact_path.starts_with("super::")
 		{
-			skip_lines.insert(item.line);
+			skip_lines.insert(use_item_analysis.item.line);
 		}
 	}
 
@@ -846,7 +884,8 @@ fn cfg_test_module_has_follow_up_group_fix(ctx: &FileContext) -> bool {
 	}
 
 	let use_items = use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
-	let use_item_skip_lines = collect_cfg_test_module_skip_lines(ctx, &use_items);
+	let analysis = build_import_analysis(ctx, use_runs, use_items);
+	let use_item_skip_lines = collect_cfg_test_module_skip_lines(&analysis.use_item_analyses);
 	let mut probe_violations = Vec::new();
 	let mut probe_edits = Vec::new();
 
@@ -855,7 +894,7 @@ fn cfg_test_module_has_follow_up_group_fix(ctx: &FileContext) -> bool {
 		&mut probe_violations,
 		&mut probe_edits,
 		true,
-		&use_items,
+		&analysis.use_item_analyses,
 		&use_item_skip_lines,
 		false,
 	);
@@ -884,7 +923,9 @@ fn cfg_test_module_has_follow_up_group_fix(ctx: &FileContext) -> bool {
 
 	let next_use_items =
 		next_use_runs.iter().flat_map(|run| run.iter().copied()).collect::<Vec<_>>();
-	let next_use_item_skip_lines = collect_cfg_test_module_skip_lines(&next_ctx, &next_use_items);
+	let next_analysis = build_import_analysis(&next_ctx, next_use_runs, next_use_items);
+	let next_use_item_skip_lines =
+		collect_cfg_test_module_skip_lines(&next_analysis.use_item_analyses);
 	let mut next_probe_violations = Vec::new();
 	let mut next_probe_edits = Vec::new();
 	let next_import004_fixed_lines = apply_use_item_rules(
@@ -892,7 +933,7 @@ fn cfg_test_module_has_follow_up_group_fix(ctx: &FileContext) -> bool {
 		&mut next_probe_violations,
 		&mut next_probe_edits,
 		false,
-		&next_use_items,
+		&next_analysis.use_item_analyses,
 		&next_use_item_skip_lines,
 		false,
 	);
@@ -900,12 +941,8 @@ fn cfg_test_module_has_follow_up_group_fix(ctx: &FileContext) -> bool {
 
 	next_import_group_skip_lines.extend(next_import004_fixed_lines);
 
-	let (_planned_import_group_edits, fixable_import_group_lines) = build_import_group_fix_plans(
-		&next_ctx,
-		&next_use_runs,
-		&next_import_group_skip_lines,
-		&collect_local_module_roots(&next_ctx),
-	);
+	let (_planned_import_group_edits, fixable_import_group_lines) =
+		build_import_group_fix_plans(&next_ctx, &next_analysis, &next_import_group_skip_lines);
 
 	!fixable_import_group_lines.is_empty()
 }
@@ -1501,30 +1538,29 @@ fn apply_use_item_rules(
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
-	use_items: &[&TopItem],
+	use_item_analyses: &[UseItemAnalysis<'_>],
 	skip_lines: &HashSet<usize>,
 	with_import_shortening: bool,
 ) -> HashSet<usize> {
 	let mut import004_fixed_lines = HashSet::new();
 
-	for item in use_items {
+	for use_item_analysis in use_item_analyses {
+		let item = use_item_analysis.item;
+
 		if skip_lines.contains(&item.line) {
 			continue;
 		}
 
-		let Some(path) = extract_use_path(ctx, item) else {
-			continue;
-		};
+		let path = &use_item_analysis.path;
 
 		if with_import_shortening {
-			if apply_import009_std_fmt_result_rule(ctx, violations, edits, emit_edits, item, &path)
-			{
+			if apply_import009_std_fmt_result_rule(ctx, violations, edits, emit_edits, item, path) {
 				import004_fixed_lines.insert(item.line);
 
 				continue;
 			}
 			if apply_import009_non_importable_root_use_rule(
-				ctx, violations, edits, emit_edits, item, &path,
+				ctx, violations, edits, emit_edits, item, path,
 			) {
 				import004_fixed_lines.insert(item.line);
 
@@ -1532,26 +1568,25 @@ fn apply_use_item_rules(
 			}
 		}
 
-		apply_import002_normalization_rule(ctx, violations, edits, emit_edits, item, &path);
+		apply_import002_normalization_rule(ctx, violations, edits, emit_edits, item, path);
 
 		let mut alias_rule_applied = false;
 
-		if apply_import003_trait_keep_alive_rule(ctx, violations, edits, emit_edits, item, &path) {
+		if apply_import003_trait_keep_alive_rule(ctx, violations, edits, emit_edits, item, path) {
 			import004_fixed_lines.insert(item.line);
 
 			alias_rule_applied = true;
 		}
-		if apply_import003_non_keep_alive_alias_rule(
-			ctx, violations, edits, emit_edits, item, &path,
-		) {
+		if apply_import003_non_keep_alive_alias_rule(ctx, violations, edits, emit_edits, item, path)
+		{
 			import004_fixed_lines.insert(item.line);
 
 			alias_rule_applied = true;
 		}
 		if !alias_rule_applied {
-			push_alias_violation_if_needed(ctx, violations, item, &path);
+			push_alias_violation_if_needed(ctx, violations, item, path);
 		}
-		if apply_import004_free_fn_macro_rule(ctx, violations, edits, emit_edits, item, &path) {
+		if apply_import004_free_fn_macro_rule(ctx, violations, edits, emit_edits, item, path) {
 			import004_fixed_lines.insert(item.line);
 		}
 	}
@@ -2668,36 +2703,32 @@ fn is_local_macro_defined(ctx: &FileContext, symbol: &str) -> bool {
 	})
 }
 
-fn collect_imported_symbol_maps(ctx: &FileContext, use_items: &[&TopItem]) -> ImportedSymbolMaps {
+fn collect_imported_symbol_maps(use_item_analyses: &[UseItemAnalysis<'_>]) -> ImportedSymbolMaps {
 	let mut maps = ImportedSymbolMaps::default();
 
-	for item in use_items {
-		let Some(path) = extract_use_path(ctx, item) else {
-			continue;
-		};
-		let imported_symbols = imported_symbols_from_use_path(&path);
-		let imported_symbol_set = imported_symbols
-			.iter()
-			.map(|symbol| normalize_ident(symbol).to_owned())
-			.collect::<HashSet<_>>();
-		let imported_self_full_paths = imported_self_full_paths_from_use_path(&path);
-
-		for symbol in imported_symbols {
-			maps.symbol_paths.entry(symbol.clone()).or_default().insert(path.clone());
-			maps.symbol_lines.entry(symbol).or_default().insert(item.line);
+	for use_item_analysis in use_item_analyses {
+		for symbol in &use_item_analysis.imported_symbols {
+			maps.symbol_paths
+				.entry(symbol.clone())
+				.or_default()
+				.insert(use_item_analysis.path.clone());
+			maps.symbol_lines
+				.entry(symbol.clone())
+				.or_default()
+				.insert(use_item_analysis.item.line);
 		}
-		for full_path in imported_full_paths_from_use_path(&path) {
-			let Some(symbol) = symbol_from_full_import_path(&full_path) else {
+		for full_path in &use_item_analysis.imported_full_paths {
+			let Some(symbol) = symbol_from_full_import_path(full_path) else {
 				continue;
 			};
 
-			if !imported_symbol_set.contains(normalize_ident(&symbol))
-				&& !imported_self_full_paths.contains(&full_path)
+			if !use_item_analysis.imported_symbol_set.contains(normalize_ident(&symbol))
+				&& !use_item_analysis.imported_self_full_paths.contains(full_path)
 			{
 				continue;
 			}
 
-			maps.full_paths_by_symbol.entry(symbol).or_default().insert(full_path);
+			maps.full_paths_by_symbol.entry(symbol).or_default().insert(full_path.clone());
 		}
 	}
 
@@ -2748,22 +2779,22 @@ fn apply_import009_rules(
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
-	import009_ctx: &Import009Context<'_>,
+	analysis: &ImportAnalysis<'_>,
 	skip_lines: &HashSet<usize>,
 ) -> HashSet<usize> {
 	let mut import009_fixed_lines = HashSet::new();
 	let mut locked_use_ranges = HashSet::new();
 
-	for (symbol, imported_paths) in &import009_ctx.maps.full_paths_by_symbol {
-		if import009_ctx
-			.maps
+	for (symbol, imported_paths) in &analysis.imported_symbol_maps.full_paths_by_symbol {
+		if analysis
+			.imported_symbol_maps
 			.symbol_lines
 			.get(symbol)
 			.is_some_and(|lines| lines.iter().any(|line| skip_lines.contains(line)))
 		{
 			continue;
 		}
-		if imported_paths.len() != 1 || import009_ctx.local_defined_symbols.contains(symbol) {
+		if imported_paths.len() != 1 || analysis.local_defined_symbols.contains(symbol) {
 			continue;
 		}
 
@@ -2772,17 +2803,21 @@ fn apply_import009_rules(
 		};
 		let Some((fixable, type_rewrites, value_rewrites, use_item_plans)) = build_import009_plan(
 			ctx,
-			import009_ctx.use_items,
+			&analysis.use_item_analyses,
 			symbol,
 			&imported_path,
-			import009_ctx.qualified_type_paths_by_symbol,
-			import009_ctx.qualified_value_paths_by_symbol,
+			&analysis.qualified_type_paths_by_symbol,
+			&analysis.qualified_value_paths_by_symbol,
 		) else {
 			continue;
 		};
 
-		for line in
-			import009_ctx.maps.symbol_lines.get(symbol).into_iter().flat_map(|lines| lines.iter())
+		for line in analysis
+			.imported_symbol_maps
+			.symbol_lines
+			.get(symbol)
+			.into_iter()
+			.flat_map(|lines| lines.iter())
 		{
 			shared::push_violation(
 				violations,
@@ -2845,7 +2880,7 @@ fn apply_import009_rules(
 
 fn build_import009_plan<'a>(
 	ctx: &FileContext,
-	use_items: &'a [&'a TopItem],
+	use_item_analyses: &'a [UseItemAnalysis<'a>],
 	symbol: &str,
 	imported_path: &str,
 	qualified_type_paths_by_symbol: &HashMap<String, HashSet<String>>,
@@ -2944,23 +2979,24 @@ fn build_import009_plan<'a>(
 	let mut use_item_plans = Vec::new();
 	let mut fixable = true;
 
-	for item in use_items {
-		let Some(path) = extract_use_path(ctx, item) else {
-			continue;
-		};
-
-		if !use_item_imports_symbol_path(&path, symbol, imported_path) {
+	for use_item_analysis in use_item_analyses {
+		if !use_item_imports_symbol_path(&use_item_analysis.path, symbol, imported_path) {
 			continue;
 		}
 
-		let removal_fix_plan = import004_free_fn_fix_plan(ctx, item, &path, symbol);
+		let removal_fix_plan = import004_free_fn_fix_plan(
+			ctx,
+			use_item_analysis.item,
+			&use_item_analysis.path,
+			symbol,
+		);
 		let Some((qualified_symbol_path, rewritten_use_path)) = removal_fix_plan else {
 			fixable = false;
 
 			break;
 		};
 
-		use_item_plans.push((*item, qualified_symbol_path, rewritten_use_path));
+		use_item_plans.push((use_item_analysis.item, qualified_symbol_path, rewritten_use_path));
 	}
 
 	if use_item_plans.is_empty() {
@@ -3059,22 +3095,19 @@ fn apply_import008_rules(
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
-	use_runs: &[Vec<&TopItem>],
-	local_module_roots: &HashSet<String>,
-	local_defined_symbols: &HashSet<String>,
-	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
-	qualified_type_paths_by_symbol: &HashMap<String, HashSet<String>>,
-	qualified_value_paths_by_symbol: &HashMap<String, HashSet<String>>,
+	analysis: &ImportAnalysis<'_>,
 ) -> HashSet<usize> {
 	let import008_candidates = collect_import008_candidates(ctx);
-	let import008_use_recovery_candidates =
-		collect_import008_use_recovery_candidates(ctx, use_runs, imported_full_paths_by_symbol);
+	let import008_use_recovery_candidates = collect_import008_use_recovery_candidates(
+		&analysis.use_item_analyses,
+		&analysis.imported_symbol_maps.full_paths_by_symbol,
+	);
 	let blocked_symbols = build_import008_blocked_symbols(
 		&import008_candidates,
-		imported_full_paths_by_symbol,
-		local_defined_symbols,
-		qualified_type_paths_by_symbol,
-		qualified_value_paths_by_symbol,
+		&analysis.imported_symbol_maps.full_paths_by_symbol,
+		&analysis.local_defined_symbols,
+		&analysis.qualified_type_paths_by_symbol,
+		&analysis.qualified_value_paths_by_symbol,
 	);
 	let mut pending_import_paths = BTreeSet::new();
 	let mut import008_group_skip_lines = HashSet::new();
@@ -3086,7 +3119,7 @@ fn apply_import008_rules(
 		emit_edits,
 		&import008_candidates,
 		&blocked_symbols,
-		imported_full_paths_by_symbol,
+		&analysis.imported_symbol_maps.full_paths_by_symbol,
 		&mut pending_import_paths,
 		&mut import008_group_skip_lines,
 	);
@@ -3097,8 +3130,8 @@ fn apply_import008_rules(
 		emit_edits,
 		&import008_use_recovery_candidates,
 		&blocked_symbols,
-		local_defined_symbols,
-		imported_full_paths_by_symbol,
+		&analysis.local_defined_symbols,
+		&analysis.imported_symbol_maps.full_paths_by_symbol,
 		&mut pending_import_paths,
 		&mut import008_group_skip_lines,
 	);
@@ -3107,10 +3140,10 @@ fn apply_import008_rules(
 		import008_group_skip_lines.extend(apply_pending_module_import_path_edits(
 			ctx,
 			edits,
-			use_runs,
-			local_module_roots,
+			&analysis.use_runs,
+			&analysis.local_module_roots,
 			&pending_import_paths,
-			imported_full_paths_by_symbol,
+			&analysis.imported_symbol_maps.full_paths_by_symbol,
 			"RUST-STYLE-IMPORT-008",
 		));
 	}
@@ -3271,17 +3304,13 @@ fn apply_import008_use_recovery_edits(
 }
 
 fn collect_import008_use_recovery_candidates(
-	ctx: &FileContext,
-	use_runs: &[Vec<&TopItem>],
+	use_item_analyses: &[UseItemAnalysis<'_>],
 	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
 ) -> Vec<Import008UseRecoveryCandidate> {
 	let mut candidates = Vec::new();
 
-	for item in use_runs.iter().flat_map(|run| run.iter().copied()) {
-		let Some(path) = extract_use_path(ctx, item) else {
-			continue;
-		};
-		let Some((prefix, symbol)) = simple_import_prefix_symbol(&path) else {
+	for use_item_analysis in use_item_analyses {
+		let Some((prefix, symbol)) = simple_import_prefix_symbol(&use_item_analysis.path) else {
 			continue;
 		};
 
@@ -3314,7 +3343,7 @@ fn collect_import008_use_recovery_candidates(
 		}
 
 		let import_path = format!("{root_full}::{symbol}");
-		let current_compact = compact_path_for_match(&path);
+		let current_compact = compact_path_for_match(&use_item_analysis.path);
 		let import_path_compact = compact_path_for_match(&import_path);
 
 		if let Some(existing_symbol_paths) = imported_full_paths_by_symbol.get(&symbol_normalized)
@@ -3327,9 +3356,9 @@ fn collect_import008_use_recovery_candidates(
 		}
 
 		candidates.push(Import008UseRecoveryCandidate {
-			line: item.line,
-			start_line: item.start_line,
-			end_line: item.end_line,
+			line: use_item_analysis.item.line,
+			start_line: use_item_analysis.item.start_line,
+			end_line: use_item_analysis.item.end_line,
 			symbol: symbol_normalized,
 			import_path,
 		});
@@ -7246,14 +7275,13 @@ fn run_text_range(ctx: &FileContext, first: &TopItem, last: &TopItem) -> Option<
 
 fn build_import_group_fix_plans(
 	ctx: &FileContext,
-	use_runs: &[Vec<&TopItem>],
+	analysis: &ImportAnalysis<'_>,
 	skip_lines: &HashSet<usize>,
-	local_module_roots: &HashSet<String>,
 ) -> (Vec<Edit>, HashSet<usize>) {
 	let mut planned_edits = Vec::new();
 	let mut fixable_lines = HashSet::new();
 
-	for run in use_runs {
+	for run in &analysis.use_runs {
 		if !is_use_run_rewrite_candidate(run, skip_lines) {
 			continue;
 		}
@@ -7261,7 +7289,7 @@ fn build_import_group_fix_plans(
 			continue;
 		}
 
-		let Some(entries) = collect_use_run_entries(ctx, run, local_module_roots) else {
+		let Some(entries) = collect_use_run_entries(ctx, run, analysis) else {
 			continue;
 		};
 		let Some((run_start, run_end)) = run_text_range(ctx, run[0], run[run.len() - 1]) else {
@@ -7304,19 +7332,19 @@ fn use_run_has_blank_only_separators(ctx: &FileContext, run: &[&TopItem]) -> boo
 fn collect_use_run_entries<'a>(
 	ctx: &'a FileContext,
 	run: &'a [&'a TopItem],
-	local_module_roots: &HashSet<String>,
+	analysis: &'a ImportAnalysis<'a>,
 ) -> Option<Vec<UseEntry<'a>>> {
 	let mut entries = Vec::with_capacity(run.len());
 
 	for (order, item) in run.iter().enumerate() {
-		let path = extract_use_path(ctx, item)?;
+		let use_item_analysis = analysis.use_item_analysis(item)?;
 		let (start, end) = item_text_range(ctx, item)?;
 		let block = ctx.text.get(start..end)?;
 		let normalized_block = normalize_use_item_block(block)?;
 
 		entries.push(UseEntry {
 			item,
-			origin: use_origin(&path, local_module_roots),
+			origin: use_origin(&use_item_analysis.path, &analysis.local_module_roots),
 			order,
 			block: normalized_block,
 		});

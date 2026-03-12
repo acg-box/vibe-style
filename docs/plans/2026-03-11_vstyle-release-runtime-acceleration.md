@@ -32,7 +32,7 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 ## Execution State
 
 - Last Updated: 2026-03-12
-- Next Checkpoint: Task 4
+- Next Checkpoint: Task 5
 - Blockers: None.
 
 ## Decision Notes
@@ -44,6 +44,7 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 - 2026-03-12: Current live runtime executes directly with optional read-only sidecars; Task 1 resumed in the existing isolated worktree after stale Builder-only routing proved inapplicable to the live environment.
 - 2026-03-12: Task 2 landed the low-risk lazy-fallback and reduced-string-churn cleanup. On this host, two immediate `final-release` reruns stayed near baseline (`4.38s` and `4.32s` tune vs `4.35s` initial baseline), so Task 3 remains the next higher-leverage checkpoint.
 - 2026-03-12: Task 3 replaced intermediate full-workspace rechecks with incremental per-file refreshes plus a final full pass. On this host, repeated `final-release` reruns dropped `tune` from the `4.35s` baseline to `2.89s`, `2.93s`, and `2.87s`, so the fix engine checkpoint is materially successful and Task 4 is now the next runtime target.
+- 2026-03-12: Task 4 collapsed repeated import-rule analysis into shared per-file state across import rules and cfg-test follow-up scans. On this host, `final-release` reruns landed at `2.98s`, `2.88s`, and `2.92s` tune, which stays inside the prior `2.87s` to `2.93s` band, so the checkpoint is structurally complete but runtime-neutral and Task 5 is now the next target.
 
 ## Implementation Outline
 
@@ -176,7 +177,7 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
