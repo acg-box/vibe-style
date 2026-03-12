@@ -20,6 +20,60 @@ static STRUCT_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
 	Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*.+,?$")
 		.expect("Compile struct field detection regex.")
 });
+static UFCS_FUNCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^(?P<func>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
+		.expect("Compile UFCS function extraction regex.")
+});
+static LET_STATEMENT_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"^let\b").expect("Compile let-statement classification regex."));
+static IF_LET_STATEMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^if\s+let\b").expect("Compile if-let statement classification regex.")
+});
+static IF_STATEMENT_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"^if\b").expect("Compile if-statement classification regex."));
+static MATCH_STATEMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^match\b").expect("Compile match-statement classification regex.")
+});
+static FOR_STATEMENT_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"^for\b").expect("Compile for-loop classification regex."));
+static WHILE_STATEMENT_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"^while\b").expect("Compile while-loop classification regex."));
+static LOOP_STATEMENT_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"^loop\b").expect("Compile loop classification regex."));
+static TRY_EXPRESSION_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\.await)?\?\s*;?$")
+		.expect("Compile try-expression classification regex.")
+});
+static MACRO_INVOCATION_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^(?P<name>[A-Za-z_][A-Za-z0-9_:]*)!\s*\(")
+		.expect("Compile macro invocation classification regex.")
+});
+static QUALIFIED_PATH_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^(?P<target>[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*\(")
+		.expect("Compile qualified path call classification regex.")
+});
+static DIRECT_FUNCTION_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^(?P<target>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
+		.expect("Compile direct function call classification regex.")
+});
+static METHOD_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^[^;]*\.(?P<method>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
+		.expect("Compile method call classification regex.")
+});
+static STATEMENT_TOKEN_SPLIT_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"[\s({;]").expect("Compile statement token split regex."));
+static RETURN_STATEMENT_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"^return\b").expect("Compile return statement detection regex."));
+static ITEM_LIKE_STATEMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(
+		r"^(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*(?:fn|struct|enum|impl|trait|type|use|mod|static|const|macro_rules!|macro)\b",
+	)
+	.expect("Compile item-like statement detection regex.")
+});
+static CONST_GROUP_STATEMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?(?:const|static(?:\s+mut)?)\b")
+		.expect("Compile const/static statement detection regex.")
+});
 
 #[derive(Clone, Copy, Debug, Default)]
 struct CodeMaskState {
@@ -810,9 +864,7 @@ fn parse_ufcs_target_call(text: &str) -> Option<(String, String)> {
 
 	rest = &rest[2..];
 
-	let fn_match = Regex::new(r"^(?P<func>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
-		.expect("Compile UFCS function extraction regex.")
-		.captures(rest)?;
+	let fn_match = UFCS_FUNCTION_RE.captures(rest)?;
 	let func = fn_match.name("func")?.as_str().to_owned();
 	let target = if let Some((_, right)) = body.split_once(" as ") {
 		right.trim().to_owned()
@@ -875,45 +927,32 @@ fn classify_statement_type(statement_lines: &[String]) -> String {
 
 	let first = normalized.as_str();
 
-	if Regex::new(r"^let\b").expect("Compile let-statement classification regex.").is_match(first) {
+	if LET_STATEMENT_RE.is_match(first) {
 		return "let".to_owned();
 	}
-	if Regex::new(r"^if\s+let\b")
-		.expect("Compile if-let statement classification regex.")
-		.is_match(first)
-	{
+	if IF_LET_STATEMENT_RE.is_match(first) {
 		return "if-let".to_owned();
 	}
-	if Regex::new(r"^if\b").expect("Compile if-statement classification regex.").is_match(first) {
+	if IF_STATEMENT_RE.is_match(first) {
 		return "if".to_owned();
 	}
-	if Regex::new(r"^match\b")
-		.expect("Compile match-statement classification regex.")
-		.is_match(first)
-	{
+	if MATCH_STATEMENT_RE.is_match(first) {
 		return "match".to_owned();
 	}
-	if Regex::new(r"^for\b").expect("Compile for-loop classification regex.").is_match(first) {
+	if FOR_STATEMENT_RE.is_match(first) {
 		return "for".to_owned();
 	}
-	if Regex::new(r"^while\b").expect("Compile while-loop classification regex.").is_match(first) {
+	if WHILE_STATEMENT_RE.is_match(first) {
 		return "while".to_owned();
 	}
-	if Regex::new(r"^loop\b").expect("Compile loop classification regex.").is_match(first) {
+	if LOOP_STATEMENT_RE.is_match(first) {
 		return "loop".to_owned();
 	}
-	if Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\.await)?\?\s*;?$")
-		.expect("Compile try-expression classification regex.")
-		.is_match(first)
-	{
+	if TRY_EXPRESSION_RE.is_match(first) {
 		return "try-expr".to_owned();
 	}
-	if Regex::new(r"^(?P<name>[A-Za-z_][A-Za-z0-9_:]*)!\s*\(")
-		.expect("Compile macro invocation classification regex.")
-		.is_match(first)
-	{
-		let macro_name = Regex::new(r"^(?P<name>[A-Za-z_][A-Za-z0-9_:]*)!\s*\(")
-			.expect("Compile macro name extraction regex.")
+	if MACRO_INVOCATION_RE.is_match(first) {
+		let macro_name = MACRO_INVOCATION_RE
 			.captures(first)
 			.and_then(|caps| caps.name("name"))
 			.map(|value| value.as_str().to_owned())
@@ -931,30 +970,17 @@ fn classify_statement_type(statement_lines: &[String]) -> String {
 	if parse_ufcs_target_call(first).is_some() {
 		return "path-call".to_owned();
 	}
-	if Regex::new(r"^(?P<target>[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*\(")
-		.expect("Compile qualified path call classification regex.")
-		.is_match(first)
-	{
+	if QUALIFIED_PATH_CALL_RE.is_match(first) {
 		return "path-call".to_owned();
 	}
-	if Regex::new(r"^(?P<target>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
-		.expect("Compile direct function call classification regex.")
-		.is_match(first)
-	{
+	if DIRECT_FUNCTION_CALL_RE.is_match(first) {
 		return "call".to_owned();
 	}
-	if Regex::new(r"^[^;]*\.(?P<method>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
-		.expect("Compile method call classification regex.")
-		.is_match(first)
-	{
+	if METHOD_CALL_RE.is_match(first) {
 		return "method".to_owned();
 	}
 
-	let token = Regex::new(r"[\s({;]")
-		.expect("Compile statement token split regex.")
-		.split(first)
-		.next()
-		.unwrap_or_default();
+	let token = STATEMENT_TOKEN_SPLIT_RE.split(first).next().unwrap_or_default();
 
 	if token.is_empty() { "other".to_owned() } else { format!("shape:{token}") }
 }
@@ -1091,8 +1117,7 @@ fn is_return_or_tail_statement(statement_lines: &[String]) -> bool {
 		return false;
 	};
 
-	if Regex::new(r"^return\b").expect("Compile return statement detection regex.").is_match(&first)
-	{
+	if RETURN_STATEMENT_RE.is_match(&first) {
 		return true;
 	}
 
@@ -1100,10 +1125,7 @@ fn is_return_or_tail_statement(statement_lines: &[String]) -> bool {
 		return false;
 	};
 
-	if Regex::new(r"^return\b")
-		.expect("Compile trailing return statement detection regex.")
-		.is_match(&last)
-	{
+	if RETURN_STATEMENT_RE.is_match(&last) {
 		return true;
 	}
 	if last.ends_with(';')
@@ -1119,11 +1141,7 @@ fn is_return_or_tail_statement(statement_lines: &[String]) -> bool {
 
 fn is_explicit_return_statement(statement_lines: &[String]) -> bool {
 	first_significant_statement_line(statement_lines)
-		.map(|first| {
-			Regex::new(r"^return\b")
-				.expect("Compile explicit return statement detection regex.")
-				.is_match(&first)
-		})
+		.map(|first| RETURN_STATEMENT_RE.is_match(&first))
 		.unwrap_or(false)
 }
 
@@ -1261,11 +1279,7 @@ fn is_item_like_statement(statement_lines: &[String]) -> bool {
 		return false;
 	};
 
-	Regex::new(
-		r"^(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*(?:fn|struct|enum|impl|trait|type|use|mod|static|const|macro_rules!|macro)\b",
-	)
-	.expect("Compile item-like statement detection regex.")
-	.is_match(first.trim())
+	ITEM_LIKE_STATEMENT_RE.is_match(first.trim())
 }
 
 fn is_pipe_pattern_continuation_statement(statement_lines: &[String]) -> bool {
@@ -1279,9 +1293,7 @@ fn is_const_group_statement(statement_lines: &[String]) -> bool {
 		return false;
 	};
 
-	Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?(?:const|static(?:\s+mut)?)\b")
-		.expect("Compile const/static statement detection regex.")
-		.is_match(first.trim())
+	CONST_GROUP_STATEMENT_RE.is_match(first.trim())
 }
 
 fn item_between_replacement_with_single_blank(
