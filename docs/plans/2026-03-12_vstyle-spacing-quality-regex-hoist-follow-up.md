@@ -9,10 +9,10 @@ quality-side regex-hoist after the spacing-side work already landed elsewhere.
 
 - Preserve the original `388f09e` baseline for this broader regex-hoist idea.
 - Record that the spacing-side regex-hoist was satisfied by `bb4fae5`.
-- If resumed, limit code changes to remaining `src/style/quality.rs` fixed-regex
-  helpers and refresh the release baseline from current `main` first.
-- Keep Linear aligned around `XY-101` as a submitted but not yet executed
-  follow-up lane.
+- Record the resumed `2026-03-13` evaluation of the remaining
+  `src/style/quality.rs` fixed-regex helper.
+- Keep Linear aligned around `XY-101` as an evaluated lane that closes without
+  a retained code delta.
 
 ## Non-goals
 
@@ -31,14 +31,12 @@ quality-side regex-hoist after the spacing-side work already landed elsewhere.
 
 ## Open Questions
 
-- After the spacing-side win in `bb4fae5`, does the remaining
-  `quality.rs::has_structured_fields` regex-hoist still show enough release-path
-  cost to justify a separate checkpoint?
+- None.
 
 ## Execution State
 
-- Last Updated: 2026-03-12
-- Next Checkpoint: Task 2.
+- Last Updated: 2026-03-13
+- Next Checkpoint: None.
 - Blockers: None.
 
 ## Decision Notes
@@ -46,15 +44,18 @@ quality-side regex-hoist after the spacing-side work already landed elsewhere.
 - `XY-101` was drafted as a broader spacing-plus-quality follow-up while the
   spacing regex-hoist was still under evaluation.
 - The spacing portion is now already covered by `bb4fae5` / `XY-99`.
-- This plan therefore remains useful only as a durable note for the still-open
-  quality-side question.
+- On `2026-03-13`, the lane was resumed on current `main` with a fresh
+  `curate 0.73s` / `tune 1.42s` baseline and a local `quality.rs`
+  `has_structured_fields()` regex-hoist candidate.
+- That candidate measured slower than the fresh baseline (`tune 1.47s` and
+  `1.46s` on two reruns), so the code change was reverted and the lane closes as
+  not worth keeping.
 
 ## Implementation Outline
 
-Keep the baseline and scope notes, but narrow any resumed execution to
-`src/style/quality.rs`. If this lane resumes, start with a fresh release
-baseline from current `main`, then decide whether the remaining fixed-regex
-setup in `quality.rs` is still worth a dedicated checkpoint.
+Keep the baseline, resumed measurements, and decision notes as durable history.
+The only remaining direct quality-side regex-hoist candidate was measured and
+rejected, so no further execution remains in this lane.
 
 ## Task 1: Record baseline and isolate the checkpoint (`XY-101`)
 
@@ -99,12 +100,13 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
-If resumed, `XY-101` will evaluate only the remaining `quality.rs` fixed-regex
-helpers against a fresh post-`bb4fae5` release baseline.
+`XY-101` evaluated the remaining `quality.rs` fixed-regex helper against a
+fresh current-main baseline and found no keepable win, so the code change was
+reverted.
 
 **Files**
 
@@ -113,9 +115,10 @@ helpers against a fresh post-`bb4fae5` release baseline.
 
 **Changes**
 
-1. Rebaseline from current `main` before editing.
-2. Limit candidate changes to remaining fixed-regex helpers in `quality.rs`.
-3. Keep spacing-side code out of scope because it is already landed.
+1. Rebaselined from current `main` before editing.
+2. Limited the candidate change to `quality.rs::has_structured_fields()`.
+3. Reverted the code change after two post-patch reruns failed to beat the
+   fresh baseline.
 
 **Verification**
 
@@ -136,11 +139,11 @@ Executor
 
 **Status**
 
-pending
+done
 
 **Outcome**
 
-The lane will end at a clean keep-vs-requeue boundary with docs, Linear, and git
+The lane now ends at a clean "do not keep" boundary with docs, Linear, and git
 state aligned.
 
 **Files**
@@ -150,10 +153,10 @@ state aligned.
 
 **Changes**
 
-1. Re-run the self-host release benchmark against a fresh post-`bb4fae5`
-   baseline.
-2. Record whether any `quality.rs` checkpoint is kept or re-queued.
-3. Sync `XY-101` with the measured outcome.
+1. Re-ran the self-host release benchmark against fresh current-main baseline
+   and post-patch code.
+2. Recorded that no `quality.rs` checkpoint is kept.
+3. Synced `XY-101` to a closed non-retained outcome.
 
 **Verification**
 
@@ -166,7 +169,5 @@ state aligned.
 
 ## Suggested Execution
 
-- Sequential: Task 1 is already archived, Task 2 becomes the next decision
-  point if this lane resumes, and Task 3 closes the lane.
-- Parallelizable: None. Any resumed code checkpoint still shares one release
-  benchmark acceptance path.
+- Sequential: None. The lane is closed.
+- Parallelizable: None.
