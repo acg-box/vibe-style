@@ -130,6 +130,17 @@ pub(crate) fn run_fix(
 	let (initial_checked, mut check_state) = run_check_with_state(cargo_options)?;
 	let mut total_applied = 0_usize;
 	let mut previous_fixable_count = check_state.fixable_count();
+
+	if should_skip_tune_rounds(previous_fixable_count) {
+		if progress {
+			eprintln!(
+				"vstyle tune: initial scan found no fixable violations; skipping fix rounds."
+			);
+		}
+
+		return Ok(initial_checked);
+	}
+
 	let mut non_decreasing_rounds = 0_usize;
 
 	for round in 0..MAX_TUNE_ROUNDS {
@@ -278,6 +289,10 @@ fn should_stop_tune_round(
 	}
 
 	(false, next_non_decreasing_rounds)
+}
+
+fn should_skip_tune_rounds(initial_fixable_count: usize) -> bool {
+	initial_fixable_count == 0
 }
 
 fn resolve_fix_round_scopes(cargo_options: &CargoOptions) -> Result<Vec<FixRoundScope>> {
@@ -7656,6 +7671,16 @@ fn sample() {
 
 		assert!(should_stop);
 		assert_eq!(non_decreasing_rounds, 1);
+	}
+
+	#[test]
+	fn should_skip_tune_rounds_when_initial_scan_has_no_fixable_violations() {
+		assert!(super::should_skip_tune_rounds(0));
+	}
+
+	#[test]
+	fn should_not_skip_tune_rounds_when_fixable_violations_remain() {
+		assert!(!super::should_skip_tune_rounds(1));
 	}
 
 	#[test]
