@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ra_ap_syntax::{
 	AstNode,
-	ast::{self, HasAttrs},
+	ast::{HasAttrs, MacroCall, Path, RecordField, Use},
 };
 
 use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
@@ -26,7 +26,7 @@ pub(crate) fn check_serde_option_default(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
-	for field in ctx.source_file.syntax().descendants().filter_map(ast::RecordField::cast) {
+	for field in ctx.source_file.syntax().descendants().filter_map(RecordField::cast) {
 		let Some(ty) = field.ty() else {
 			continue;
 		};
@@ -364,11 +364,11 @@ fn unqualified_path_rewrites(
 ) -> Vec<(usize, usize, String)> {
 	let mut rewrites = Vec::new();
 
-	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+	for path in ctx.source_file.syntax().descendants().filter_map(Path::cast) {
 		if path.qualifier().is_some() {
 			continue;
 		}
-		if path.syntax().ancestors().any(|node| ast::Use::cast(node).is_some()) {
+		if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
 			continue;
 		}
 
@@ -404,7 +404,7 @@ fn unqualified_macro_call_rewrites(
 ) -> Vec<(usize, usize, String)> {
 	let mut rewrites = Vec::new();
 
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		let Some(path) = macro_call.path() else {
 			continue;
 		};

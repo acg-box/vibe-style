@@ -3,11 +3,15 @@ use std::{
 	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 	fs, iter, mem,
 	path::PathBuf,
+	sync::OnceLock,
 };
 
 use ra_ap_syntax::{
 	self, AstNode, Edition, SyntaxNode,
-	ast::{self, HasAttrs, HasName, HasVisibility, Item, Module, Use},
+	ast::{
+		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Module, PathExpr,
+		PathPat, PathType, RecordExpr, RecordPat, Use,
+	},
 };
 use regex::Regex;
 
@@ -23,11 +27,20 @@ type Import009Plan<'a> = (
 	Vec<(&'a TopItem, String, Option<String>)>,
 );
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Import008CandidateKind {
+	TypePath,
+	ValueReceiver,
+	MacroModule,
+	Derive,
+}
+
 #[derive(Clone, Debug)]
 struct Import008Candidate {
 	line: usize,
 	start: usize,
 	end: usize,
+	kind: Import008CandidateKind,
 	symbol: String,
 	import_path: String,
 	replacement: String,
@@ -2156,7 +2169,7 @@ fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
 	let derive_symbol_re = Regex::new(&format!(r"\b{}\b", regex::escape(symbol)))
 		.expect("Expected operation to succeed.");
 
-	for attr in ctx.source_file.syntax().descendants().filter_map(ast::Attr::cast) {
+	for attr in ctx.source_file.syntax().descendants().filter_map(Attr::cast) {
 		let text = attr.syntax().text().to_string();
 
 		if !text.contains("derive") {
@@ -3159,12 +3172,17 @@ fn build_import008_blocked_symbols(
 	qualified_value_paths_by_symbol: &HashMap<String, HashSet<String>>,
 ) -> HashSet<String> {
 	let mut candidate_paths_by_symbol: HashMap<String, HashSet<String>> = HashMap::new();
+	let mut non_value_receiver_candidate_symbols = HashSet::new();
 
 	for candidate in import008_candidates {
 		candidate_paths_by_symbol
 			.entry(candidate.symbol.clone())
 			.or_default()
 			.insert(candidate.import_path.clone());
+
+		if candidate.kind != Import008CandidateKind::ValueReceiver {
+			non_value_receiver_candidate_symbols.insert(candidate.symbol.clone());
+		}
 	}
 
 	let mut blocked_symbols = HashSet::new();
@@ -3181,7 +3199,10 @@ fn build_import008_blocked_symbols(
 			all_paths.extend(value_paths.iter().cloned());
 		}
 
-		let import009_consistency_conflict = is_import009_type_like_symbol(symbol)
+		let has_non_value_receiver_candidate =
+			non_value_receiver_candidate_symbols.contains(symbol);
+		let import009_consistency_conflict = has_non_value_receiver_candidate
+			&& is_import009_type_like_symbol(symbol)
 			&& qualified_value_paths_by_symbol.get(symbol).is_some_and(|value_paths| {
 				candidate_paths.iter().any(|path| value_paths.contains(path))
 			});
@@ -3509,7 +3530,7 @@ fn collect_import011_candidates(
 ) -> Vec<DeriveOrderCandidate> {
 	let mut candidates = Vec::new();
 
-	for attr in ctx.source_file.syntax().descendants().filter_map(ast::Attr::cast) {
+	for attr in ctx.source_file.syntax().descendants().filter_map(Attr::cast) {
 		let Some(meta) = attr.meta() else {
 			continue;
 		};
@@ -3669,11 +3690,11 @@ fn collect_import004_qualified_function_call_candidates(
 	candidates: &mut Vec<Import004QualifiedFunctionCandidate>,
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
-	for call_expr in ctx.source_file.syntax().descendants().filter_map(ast::CallExpr::cast) {
+	for call_expr in ctx.source_file.syntax().descendants().filter_map(CallExpr::cast) {
 		let Some(expr) = call_expr.expr() else {
 			continue;
 		};
-		let Some(path_expr) = ast::PathExpr::cast(expr.syntax().clone()) else {
+		let Some(path_expr) = PathExpr::cast(expr.syntax().clone()) else {
 			continue;
 		};
 		let Some(path) = path_expr.path() else {
@@ -3717,12 +3738,7 @@ fn collect_import004_qualified_function_macro_candidates(
 	candidates: &mut Vec<Import004QualifiedFunctionCandidate>,
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
-	let path_re = Regex::new(
-		r"(?:\b(?:crate|self|super|[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)(?:\s*::\s*(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*)+)",
-	)
-	.expect("Compile import004 qualified macro path regex.");
-
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		if skip_cfg_test_module_paths && syntax_is_inside_cfg_test_module(macro_call.syntax()) {
 			continue;
 		}
@@ -3733,7 +3749,7 @@ fn collect_import004_qualified_function_macro_candidates(
 		let tree_text = token_tree.syntax().text().to_string();
 		let tree_start = usize::from(token_tree.syntax().text_range().start());
 
-		for found in path_re.find_iter(&tree_text) {
+		for found in qualified_macro_path_regex().find_iter(&tree_text) {
 			if !macro_symbol_has_import004_function_follow(&tree_text, found.end())
 				|| !macro_symbol_is_import009_unqualified(&tree_text, found.start())
 			{
@@ -3814,6 +3830,7 @@ fn collect_import008_candidates(ctx: &FileContext) -> Vec<Import008Candidate> {
 	let mut seen_ranges = HashSet::new();
 
 	collect_import008_from_paths(ctx, &mut candidates, &mut seen_ranges);
+	collect_import008_from_value_receivers(ctx, &mut candidates, &mut seen_ranges);
 	collect_import008_from_macro_calls(ctx, &mut candidates, &mut seen_ranges);
 	collect_import008_from_derive_attrs(ctx, &derive_path_re, &mut candidates, &mut seen_ranges);
 
@@ -3825,7 +3842,7 @@ fn collect_import008_from_paths(
 	candidates: &mut Vec<Import008Candidate>,
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
-	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+	for path_type in ctx.source_file.syntax().descendants().filter_map(PathType::cast) {
 		let Some(candidate) = path_type.path().and_then(|path| {
 			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Qualified)
 		}) else {
@@ -3879,7 +3896,160 @@ fn collect_import008_from_paths(
 
 		let line = shared::line_from_offset(&ctx.line_starts, start);
 
-		candidates.push(Import008Candidate { line, start, end, symbol, import_path, replacement });
+		candidates.push(Import008Candidate {
+			line,
+			start,
+			end,
+			kind: Import008CandidateKind::TypePath,
+			symbol,
+			import_path,
+			replacement,
+		});
+	}
+}
+
+fn collect_import008_from_value_receivers(
+	ctx: &FileContext,
+	candidates: &mut Vec<Import008Candidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+) {
+	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+		let Some(candidate) = classify_value_path_candidate(
+			ctx,
+			path,
+			PathQualificationRequirement::Qualified,
+			false,
+			true,
+		) else {
+			continue;
+		};
+		let mut segments = Vec::new();
+
+		if !collect_path_segment_texts(&candidate.path, &mut segments) {
+			continue;
+		}
+
+		let Some((symbol, import_path)) = qualified_associated_receiver_symbol_path(&segments)
+		else {
+			continue;
+		};
+		let Some(receiver_leaf) = segments.get(segments.len().saturating_sub(2)) else {
+			continue;
+		};
+		let Some(leaf) = segments.last() else {
+			continue;
+		};
+
+		if matches!(symbol.as_str(), "" | "self" | "super" | "crate" | "Self") {
+			continue;
+		}
+
+		let root = segments[0].as_str();
+
+		if is_non_importable_root(root) {
+			continue;
+		}
+
+		let replacement = format!("{receiver_leaf}::{leaf}");
+		let range = candidate.path.syntax().text_range();
+		let start = usize::from(range.start());
+		let end = usize::from(range.end());
+
+		if start >= end || !seen_ranges.insert((start, end)) {
+			continue;
+		}
+
+		let line = shared::line_from_offset(&ctx.line_starts, start);
+
+		candidates.push(Import008Candidate {
+			line,
+			start,
+			end,
+			kind: Import008CandidateKind::ValueReceiver,
+			symbol,
+			import_path,
+			replacement,
+		});
+	}
+}
+
+fn qualified_macro_path_regex() -> &'static Regex {
+	static QUALIFIED_MACRO_PATH_RE: OnceLock<Regex> = OnceLock::new();
+
+	QUALIFIED_MACRO_PATH_RE.get_or_init(|| {
+		Regex::new(
+			r"(?:\b(?:crate|self|super|[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)(?:\s*::\s*(?:[A-Za-z_][A-Za-z0-9_]*|r#[A-Za-z_][A-Za-z0-9_]*)\s*)+)",
+		)
+		.expect("Compile qualified macro path regex.")
+	})
+}
+
+fn collect_import008_from_macro_record_receivers(
+	ctx: &FileContext,
+	candidates: &mut Vec<Import008Candidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+	tree_text: &str,
+	tree_start: usize,
+) {
+	if !tree_text.contains("::") || !tree_text.contains('{') {
+		return;
+	}
+
+	for found in qualified_macro_path_regex().find_iter(tree_text) {
+		if !macro_symbol_has_record_follow(tree_text, found.end())
+			|| !macro_symbol_is_import009_unqualified(tree_text, found.start())
+		{
+			continue;
+		}
+
+		let segments = found
+			.as_str()
+			.split("::")
+			.map(str::trim)
+			.filter(|segment| !segment.is_empty())
+			.map(ToOwned::to_owned)
+			.collect::<Vec<_>>();
+
+		if segments.len() < 3 {
+			continue;
+		}
+
+		let root = segments[0].as_str();
+
+		if is_non_importable_root(root) {
+			continue;
+		}
+
+		let receiver_leaf = segments[segments.len() - 2].clone();
+		let symbol = normalize_ident(&receiver_leaf).to_owned();
+
+		if !is_import009_type_like_symbol(&symbol) {
+			continue;
+		}
+
+		let Some(leaf) = segments.last().cloned() else {
+			continue;
+		};
+		let import_path = segments[..segments.len() - 1].join("::");
+		let replacement = format!("{receiver_leaf}::{leaf}");
+		let start = tree_start + found.start();
+		let end = tree_start + found.end();
+
+		if start >= end || !seen_ranges.insert((start, end)) {
+			continue;
+		}
+
+		let line = shared::line_from_offset(&ctx.line_starts, start);
+
+		candidates.push(Import008Candidate {
+			line,
+			start,
+			end,
+			kind: Import008CandidateKind::ValueReceiver,
+			symbol,
+			import_path,
+			replacement,
+		});
 	}
 }
 
@@ -3888,12 +4058,29 @@ fn collect_import008_from_macro_calls(
 	candidates: &mut Vec<Import008Candidate>,
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
+		if syntax_is_inside_cfg_test_module(macro_call.syntax()) {
+			continue;
+		}
+
+		if let Some(token_tree) = macro_call.token_tree() {
+			let tree_text = token_tree.syntax().text().to_string();
+			let tree_start = usize::from(token_tree.syntax().text_range().start());
+
+			collect_import008_from_macro_record_receivers(
+				ctx,
+				candidates,
+				seen_ranges,
+				&tree_text,
+				tree_start,
+			);
+		}
+
 		let Some(path) = macro_call.path() else {
 			continue;
 		};
 
-		if path.qualifier().is_none() || is_inside_cfg_test_module(&path) {
+		if path.qualifier().is_none() {
 			continue;
 		}
 
@@ -3937,7 +4124,15 @@ fn collect_import008_from_macro_calls(
 
 		let line = shared::line_from_offset(&ctx.line_starts, start);
 
-		candidates.push(Import008Candidate { line, start, end, symbol, import_path, replacement });
+		candidates.push(Import008Candidate {
+			line,
+			start,
+			end,
+			kind: Import008CandidateKind::MacroModule,
+			symbol,
+			import_path,
+			replacement,
+		});
 	}
 }
 
@@ -3947,7 +4142,7 @@ fn collect_import008_from_derive_attrs(
 	candidates: &mut Vec<Import008Candidate>,
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
-	for attr in ctx.source_file.syntax().descendants().filter_map(ast::Attr::cast) {
+	for attr in ctx.source_file.syntax().descendants().filter_map(Attr::cast) {
 		let Some(attr_path) = attr.path() else {
 			continue;
 		};
@@ -4054,6 +4249,7 @@ fn collect_import008_from_derive_attrs(
 				line,
 				start,
 				end,
+				kind: Import008CandidateKind::Derive,
 				symbol,
 				import_path,
 				replacement,
@@ -4065,7 +4261,7 @@ fn collect_import008_from_derive_attrs(
 fn collect_qualified_type_paths_by_symbol(ctx: &FileContext) -> HashMap<String, HashSet<String>> {
 	let mut out: HashMap<String, HashSet<String>> = HashMap::new();
 
-	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+	for path_type in ctx.source_file.syntax().descendants().filter_map(PathType::cast) {
 		let Some(candidate) = path_type.path().and_then(|path| {
 			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Qualified)
 		}) else {
@@ -4163,10 +4359,10 @@ fn is_import009_type_like_symbol(symbol: &str) -> bool {
 
 fn is_value_path_usage(path: &ast::Path) -> bool {
 	path.syntax().ancestors().any(|node| {
-		ast::PathExpr::cast(node.clone()).is_some()
-			|| ast::PathPat::cast(node.clone()).is_some()
-			|| ast::RecordExpr::cast(node.clone()).is_some()
-			|| ast::RecordPat::cast(node).is_some()
+		PathExpr::cast(node.clone()).is_some()
+			|| PathPat::cast(node.clone()).is_some()
+			|| RecordExpr::cast(node.clone()).is_some()
+			|| RecordPat::cast(node).is_some()
 	})
 }
 
@@ -4205,11 +4401,11 @@ fn classify_value_path_candidate(
 	if path.syntax().ancestors().any(|node| Use::cast(node).is_some()) {
 		return None;
 	}
-	if path.syntax().ancestors().any(|node| ast::PathType::cast(node).is_some()) {
+	if path.syntax().ancestors().any(|node| PathType::cast(node).is_some()) {
 		return None;
 	}
 
-	let macro_context = path.syntax().ancestors().any(|node| ast::MacroCall::cast(node).is_some());
+	let macro_context = path.syntax().ancestors().any(|node| MacroCall::cast(node).is_some());
 
 	if macro_context {
 		if !allow_macro_context {
@@ -4226,9 +4422,10 @@ fn classify_value_path_candidate(
 		return None;
 	}
 
-	let is_record_context = path.syntax().ancestors().any(|node| {
-		ast::RecordExpr::cast(node.clone()).is_some() || ast::RecordPat::cast(node).is_some()
-	});
+	let is_record_context = path
+		.syntax()
+		.ancestors()
+		.any(|node| RecordExpr::cast(node.clone()).is_some() || RecordPat::cast(node).is_some());
 
 	Some(ValuePathCandidate { path, name_ref, is_record_context })
 }
@@ -4269,7 +4466,7 @@ fn unqualified_type_path_rewrites(
 ) -> Vec<(usize, usize, String)> {
 	let mut rewrites = Vec::new();
 
-	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+	for path_type in ctx.source_file.syntax().descendants().filter_map(PathType::cast) {
 		let Some(candidate) = path_type.path().and_then(|path| {
 			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Unqualified)
 		}) else {
@@ -4297,7 +4494,7 @@ fn alias_root_type_path_rewrites(
 ) -> Vec<(usize, usize, String)> {
 	let mut rewrites = Vec::new();
 
-	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+	for path_type in ctx.source_file.syntax().descendants().filter_map(PathType::cast) {
 		let Some(candidate) = path_type.path().and_then(|path| {
 			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Qualified)
 		}) else {
@@ -4385,7 +4582,7 @@ fn alias_macro_token_tree_rewrites(
 	let replacement = format!("{qualified_path}::");
 	let mut rewrites = Vec::new();
 
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		let Some(token_tree) = macro_call.token_tree() else {
 			continue;
 		};
@@ -4413,7 +4610,7 @@ fn unqualified_derive_attr_symbol_rewrites(
 		.expect("Compile import009 derive symbol regex.");
 	let mut rewrites = Vec::new();
 
-	for attr in ctx.source_file.syntax().descendants().filter_map(ast::Attr::cast) {
+	for attr in ctx.source_file.syntax().descendants().filter_map(Attr::cast) {
 		let Some(meta) = attr.meta() else {
 			continue;
 		};
@@ -4502,7 +4699,7 @@ fn unqualified_nongeneric_type_path_rewrites(
 ) -> Vec<(usize, usize, String)> {
 	let mut rewrites = Vec::new();
 
-	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+	for path_type in ctx.source_file.syntax().descendants().filter_map(PathType::cast) {
 		let Some(candidate) = path_type.path().and_then(|path| {
 			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Unqualified)
 		}) else {
@@ -4527,7 +4724,7 @@ fn unqualified_nongeneric_type_path_rewrites(
 }
 
 fn has_unqualified_generic_type_path_use(ctx: &FileContext, symbol: &str) -> bool {
-	for path_type in ctx.source_file.syntax().descendants().filter_map(ast::PathType::cast) {
+	for path_type in ctx.source_file.syntax().descendants().filter_map(PathType::cast) {
 		let Some(candidate) = path_type.path().and_then(|path| {
 			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Unqualified)
 		}) else {
@@ -4595,7 +4792,7 @@ fn unqualified_macro_token_symbol_rewrites(
 		.expect("Compile import009 macro symbol regex.");
 	let mut rewrites = Vec::new();
 
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		let Some(token_tree) = macro_call.token_tree() else {
 			continue;
 		};
@@ -4639,6 +4836,17 @@ fn macro_symbol_has_import009_follow(text: &str, symbol_end: usize) -> bool {
 	}
 
 	idx + 1 < bytes.len() && bytes[idx] == b':' && bytes[idx + 1] == b':'
+}
+
+fn macro_symbol_has_record_follow(text: &str, symbol_end: usize) -> bool {
+	let bytes = text.as_bytes();
+	let mut idx = symbol_end;
+
+	while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+		idx += 1;
+	}
+
+	idx < bytes.len() && bytes[idx] == b'{'
 }
 
 fn macro_symbol_is_import009_unqualified(text: &str, symbol_start: usize) -> bool {
@@ -6413,7 +6621,7 @@ fn import004_has_conflicting_root_qualified_macro_path_usage(
 	)
 	.expect("Compile import004 root conflict macro path regex.");
 
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		if !import004_is_in_current_scope(macro_call.syntax()) {
 			continue;
 		}
@@ -6565,11 +6773,11 @@ fn unqualified_function_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usi
 	let mut ranges = Vec::new();
 	let mut seen_ranges = HashSet::new();
 
-	for call_expr in ctx.source_file.syntax().descendants().filter_map(ast::CallExpr::cast) {
+	for call_expr in ctx.source_file.syntax().descendants().filter_map(CallExpr::cast) {
 		let Some(expr) = call_expr.expr() else {
 			continue;
 		};
-		let Some(path_expr) = ast::PathExpr::cast(expr.syntax().clone()) else {
+		let Some(path_expr) = PathExpr::cast(expr.syntax().clone()) else {
 			continue;
 		};
 		let Some(path) = path_expr.path() else {
@@ -6617,7 +6825,7 @@ fn unqualified_macro_token_function_call_ranges(
 		.expect("Compile import004 macro function regex.");
 	let mut ranges = Vec::new();
 
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		let Some(token_tree) = macro_call.token_tree() else {
 			continue;
 		};
@@ -6671,7 +6879,7 @@ fn macro_symbol_has_import004_function_follow(text: &str, symbol_end: usize) -> 
 fn unqualified_macro_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize, usize)> {
 	let mut ranges = Vec::new();
 
-	for macro_call in ctx.source_file.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
 		let Some(path) = macro_call.path() else {
 			continue;
 		};

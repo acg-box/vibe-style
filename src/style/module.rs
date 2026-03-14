@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ra_ap_syntax::{
 	AstNode,
-	ast::{self, HasAttrs, HasVisibility, Item, ItemList},
+	ast::{HasAttrs, HasVisibility, Item, ItemList, MacroCall, Module},
 };
 use regex::Regex;
 
@@ -544,7 +544,7 @@ fn check_nested_module_item_order(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
-	for module in ctx.source_file.syntax().descendants().filter_map(ast::Module::cast) {
+	for module in ctx.source_file.syntax().descendants().filter_map(Module::cast) {
 		let Some(item_list) = module.item_list() else {
 			continue;
 		};
@@ -624,7 +624,7 @@ fn macro_rules_name_text(text: &str) -> Option<String> {
 }
 
 fn scope_has_macro_call(item_list: &ItemList, macro_name: &str) -> bool {
-	for macro_call in item_list.syntax().descendants().filter_map(ast::MacroCall::cast) {
+	for macro_call in item_list.syntax().descendants().filter_map(MacroCall::cast) {
 		let Some(path_text) = macro_call.path().map(|path| path.syntax().text().to_string()) else {
 			continue;
 		};

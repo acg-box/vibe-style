@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
-	ast::{self, BlockExpr, HasName, LetStmt, Path},
+	ast::{self, BlockExpr, HasName, LetStmt, Path, PathExpr, RefExpr},
 };
 
 use crate::style::shared::{self, Edit, FileContext, Violation};
@@ -132,7 +132,7 @@ fn let_stmt_references_unqualified_ident(let_stmt: &LetStmt, name: &str) -> bool
 fn let_stmt_borrowed_unqualified_idents(let_stmt: &LetStmt) -> BTreeSet<String> {
 	let mut out = BTreeSet::<String>::new();
 
-	for ref_expr in let_stmt.syntax().descendants().filter_map(ast::RefExpr::cast) {
+	for ref_expr in let_stmt.syntax().descendants().filter_map(RefExpr::cast) {
 		let Some(ast::Expr::PathExpr(path_expr)) = ref_expr.expr() else {
 			continue;
 		};
@@ -160,7 +160,7 @@ fn let_stmt_borrowed_unqualified_idents(let_stmt: &LetStmt) -> BTreeSet<String> 
 fn let_stmt_by_value_unqualified_idents(let_stmt: &LetStmt) -> BTreeSet<String> {
 	let mut out = BTreeSet::<String>::new();
 
-	for path_expr in let_stmt.syntax().descendants().filter_map(ast::PathExpr::cast) {
+	for path_expr in let_stmt.syntax().descendants().filter_map(PathExpr::cast) {
 		let Some(path) = path_expr.path() else {
 			continue;
 		};

@@ -1,8 +1,11 @@
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
-	ast::{self, Attr, HasArgList, HasAttrs, HasModuleItem, HasName, MacroCall, MethodCallExpr},
+	ast::{
+		self, Attr, Fn, HasArgList, HasAttrs, HasModuleItem, HasName, Literal, MacroCall,
+		MethodCallExpr, Module,
+	},
 };
 use regex::Regex;
 
@@ -141,7 +144,7 @@ pub(crate) fn check_numeric_literals(
 	// `vec![0.0f32; n]`).
 	check_numeric_literal_tokens(ctx, violations, edits, emit_edits);
 
-	for literal in ctx.source_file.syntax().descendants().filter_map(ast::Literal::cast) {
+	for literal in ctx.source_file.syntax().descendants().filter_map(Literal::cast) {
 		let literal_text = literal.syntax().text().to_string();
 
 		if literal_text.is_empty() || !literal_text.as_bytes()[0].is_ascii_digit() {
@@ -212,7 +215,7 @@ pub(crate) fn check_numeric_literals(
 pub(crate) fn function_ranges(ctx: &FileContext) -> Vec<(usize, usize)> {
 	let mut ranges = Vec::new();
 
-	for function in ctx.source_file.syntax().descendants().filter_map(ast::Fn::cast) {
+	for function in ctx.source_file.syntax().descendants().filter_map(Fn::cast) {
 		let Some(body) = function.body() else {
 			continue;
 		};
@@ -247,7 +250,7 @@ pub(crate) fn check_function_length(ctx: &FileContext, violations: &mut Vec<Viol
 }
 
 pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation>) {
-	for function in ctx.source_file.syntax().descendants().filter_map(ast::Fn::cast) {
+	for function in ctx.source_file.syntax().descendants().filter_map(Fn::cast) {
 		let is_test = function
 			.attrs()
 			.any(|attr| attr.as_simple_atom().map(|atom| atom.as_str() == "test").unwrap_or(false));
@@ -323,7 +326,7 @@ fn check_numeric_literal_tokens(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
-	let mut seen = std::collections::HashSet::<(usize, usize)>::new();
+	let mut seen = HashSet::new();
 
 	for token in ctx
 		.source_file
@@ -459,7 +462,7 @@ fn handle_expect_call(
 	let literal_message = first_arg
 		.syntax()
 		.descendants()
-		.filter_map(ast::Literal::cast)
+		.filter_map(Literal::cast)
 		.next()
 		.and_then(|lit| parse_string_literal(&lit.syntax().text().to_string()));
 	let Some(message) = literal_message else {
@@ -681,12 +684,12 @@ fn has_attr_text(mut attrs: impl Iterator<Item = Attr>, needle: &str) -> bool {
 
 fn method_call_in_test_context(call: &MethodCallExpr) -> bool {
 	for node in call.syntax().ancestors() {
-		if let Some(module) = ast::Module::cast(node.clone())
+		if let Some(module) = Module::cast(node.clone())
 			&& has_attr_text(module.attrs(), "cfg(test)")
 		{
 			return true;
 		}
-		if let Some(function) = ast::Fn::cast(node)
+		if let Some(function) = Fn::cast(node)
 			&& has_attr_text(function.attrs(), "test")
 		{
 			return true;

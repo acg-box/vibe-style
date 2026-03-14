@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ra_ap_syntax::{
 	AstNode, TextRange,
-	ast::{self, HasModuleItem, HasTypeBounds},
+	ast::{self, GenericParamList, HasModuleItem, HasTypeBounds},
 };
 use regex::Regex;
 
@@ -131,7 +131,7 @@ pub(crate) fn check_impl_rules(
 }
 
 pub(crate) fn check_inline_trait_bounds(ctx: &FileContext, violations: &mut Vec<Violation>) {
-	for item in ctx.source_file.syntax().descendants().filter_map(ast::GenericParamList::cast) {
+	for item in ctx.source_file.syntax().descendants().filter_map(GenericParamList::cast) {
 		for param in item.generic_params() {
 			if let ast::GenericParam::TypeParam(type_param) = param
 				&& type_param.type_bound_list().is_some()

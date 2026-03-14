@@ -21,6 +21,8 @@ The split below is by question type, not by human-versus-agent audience.
   `docs/spec/`
 - Need runbooks, migrations, validation steps, troubleshooting, or operational sequences ->
   `docs/guide/`
+- Need benchmark selection, pre-commit timing rules, or project-level performance tracking ->
+  `docs/guide/benchmark_tracking.md`
 - Need repo task names or automation entrypoints -> `Makefile.toml`
 - Need documentation placement or authoring rules -> `docs/governance.md`
 - Need a planning-tool artifact or saved execution plan -> `docs/plans/`

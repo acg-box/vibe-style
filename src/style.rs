@@ -4413,6 +4413,74 @@ struct Record {
 	}
 
 	#[test]
+	fn import008_shortens_qualified_value_receiver_path_inside_macro_and_adds_import() {
+		let original = r#"
+use crate::{
+	agent::tracker_tool_bridge::{DynamicToolCallResponse, DynamicToolHandler, DynamicToolSpec},
+};
+
+fn build_response() -> DynamicToolCallResponse {
+	let _handler = None::<DynamicToolHandler>;
+	let _spec = None::<DynamicToolSpec>;
+
+	DynamicToolCallResponse {
+		content_items: vec![
+			crate::agent::tracker_tool_bridge::DynamicToolContentItem::InputText {
+				text: String::from("boom"),
+			},
+		],
+		success: false,
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import008_value_receiver_nested_use.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert!(
+			rewritten.lines().any(|line| line.trim()
+				== "use crate::agent::tracker_tool_bridge::DynamicToolContentItem;"),
+			"{rewritten}"
+		);
+		assert!(rewritten.contains("DynamicToolContentItem::InputText{"), "{rewritten}");
+		assert!(
+			!rewritten
+				.contains("crate::agent::tracker_tool_bridge::DynamicToolContentItem::InputText")
+		);
+	}
+
+	#[test]
+	fn import008_ignores_large_macro_noise_without_record_receiver_paths() {
+		let entries = (0..128)
+			.map(|idx| {
+				format!(
+					"Noise {{ label: helper::module::name({idx}), count: helper::count({idx}) }}"
+				)
+			})
+			.collect::<Vec<_>>()
+			.join(", ");
+		let original = format!(
+			r#"
+fn build_noise() {{
+	let _ = vec![{entries}];
+}}
+"#
+		);
+		let ctx =
+			shared::read_file_context_from_text(Path::new("import008_macro_noise.rs"), original)
+				.expect("context")
+				.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+	}
+
+	#[test]
 	fn import009_autofixes_when_different_qualified_symbol_path_exists() {
 		let original = r#"
 use a::A;
@@ -4628,7 +4696,7 @@ struct Row;
 	}
 
 	#[test]
-	fn import011_converges_after_import009_qualifies_derive_paths() {
+	fn import011_converges_when_imported_derive_symbol_and_associated_call_stay_short() {
 		let original = r#"
 use foo::Bar;
 
@@ -4648,8 +4716,9 @@ fn run() {
 			.expect("apply fix passes");
 
 		assert!(applied_count > 0, "Rewritten:\n{rewritten}");
-		assert!(!rewritten.contains("use foo::Bar;"));
-		assert!(rewritten.contains("#[derive(Clone, foo::Bar)]"));
+		assert!(rewritten.contains("use foo::{self, Bar};"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains("#[derive(Clone, Bar)]"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains("Bar::make();"), "Rewritten:\n{rewritten}");
 	}
 
 	#[test]
@@ -5724,7 +5793,7 @@ fn normalize_error(input: Error) -> Error {
 	}
 
 	#[test]
-	fn import009_fix_stays_applied_for_grouped_pubfi_search_import_with_separate_error_import() {
+	fn import008_shortens_grouped_pubfi_search_error_receiver_when_import_exists() {
 		let original = r#"
 use pubfi_search::{
 	client::SearchClient,
@@ -5752,13 +5821,14 @@ fn normalize_error(input: Error, query: SearchQuery, client: SearchClient) -> Er
 			.expect("apply fix passes");
 
 		assert!(!rewritten.contains("use pubfi_search::Error;"));
-		assert!(rewritten.contains("source: pubfi_search::Error"));
+		assert!(rewritten.contains("source: Error"), "Rewritten:\n{rewritten}");
 		assert!(
 			rewritten.contains(
-				"fn normalize_error(input: pubfi_search::Error, query: SearchQuery, client: SearchClient) -> pubfi_search::Error"
-			)
+				"fn normalize_error(input: Error, query: SearchQuery, client: SearchClient) -> Error"
+			),
+			"Rewritten:\n{rewritten}"
 		);
-		assert!(rewritten.contains("pubfi_search::Error::NotFound"));
+		assert!(rewritten.contains("Error::NotFound"), "Rewritten:\n{rewritten}");
 
 		let (
 			repeated,
@@ -5920,7 +5990,7 @@ fn build_payload() -> Value {
 	}
 
 	#[test]
-	fn import009_fix_stays_applied_for_serde_value_with_other_imports() {
+	fn import008_shortens_serde_value_receivers_when_import_exists() {
 		let original = r#"
 use std::collections::HashMap;
 
@@ -5942,10 +6012,13 @@ fn capture(mut map: HashMap<String, Value>) {
 			)
 			.expect("apply fix passes");
 
-		assert!(!rewritten.contains("use serde_json::Value;"));
-		assert!(rewritten.contains("fn build_payload() -> serde_json::Value"));
-		assert!(rewritten.contains("fn capture(mut map: HashMap<String, serde_json::Value>)"));
-		assert!(rewritten.contains("serde_json::Value::String(\"x\".to_string())"));
+		assert!(rewritten.contains("use serde_json::{self, Value};"), "Rewritten:\n{rewritten}");
+		assert!(rewritten.contains("fn build_payload() -> Value"), "Rewritten:\n{rewritten}");
+		assert!(
+			rewritten.contains("fn capture(mut map: HashMap<String, Value>)"),
+			"Rewritten:\n{rewritten}"
+		);
+		assert!(rewritten.contains("Value::String(\"x\".to_string())"), "Rewritten:\n{rewritten}");
 
 		let (
 			repeated,

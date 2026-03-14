@@ -1,6 +1,7 @@
 use std::{
 	collections::{BTreeMap, BTreeSet},
 	env, fs,
+	io::ErrorKind,
 	path::{Path, PathBuf},
 	process::{self, Command, Stdio},
 	sync::{
@@ -323,7 +324,7 @@ fn semantic_cache_dir(verbose: bool) -> Option<PathBuf> {
 fn read_cached_semantic_output(cache_path: &Path, verbose: bool) -> Option<String> {
 	let output = match fs::read_to_string(cache_path) {
 		Ok(contents) => contents,
-		Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+		Err(err) if err.kind() == ErrorKind::NotFound => return None,
 		Err(err) => {
 			log_verbose_error(
 				verbose,

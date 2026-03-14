@@ -27,6 +27,11 @@ Question this index answers: "what should I do?"
 - Troubleshooting flows and operator checklists.
 - Short implementation recipes that depend on a governing spec.
 
+## Current guides
+
+- `docs/guide/benchmark_tracking.md`: choose release vs semantic evidence, handle commit-anchored
+  benchmark harness behavior, and refresh project-level performance baselines.
+
 ## Guide document contract
 
 Start each guide with a compact routing header:

@@ -230,6 +230,24 @@ against the self-host no-op benchmark above.
 The current semantic-path baseline and follow-up history live in
 `docs/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`.
 
+### Benchmark tracking
+
+The repository also tracks both benchmark harnesses through a non-blocking GitHub Actions workflow.
+Use the `Benchmarks` workflow for periodic project-level tracking, scheduled baseline refreshes, and
+manual reruns when you want artifact-backed evidence without turning performance into a PR gate.
+
+Use direct current-worktree timings first when a local rule change makes the repository's own
+sources newly fixable. The checked-in `bench-release-vstyle` harness builds the current binary but
+benchmarks a detached `HEAD` worktree, so self-host drift in uncommitted files must be fixed and
+committed before the harness becomes authoritative again.
+
+Use the release benchmark for general workspace-scan, fix-engine, import, module, spacing, or
+quality-path changes. Use the semantic benchmark for `src/style/semantic.rs`, semantic cache key
+changes, or semantic-validation fallback changes. Run both when a change touches both lanes.
+
+The operational runbook for selecting the right benchmark evidence lives in
+`docs/guide/benchmark_tracking.md`.
+
 ## Configuration
 
 There is currently no user configuration file.

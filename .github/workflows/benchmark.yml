@@ -1,0 +1,91 @@
+name: Benchmarks
+
+permissions:
+  contents: read
+
+env:
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  CARGO_TERM_COLOR: always
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/benchmark.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile.toml'
+      - 'scripts/bench-*.sh'
+      - 'src/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+jobs:
+  benchmark:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: release
+            name: Release benchmark
+            task: bench-release-vstyle
+            summary_glob: target/vstyle-bench/*/summary.txt
+            artifact_path: target/vstyle-bench
+          - key: semantic
+            name: Semantic benchmark
+            task: bench-semantic-vstyle
+            summary_glob: target/vstyle-bench-semantic/*/summary.txt
+            artifact_path: target/vstyle-bench-semantic
+    steps:
+      - name: Fetch latest code
+        uses: actions/checkout@v6
+
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+          rustflags: ''
+
+      - name: Install cargo-make
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+
+      - name: Run benchmark
+        run: cargo make ${{ matrix.task }}
+
+      - name: Publish benchmark summary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          summary_file="$(find . -path "./${{ matrix.summary_glob }}" -type f | sort | tail -n 1)"
+
+          if [[ -z "${summary_file}" ]]; then
+            printf 'Missing summary file for %s\n' "${{ matrix.name }}" >&2
+            exit 1
+          fi
+
+          {
+            printf '## %s\n\n' "${{ matrix.name }}"
+            printf 'Summary file: `%s`\n\n' "${summary_file#./}"
+            printf '```text\n'
+            cat "${summary_file}"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmarks-${{ matrix.key }}-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ matrix.artifact_path }}
+          if-no-files-found: error
+          retention-days: 14
