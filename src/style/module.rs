@@ -47,6 +47,8 @@ pub(crate) fn check_module_order(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
+	check_module_doc_comments(ctx, violations);
+
 	let items_for_order = collect_non_cfg_test_top_items(ctx);
 	let (planned_reorder_edits, mod001_fixable_lines, mod002_fixable_lines, mod003_fixable_lines) =
 		build_module_reorder_plans(ctx);
@@ -64,6 +66,73 @@ pub(crate) fn check_module_order(
 	check_top_level_visibility_batch_spacing(ctx, violations, edits, emit_edits);
 	check_top_level_excess_blank_lines(ctx, violations, edits, emit_edits);
 	check_nested_module_item_order(ctx, violations, edits, emit_edits);
+}
+
+fn check_module_doc_comments(ctx: &FileContext, violations: &mut Vec<Violation>) {
+	for item in ctx.source_file.syntax().descendants().filter_map(Item::cast) {
+		if !matches!(item, Item::Module(_)) {
+			continue;
+		}
+
+		let Some(doc_line) = module_doc_attr_line(ctx, &item) else {
+			continue;
+		};
+
+		shared::push_violation(
+			violations,
+			ctx,
+			doc_line,
+			"RUST-STYLE-MOD-004",
+			"Do not write module docs as outer comments on `mod`; place module docs inside the module with `//!`.",
+			false,
+		);
+	}
+}
+
+fn module_doc_attr_line(ctx: &FileContext, item: &Item) -> Option<usize> {
+	let raw = item.syntax().text().to_string();
+	let start_line =
+		shared::line_from_offset(&ctx.line_starts, usize::from(item.syntax().text_range().start()));
+	let lines = raw.lines().collect::<Vec<_>>();
+	let mod_line_idx =
+		lines.iter().position(|line| is_module_declaration_line(line.trim_start()))?;
+	let mut in_block_doc = false;
+
+	for idx in (0..mod_line_idx).rev() {
+		let trimmed = lines[idx].trim();
+
+		if trimmed.is_empty() {
+			continue;
+		}
+		if in_block_doc {
+			if trimmed.starts_with("/**") {
+				return Some(start_line + idx);
+			}
+
+			continue;
+		}
+		if trimmed.starts_with("*/") || trimmed.starts_with('*') {
+			in_block_doc = true;
+
+			continue;
+		}
+		if trimmed.starts_with("///") {
+			return Some(start_line + idx);
+		}
+		if trimmed.starts_with("#[") {
+			continue;
+		}
+
+		break;
+	}
+
+	None
+}
+
+fn is_module_declaration_line(trimmed: &str) -> bool {
+	Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\b")
+		.expect("Compile module declaration regex.")
+		.is_match(trimmed)
 }
 
 fn collect_non_cfg_test_top_items(ctx: &FileContext) -> Vec<&TopItem> {

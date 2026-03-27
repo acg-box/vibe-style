@@ -208,6 +208,12 @@ pub(crate) fn check_import_rules(
 	);
 
 	push_import004_ambiguous_symbol_violations(ctx, violations, &analysis.imported_symbol_maps);
+	apply_import012_crate_keep_alive_rule(
+		ctx,
+		violations,
+		&analysis.use_item_analyses,
+		&analysis.local_module_roots,
+	);
 
 	let import004_qualified_path_fixed_lines = apply_import004_qualified_function_path_rule(
 		ctx,
@@ -261,6 +267,161 @@ pub(crate) fn check_import_rules(
 }
 
 pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
+	exported_symbols_from_super_scope_impl(use_item)
+}
+
+fn apply_import012_crate_keep_alive_rule(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	use_item_analyses: &[UseItemAnalysis<'_>],
+	local_module_roots: &HashSet<String>,
+) {
+	let package_contexts = shared::package_rust_files_for_path(&ctx.path).ok().flatten().map(
+		|(current_path, package_files)| {
+			package_files
+				.into_iter()
+				.filter(|path| *path != current_path)
+				.filter_map(|path| shared::read_file_context(&path).ok().flatten())
+				.collect::<Vec<_>>()
+		},
+	);
+
+	for use_item_analysis in use_item_analyses {
+		let item = use_item_analysis.item;
+		let Some(root) = import012_keep_alive_root(&use_item_analysis.path, local_module_roots)
+		else {
+			continue;
+		};
+
+		if import012_has_other_root_usage(ctx, item, root.as_str(), package_contexts.as_deref()) {
+			continue;
+		}
+
+		shared::push_violation(
+			violations,
+			ctx,
+			item.line,
+			"RUST-STYLE-IMPORT-012",
+			"Do not add crate keep-alive imports `use dep as _;` unless another path in the package uses that crate.",
+			false,
+		);
+	}
+}
+
+fn import012_keep_alive_root(path: &str, local_module_roots: &HashSet<String>) -> Option<String> {
+	let trimmed = path.trim();
+	let (base, alias) = trimmed.rsplit_once(" as ")?;
+
+	if alias.trim() != "_" {
+		return None;
+	}
+
+	let base = base.trim();
+	let normalized = normalize_ident(base);
+
+	if base.is_empty()
+		|| base.contains("::")
+		|| base.contains('{')
+		|| base.contains('}')
+		|| base.contains('*')
+		|| matches!(normalized, "std" | "core" | "alloc" | "crate" | "self" | "super")
+		|| local_module_roots.contains(normalized)
+		|| WORKSPACE_IMPORT_ROOTS.contains(normalized)
+		|| WORKSPACE_IMPORT_ROOTS.contains(&normalized.replace('-', "_"))
+	{
+		return None;
+	}
+
+	Some(base.to_owned())
+}
+
+fn import012_has_other_root_usage(
+	ctx: &FileContext,
+	current_item: &TopItem,
+	root: &str,
+	package_contexts: Option<&[FileContext]>,
+) -> bool {
+	if import012_context_mentions_root(ctx, Some(current_item.start_offset), root) {
+		return true;
+	}
+
+	if let Some(package_contexts) = package_contexts {
+		for package_ctx in package_contexts {
+			if import012_context_mentions_root(package_ctx, None, root) {
+				return true;
+			}
+		}
+	}
+
+	false
+}
+
+fn import012_context_mentions_root(
+	ctx: &FileContext,
+	excluded_item_start_offset: Option<usize>,
+	root: &str,
+) -> bool {
+	let normalized_root = normalize_ident(root);
+
+	for item in &ctx.top_items {
+		if item.kind != TopKind::Use {
+			continue;
+		}
+		if Some(item.start_offset) == excluded_item_start_offset {
+			continue;
+		}
+
+		let Some(path) = item.use_path.as_deref() else {
+			continue;
+		};
+
+		if import012_keep_alive_root_only(path, normalized_root) {
+			continue;
+		}
+		if import012_path_mentions_root(path, normalized_root) {
+			return true;
+		}
+	}
+	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+		if path.qualifier().is_some() {
+			continue;
+		}
+		if path.syntax().ancestors().any(|node| Use::can_cast(node.kind())) {
+			continue;
+		}
+
+		let Some(segment) = path.segment() else {
+			continue;
+		};
+		let Some(name_ref) = segment.name_ref() else {
+			continue;
+		};
+
+		if is_same_ident(name_ref.text().as_str(), normalized_root) {
+			return true;
+		}
+	}
+
+	false
+}
+
+fn import012_keep_alive_root_only(path: &str, root: &str) -> bool {
+	let Some((base, alias)) = path.trim().rsplit_once(" as ") else {
+		return false;
+	};
+
+	alias.trim() == "_" && is_same_ident(base.trim(), root)
+}
+
+fn import012_path_mentions_root(path: &str, root: &str) -> bool {
+	let compact = path.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+	let normalized_root = normalize_ident(root);
+
+	is_same_ident(compact.as_str(), normalized_root)
+		|| compact.starts_with(&format!("{normalized_root}::"))
+}
+
+fn exported_symbols_from_super_scope_impl(use_item: &Use) -> Option<BTreeSet<String>> {
 	let current_module = use_item.syntax().ancestors().find_map(Module::cast)?;
 	let current_module_item_list = current_module.item_list()?;
 	let current_module_name = current_module.name().map(|name| name.text().to_string());

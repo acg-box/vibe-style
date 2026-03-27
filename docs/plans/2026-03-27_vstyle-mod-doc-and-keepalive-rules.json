@@ -1,0 +1,118 @@
+{
+  "spec": {
+    "schema": "plan/1",
+    "plan_id": "vstyle-mod-doc-and-keepalive-rules-2026-03-27",
+    "goal": "Add vstyle enforcement for module documentation placement and unnecessary crate-level `use ... as _;` keep-alive imports.",
+    "success_criteria": [
+      "vstyle reports a violation when a module declaration is documented with outer `///` or `/** */` comments instead of module-internal `//!` or `/*! */` comments.",
+      "vstyle reports a violation when a crate-level `use foo as _;` keep-alive import exists without a justified need to keep the dependency alive.",
+      "Existing trait keep-alive import behavior under RUST-STYLE-IMPORT-003 remains intact.",
+      "Rule catalog and focused regression tests cover the new behavior."
+    ],
+    "constraints": [
+      "Keep the persisted plan artifact inside this active workspace lane.",
+      "Do not rely on Clippy for these two policies; implement them in vstyle.",
+      "Preserve current alias and trait keep-alive semantics outside the new crate keep-alive rule.",
+      "Use repo-native focused verification after implementation."
+    ],
+    "defaults": {
+      "workspace_lane": "feat-mod-doc-keepalive-rules",
+      "branch": "feat/mod-doc-keepalive-rules"
+    },
+    "tasks": [
+      {
+        "id": "task-1",
+        "title": "Implement new rule checks and tests",
+        "status": "done",
+        "objective": "Add vstyle detection and fix behavior for module doc placement and unnecessary crate keep-alive imports, with targeted tests.",
+        "inputs": [
+          "src/style/module.rs",
+          "src/style/imports.rs",
+          "src/style/shared.rs",
+          "src/style.rs"
+        ],
+        "outputs": [
+          "Implemented rule logic",
+          "Updated rule ids",
+          "Regression tests covering valid and invalid cases"
+        ],
+        "verification": [
+          "Focused Rust tests for the touched rule families pass."
+        ],
+        "depends_on": []
+      },
+      {
+        "id": "task-2",
+        "title": "Update surfaced rule catalog",
+        "status": "done",
+        "objective": "Document the new rule ids and behavior in the repo rule catalog so the CLI-exposed coverage and docs stay aligned.",
+        "inputs": [
+          "README.md"
+        ],
+        "outputs": [
+          "README rule catalog updated for the new rule ids"
+        ],
+        "verification": [
+          "Coverage output includes the new rules and README descriptions match implemented behavior."
+        ],
+        "depends_on": [
+          "task-1"
+        ]
+      },
+      {
+        "id": "task-3",
+        "title": "Run focused verification and finalize runtime state",
+        "status": "done",
+        "objective": "Validate the saved plan, run focused repo-native verification for the new rules, and record evidence in plan state.",
+        "inputs": [
+          "Saved plan/1 contract",
+          "Implemented rule changes"
+        ],
+        "outputs": [
+          "Passing focused verification evidence",
+          "Updated plan runtime state"
+        ],
+        "verification": [
+          "Plan validates with the plan-writing validator.",
+          "Repo-native focused verification commands succeed."
+        ],
+        "depends_on": [
+          "task-2"
+        ]
+      }
+    ],
+    "replan_policy": {
+      "owner": "plan-writing",
+      "triggers": [
+        "A new rule needs a different id topology or shared utility extraction that changes the task graph.",
+        "Focused verification exposes a semantic conflict with existing import or module rules.",
+        "Implementation reveals that external-file modules and inline modules need separate policy decisions."
+      ]
+    }
+  },
+  "state": {
+    "phase": "done",
+    "current_task_id": null,
+    "next_task_id": null,
+    "blockers": [],
+    "evidence": [
+      "python3 /Users/xavier/.codex/skills/plan-writing/scripts/validate_plan_contract.py --path docs/plans/2026-03-27_vstyle-mod-doc-and-keepalive-rules.json -> OK",
+      "cargo test --quiet import012_ -> ok (3 passed)",
+      "cargo test --quiet mod004_ -> ok (3 passed)",
+      "cargo test --quiet style_rule_ids_ -> ok",
+      "cargo run --quiet --bin vstyle -- coverage | rg 'MOD-004|IMPORT-012' -> both rules implemented",
+      "cargo make lint-vstyle -> success",
+      "cargo test --quiet mod004_ -> ok (4 passed) after narrowing MOD-004 to comment-style outer docs only",
+      "cargo make lint-vstyle -> success after MOD-004 review-finding repair",
+      "cargo test --quiet import012_ -> ok (4 passed) after widening IMPORT-012 to same-package evidence",
+      "cargo make lint-vstyle -> success after IMPORT-012 cross-file review-finding repair"
+    ],
+    "last_updated": "2026-03-27T11:15:53Z",
+    "replan_reason": null,
+    "context_snapshot": {
+      "workspace_path": "/Users/xavier/code/trusted/y/hack-ink/vibe-style/.workspaces/feat-mod-doc-keepalive-rules",
+      "branch": "feat/mod-doc-keepalive-rules",
+      "repo_root": "/Users/xavier/code/trusted/y/hack-ink/vibe-style"
+    }
+  }
+}

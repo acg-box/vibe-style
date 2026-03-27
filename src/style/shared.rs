@@ -14,11 +14,12 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-pub(crate) const STYLE_RULE_IDS: [&str; 35] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 37] = [
 	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
 	"RUST-STYLE-MOD-003",
+	"RUST-STYLE-MOD-004",
 	"RUST-STYLE-MOD-005",
 	"RUST-STYLE-MOD-007",
 	"RUST-STYLE-SERDE-001",
@@ -33,6 +34,7 @@ pub(crate) const STYLE_RULE_IDS: [&str; 35] = [
 	"RUST-STYLE-IMPORT-009",
 	"RUST-STYLE-IMPORT-010",
 	"RUST-STYLE-IMPORT-011",
+	"RUST-STYLE-IMPORT-012",
 	"RUST-STYLE-IMPL-001",
 	"RUST-STYLE-IMPL-003",
 	"RUST-STYLE-GENERICS-001",
@@ -316,6 +318,28 @@ pub(crate) fn package_names_for_files(files: &[PathBuf]) -> Result<Option<Vec<St
 	Ok(Some(packages.into_keys().collect()))
 }
 
+pub(crate) fn package_rust_files_for_path(path: &Path) -> Result<Option<(PathBuf, Vec<PathBuf>)>> {
+	let cwd = current_dir_normalized()?;
+	let absolute = normalize_path(&cwd.join(path));
+
+	if !absolute.is_file() {
+		return Ok(None);
+	}
+
+	let workspace_layout = workspace_layout()?;
+	let Some(package) = workspace_package_for_path(&workspace_layout, &absolute) else {
+		return Ok(None);
+	};
+	let mut files = Vec::new();
+
+	collect_package_rust_files(&package.root, &mut files)?;
+
+	files.sort();
+	files.dedup();
+
+	Ok(Some((absolute, files)))
+}
+
 pub(crate) fn read_file_context(path: &Path) -> Result<Option<FileContext>> {
 	let text = match fs::read_to_string(path) {
 		Ok(text) => text,
@@ -442,6 +466,38 @@ pub(crate) fn strip_string_and_line_comment(line: &str, mut in_str: bool) -> (St
 	(out, in_str)
 }
 
+fn collect_package_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+	let entries = fs::read_dir(dir).map_err(|err| {
+		eyre::eyre!("Failed to read package directory `{}`: {err}.", dir.display())
+	})?;
+
+	for entry in entries {
+		let entry =
+			entry.map_err(|err| eyre::eyre!("Failed to read package directory entry: {err}."))?;
+		let path = entry.path();
+		let file_type = entry.file_type().map_err(|err| {
+			eyre::eyre!("Failed to read file type for package path `{}`: {err}.", path.display())
+		})?;
+		let name = entry.file_name();
+		let name = name.to_string_lossy();
+
+		if file_type.is_dir() {
+			if should_skip_package_scan_dir(name.as_ref()) {
+				continue;
+			}
+
+			collect_package_rust_files(&path, files)?;
+
+			continue;
+		}
+		if file_type.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+			files.push(normalize_path(&path));
+		}
+	}
+
+	Ok(())
+}
+
 fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
 	let cwd = current_dir_normalized()?;
 
@@ -559,6 +615,10 @@ fn normalize_path(path: &Path) -> PathBuf {
 		Ok(canonical) => canonical,
 		Err(_) => path.to_path_buf(),
 	}
+}
+
+fn should_skip_package_scan_dir(name: &str) -> bool {
+	name == "target" || name.starts_with('.')
 }
 
 fn build_line_starts(text: &str) -> Vec<usize> {

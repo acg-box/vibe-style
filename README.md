@@ -281,6 +281,7 @@ Rules are built into the checker.
 - `RUST-STYLE-MOD-001`: Keep top-level item order as `mod`, `use`, `macro_rules!`, `type`, `const`, `static`, `trait`, `enum`, `struct`, `impl`, `fn`.
 - `RUST-STYLE-MOD-002`: Place `pub` items before non-`pub` items within the same kind. Visibility boundaries define separate batches and must be separated by exactly one blank line.
 - `RUST-STYLE-MOD-003`: Place non-`async` functions before `async` functions at the same visibility.
+- `RUST-STYLE-MOD-004`: Do not document modules with outer doc comments on the `mod` declaration; place module docs inside the module with `//!`.
 - `RUST-STYLE-MOD-005`: Keep each type adjacent to related `impl` blocks, with no blank line between the type and its first `impl`.
 - `RUST-STYLE-MOD-007`: In `#[cfg(test)] mod tests`, remove unused `use super::*;` keep-alive imports during `tune`.
 
@@ -300,6 +301,7 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
 - `RUST-STYLE-IMPORT-010`: Do not use `super` or `self` import prefixes. Rewrite `super` imports to crate-absolute imports (`use crate::...`) when module depth allows it, and rewrite `self::...` imports to direct module paths.
 - `RUST-STYLE-IMPORT-011`: Order `#[derive(...)]` entries like imports: `std`/`core`/`alloc` first, then third-party derives, then workspace derives; alphabetize within each group.
+- `RUST-STYLE-IMPORT-012`: Do not add crate keep-alive imports `use dep as _;` unless another path in the same package uses that crate.
 
 ### Types and generics
 

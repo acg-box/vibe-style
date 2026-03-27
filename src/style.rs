@@ -1028,9 +1028,30 @@ mod tests {
 		env, fs,
 		path::{Path, PathBuf},
 		process, slice,
+		sync::{LazyLock, Mutex},
 	};
 
 	use crate::style::{Edit, MAX_FIX_PASSES, fixes, semantic, shared, types, violation_signature};
+
+	static TEST_CWD_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+	struct TestCurrentDirGuard {
+		previous: PathBuf,
+	}
+	impl TestCurrentDirGuard {
+		fn enter(path: &Path) -> Self {
+			let previous = env::current_dir().expect("Read current directory.");
+
+			env::set_current_dir(path).expect("Enter test workspace directory.");
+
+			Self { previous }
+		}
+	}
+	impl Drop for TestCurrentDirGuard {
+		fn drop(&mut self) {
+			env::set_current_dir(&self.previous).expect("Restore previous working directory.");
+		}
+	}
 
 	#[test]
 	fn suffix_rewrite_works() {
@@ -2883,6 +2904,117 @@ use std::task::Context;
 				&& v.message
 					== "Ambiguous imported symbol `Context` is not allowed; use fully qualified paths."
 		}));
+	}
+
+	#[test]
+	fn import012_reports_unused_crate_keep_alive_import() {
+		let text = r#"
+use regex as _;
+
+fn main() {}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import012_unused_crate_keep_alive.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-012"
+				&& v.message
+					== "Do not add crate keep-alive imports `use dep as _;` unless another path in the package uses that crate."
+				&& !v.fixable
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-012"));
+	}
+
+	#[test]
+	fn import012_allows_crate_keep_alive_import_with_other_crate_path_usage() {
+		let text = r#"
+use regex as _;
+
+fn compile() {
+	let _ = regex::Regex::new("a+");
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import012_used_crate_keep_alive.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-012"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-012"));
+	}
+
+	#[test]
+	fn import012_allows_crate_keep_alive_import_with_cross_file_path_usage() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Read timestamp.")
+			.as_nanos();
+		let root =
+			env::temp_dir().join(format!("vstyle-import012-cross-file-{}-{now}", process::id()));
+		let src_dir = root.join("src");
+		let main_path = src_dir.join("main.rs");
+		let helper_path = src_dir.join("helper.rs");
+
+		fs::create_dir_all(&src_dir).expect("Create temp src directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"vstyle-import012-cross-file\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[dependencies]\nregex = \"1\"\n",
+		)
+		.expect("Write Cargo manifest.");
+		fs::write(
+			&main_path,
+			"use regex as _;\n\nmod helper;\n\nfn main() {\n\thelper::compile();\n}\n",
+		)
+		.expect("Write main source.");
+		fs::write(
+			&helper_path,
+			"pub(crate) fn compile() {\n\tlet _ = regex::Regex::new(\"a+\");\n}\n",
+		)
+		.expect("Write helper source.");
+
+		let _cwd_lock = TEST_CWD_LOCK.lock().expect("Lock test cwd.");
+		let _cwd_guard = TestCurrentDirGuard::enter(&root);
+		let ctx =
+			shared::read_file_context(&main_path).expect("Read context.").expect("Have context.");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-012"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-012"));
+
+		drop(_cwd_guard);
+		drop(_cwd_lock);
+
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn import012_does_not_report_trait_keep_alive_imports() {
+		let text = r#"
+use std::fmt::Write as _;
+
+fn main() {
+	let mut out = String::new();
+	let _ = write!(out, "ok");
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import012_trait_keep_alive.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-012"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-012"));
 	}
 
 	#[test]
@@ -7240,6 +7372,89 @@ pub(crate) const CRATE_LIMIT: usize = 3;
 				&& v.message == "Do not insert blank lines within constant declaration groups."
 		}));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SPACE-003"));
+	}
+
+	#[test]
+	fn mod004_reports_outer_doc_comment_on_inline_module() {
+		let text = r#"
+/// API helpers.
+mod api {
+	fn run() {}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod004_outer_doc_inline_module.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-MOD-004"
+				&& v.message
+					== "Do not write module docs as outer comments on `mod`; place module docs inside the module with `//!`."
+				&& !v.fixable
+		}));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-004"));
+	}
+
+	#[test]
+	fn mod004_reports_outer_doc_comment_on_external_module_declaration() {
+		let text = r#"
+/// API helpers.
+mod api;
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod004_outer_doc_external_module.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-004" && !v.fixable));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-004"));
+	}
+
+	#[test]
+	fn mod004_allows_inner_doc_comment_inside_module_body() {
+		let text = r#"
+mod api {
+	//! API helpers.
+	fn run() {}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod004_inner_doc_module.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-004"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-004"));
+	}
+
+	#[test]
+	fn mod004_allows_doc_control_attribute_on_module() {
+		let text = r#"
+#[doc(hidden)]
+mod api {
+	fn run() {}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("mod004_doc_hidden_module.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-MOD-004"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-MOD-004"));
 	}
 
 	#[test]
