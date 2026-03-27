@@ -319,14 +319,20 @@ pub(crate) fn package_names_for_files(files: &[PathBuf]) -> Result<Option<Vec<St
 }
 
 pub(crate) fn package_rust_files_for_path(path: &Path) -> Result<Option<(PathBuf, Vec<PathBuf>)>> {
-	let cwd = current_dir_normalized()?;
-	let absolute = normalize_path(&cwd.join(path));
+	let absolute = if path.is_absolute() {
+		normalize_path(path)
+	} else {
+		let cwd = current_dir_normalized()?;
+
+		normalize_path(&cwd.join(path))
+	};
 
 	if !absolute.is_file() {
 		return Ok(None);
 	}
 
-	let workspace_layout = workspace_layout()?;
+	let workspace_layout =
+		workspace_layout_for_dir(absolute.parent().unwrap_or_else(|| Path::new("/")))?;
 	let Some(package) = workspace_package_for_path(&workspace_layout, &absolute) else {
 		return Ok(None);
 	};
@@ -533,6 +539,12 @@ fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
 fn workspace_layout() -> Result<WorkspaceLayout> {
 	let cwd = current_dir_normalized()?;
 
+	workspace_layout_for_dir(&cwd)
+}
+
+fn workspace_layout_for_dir(dir: &Path) -> Result<WorkspaceLayout> {
+	let cwd = normalize_path(dir);
+
 	if let Some(layout) =
 		WORKSPACE_LAYOUT_CACHE.lock().expect("Lock workspace layout cache.").get(&cwd).cloned()
 	{
@@ -542,6 +554,7 @@ fn workspace_layout() -> Result<WorkspaceLayout> {
 	let mut cmd = MetadataCommand::new();
 
 	cmd.no_deps();
+	cmd.current_dir(&cwd);
 
 	let metadata = cmd.exec().map_err(|err| eyre::eyre!("Failed to run cargo metadata: {err}."))?;
 	let workspace_member_ids = metadata.workspace_members.iter().cloned().collect::<HashSet<_>>();

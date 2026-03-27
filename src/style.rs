@@ -1028,30 +1028,9 @@ mod tests {
 		env, fs,
 		path::{Path, PathBuf},
 		process, slice,
-		sync::{LazyLock, Mutex},
 	};
 
 	use crate::style::{Edit, MAX_FIX_PASSES, fixes, semantic, shared, types, violation_signature};
-
-	static TEST_CWD_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
-	struct TestCurrentDirGuard {
-		previous: PathBuf,
-	}
-	impl TestCurrentDirGuard {
-		fn enter(path: &Path) -> Self {
-			let previous = env::current_dir().expect("Read current directory.");
-
-			env::set_current_dir(path).expect("Enter test workspace directory.");
-
-			Self { previous }
-		}
-	}
-	impl Drop for TestCurrentDirGuard {
-		fn drop(&mut self) {
-			env::set_current_dir(&self.previous).expect("Restore previous working directory.");
-		}
-	}
 
 	#[test]
 	fn suffix_rewrite_works() {
@@ -2980,17 +2959,12 @@ fn compile() {
 		)
 		.expect("Write helper source.");
 
-		let _cwd_lock = TEST_CWD_LOCK.lock().expect("Lock test cwd.");
-		let _cwd_guard = TestCurrentDirGuard::enter(&root);
 		let ctx =
 			shared::read_file_context(&main_path).expect("Read context.").expect("Have context.");
 		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-012"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-012"));
-
-		drop(_cwd_guard);
-		drop(_cwd_lock);
 
 		let _ = fs::remove_dir_all(&root);
 	}
