@@ -204,8 +204,8 @@ microbenchmark for every hotspot. On the current workspace it is usually a no-op
 validation and should not be used to judge semantic-path changes in `src/style/semantic.rs`.
 Use a semantic-positive workload before drawing conclusions about semantic validation performance.
 
-The current baseline and checkpoint history live in
-`docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`.
+Historical benchmark baseline artifacts are not kept in this repository. Use fresh local runs or
+the non-blocking `Benchmarks` workflow artifacts when benchmark evidence matters.
 
 To compare the plain `release` profile diagnostically:
 
@@ -236,8 +236,8 @@ and runs `vstyle tune --verbose` twice:
 Use this semantic benchmark to judge `XY-95`-style work; do not compare semantic-path changes only
 against the self-host no-op benchmark above.
 
-The current semantic-path baseline and follow-up history live in
-`docs/research/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`.
+Historical semantic benchmark artifacts are not kept in this repository. Use fresh local runs or
+the non-blocking `Benchmarks` workflow artifacts when semantic evidence matters.
 
 ### Benchmark tracking
 

@@ -14,9 +14,6 @@ The split below is by question type, not by human-versus-agent audience.
   - `docs/runbook/index.md` when the question is "what should I do?"
   - `docs/reference/index.md` when the question is "how is this organized now?"
   - `docs/decisions/index.md` when the question is "why is it shaped this way?"
-  - `docs/research/index.md` when the question needs supporting evidence or benchmark history.
-- Use `docs/plans/` only when a planning tool or execution workflow explicitly points to
-  a saved plan artifact there.
 
 ## Routing matrix
 
@@ -26,14 +23,11 @@ The split below is by question type, not by human-versus-agent audience.
   `docs/runbook/`
 - Need benchmark selection, pre-commit timing rules, or project-level performance tracking ->
   `docs/runbook/benchmark_tracking.md`
-- Need benchmark checkpoint records or historical performance evidence ->
-  `docs/research/benchmarks/index.md`
 - Need current layout, ownership boundaries, surface maps, or implementation orientation ->
   `docs/reference/`
 - Need durable rationale, tradeoffs, and consequences -> `docs/decisions/`
 - Need repo task names or automation entrypoints -> `Makefile.toml`
 - Need documentation placement or authoring rules -> `docs/policy.md`
-- Need a planning-tool artifact or saved execution plan -> `docs/plans/`
 
 ## Retrieval rules
 
@@ -43,5 +37,4 @@ The split below is by question type, not by human-versus-agent audience.
   when to read it, and what it does not cover.
 - Keep links explicit and stable.
 - Do not create new top-level docs lanes when `spec`, `runbook`, `reference`,
-  `decisions`, or `research` already fits.
-- Treat `docs/plans/` as a tool-managed exception, not as a general documentation lane.
+  or `decisions` already fits.

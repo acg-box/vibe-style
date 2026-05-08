@@ -15,7 +15,6 @@ Question this index answers: "how is this organized now?"
 
 - You need a correctness contract; read `docs/spec/index.md`.
 - You need a procedure; read `docs/runbook/index.md`.
-- You need supporting benchmark or investigation evidence; read `docs/research/index.md`.
 
 ## Current references
 

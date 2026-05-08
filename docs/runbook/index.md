@@ -15,7 +15,6 @@ Question this index answers: "what should I do?"
 ## Do not use this index when
 
 - You need the authoritative contract, schema, or invariant.
-- You need a planning-tool artifact or a saved execution plan under `docs/plans/`.
 - You need broad documentation policy or repo task-entrypoint rules; read
   `docs/policy.md` or `Makefile.toml` instead.
 
