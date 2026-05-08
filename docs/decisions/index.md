@@ -15,7 +15,6 @@ Question this index answers: "why is it shaped this way?"
 
 - You need the authoritative behavior contract; read `docs/spec/index.md`.
 - You need the execution procedure; read `docs/runbook/index.md`.
-- You need supporting evidence without a durable decision; read `docs/research/index.md`.
 
 ## Current decisions
 
@@ -31,4 +30,4 @@ Start each decision with a compact routing header:
 - `Decision`
 - `Consequences`
 
-Keep decisions short and link to supporting research when evidence matters.
+Keep decisions short and link to current specs or runbooks when operational context matters.
