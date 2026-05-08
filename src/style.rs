@@ -9,6 +9,7 @@ mod quality;
 mod semantic;
 mod shared;
 mod spacing;
+mod swift;
 mod test_modules;
 mod types;
 
@@ -909,7 +910,9 @@ fn collect_check_outcomes(files: &[PathBuf]) -> Result<Vec<FileCheckOutcome>> {
 		let outcomes = batch
 			.par_iter()
 			.map(|file| -> Result<FileCheckOutcome> {
-				let violations = if let Some(ctx) = shared::read_file_context(file)? {
+				let violations = if shared::is_swift_file(file) {
+					swift::collect_violations_from_file(file)?
+				} else if let Some(ctx) = shared::read_file_context(file)? {
 					let (found, _edits) = collect_violations(&ctx, false);
 
 					found

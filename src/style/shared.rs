@@ -14,7 +14,7 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-pub(crate) const STYLE_RULE_IDS: [&str; 37] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 43] = [
 	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
@@ -52,6 +52,12 @@ pub(crate) const STYLE_RULE_IDS: [&str; 37] = [
 	"RUST-STYLE-SPACE-004",
 	"RUST-STYLE-TEST-001",
 	"RUST-STYLE-TEST-002",
+	"SWIFT-STYLE-FILE-001",
+	"SWIFT-STYLE-IMPORT-004",
+	"SWIFT-STYLE-TYPE-001",
+	"SWIFT-STYLE-RUNTIME-001",
+	"SWIFT-STYLE-NUM-002",
+	"SWIFT-STYLE-READ-002",
 ];
 
 pub(crate) static SNAKE_CASE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -89,7 +95,7 @@ pub(crate) static WORKSPACE_IMPORT_ROOTS: LazyLock<HashSet<String>> = LazyLock::
 	roots
 });
 
-static GIT_RS_FILES_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, Vec<PathBuf>>>> =
+static GIT_STYLE_FILES_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, Vec<PathBuf>>>> =
 	LazyLock::new(|| Mutex::new(BTreeMap::new()));
 static WORKSPACE_LAYOUT_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, WorkspaceLayout>>> =
 	LazyLock::new(|| Mutex::new(BTreeMap::new()));
@@ -179,6 +185,7 @@ struct WorkspacePackageInfo {
 
 #[derive(Clone, Debug)]
 struct WorkspaceLayout {
+	workspace_root: PathBuf,
 	workspace_packages: Vec<WorkspacePackageInfo>,
 	default_roots: Vec<PathBuf>,
 }
@@ -217,18 +224,22 @@ pub(crate) fn push_violation(
 }
 
 pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>> {
-	let git_files = git_ls_files_rs()?;
+	let git_files = git_ls_files_style_sources()?;
 	let workspace_layout = workspace_layout()?;
-	let mut selected_roots = HashSet::new();
+	let mut selected_rust_roots = HashSet::new();
+	let mut selected_swift_roots = HashSet::new();
 
 	if cargo_options.workspace {
 		for package in &workspace_layout.workspace_packages {
-			selected_roots.insert(package.root.clone());
+			selected_rust_roots.insert(package.root.clone());
 		}
+
+		selected_swift_roots.insert(workspace_layout.workspace_root.clone());
 	}
 	if !cargo_options.workspace && cargo_options.packages.is_empty() {
 		for root in &workspace_layout.default_roots {
-			selected_roots.insert(root.clone());
+			selected_rust_roots.insert(root.clone());
+			selected_swift_roots.insert(root.clone());
 		}
 	}
 	if !cargo_options.packages.is_empty() {
@@ -250,7 +261,8 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 			}
 
 			if matched {
-				selected_roots.insert(package.root.clone());
+				selected_rust_roots.insert(package.root.clone());
+				selected_swift_roots.insert(package.root.clone());
 			}
 		}
 
@@ -265,7 +277,7 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 			));
 		}
 	}
-	if selected_roots.is_empty() {
+	if selected_rust_roots.is_empty() && selected_swift_roots.is_empty() {
 		return Ok(Vec::new());
 	}
 
@@ -274,6 +286,8 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 
 	for relative in git_files {
 		let absolute = normalize_path(&cwd.join(&relative));
+		let selected_roots =
+			if is_swift_file(&relative) { &selected_swift_roots } else { &selected_rust_roots };
 
 		if selected_roots.iter().any(|root| absolute.starts_with(root)) {
 			files.push(relative);
@@ -281,6 +295,10 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 	}
 
 	Ok(files)
+}
+
+pub(crate) fn is_swift_file(path: &Path) -> bool {
+	path.extension().and_then(|ext| ext.to_str()) == Some("swift")
 }
 
 pub(crate) fn package_file_map_for_files(
@@ -504,17 +522,17 @@ fn collect_package_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()
 	Ok(())
 }
 
-fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
+fn git_ls_files_style_sources() -> Result<Vec<PathBuf>> {
 	let cwd = current_dir_normalized()?;
 
 	if let Some(files) =
-		GIT_RS_FILES_CACHE.lock().expect("Lock git ls-files cache.").get(&cwd).cloned()
+		GIT_STYLE_FILES_CACHE.lock().expect("Lock git ls-files cache.").get(&cwd).cloned()
 	{
 		return Ok(files);
 	}
 
 	let output = Command::new("git")
-		.args(["ls-files", "*.rs"])
+		.args(["ls-files", "*.rs", "*.swift"])
 		.output()
 		.map_err(|err| eyre::eyre!("Failed to run git ls-files: {err}."))?;
 
@@ -531,7 +549,7 @@ fn git_ls_files_rs() -> Result<Vec<PathBuf>> {
 		}
 	}
 
-	GIT_RS_FILES_CACHE.lock().expect("Lock git ls-files cache.").insert(cwd, files.clone());
+	GIT_STYLE_FILES_CACHE.lock().expect("Lock git ls-files cache.").insert(cwd, files.clone());
 
 	Ok(files)
 }
@@ -557,6 +575,7 @@ fn workspace_layout_for_dir(dir: &Path) -> Result<WorkspaceLayout> {
 	cmd.current_dir(&cwd);
 
 	let metadata = cmd.exec().map_err(|err| eyre::eyre!("Failed to run cargo metadata: {err}."))?;
+	let workspace_root = normalize_path(&PathBuf::from(metadata.workspace_root.as_str()));
 	let workspace_member_ids = metadata.workspace_members.iter().cloned().collect::<HashSet<_>>();
 	let mut workspace_packages = metadata
 		.packages
@@ -585,7 +604,7 @@ fn workspace_layout_for_dir(dir: &Path) -> Result<WorkspaceLayout> {
 	default_roots.sort();
 	default_roots.dedup();
 
-	let layout = WorkspaceLayout { workspace_packages, default_roots };
+	let layout = WorkspaceLayout { workspace_root, workspace_packages, default_roots };
 
 	WORKSPACE_LAYOUT_CACHE
 		.lock()
@@ -815,13 +834,19 @@ mod tests {
 		let mut current_prefix = String::new();
 
 		for rule in STYLE_RULE_IDS {
-			let without_head =
-				rule.strip_prefix("RUST-STYLE-").expect("Rule IDs must start with `RUST-STYLE-`.");
+			let (language, without_head) =
+				if let Some(without_head) = rule.strip_prefix("RUST-STYLE-") {
+					("RUST", without_head)
+				} else if let Some(without_head) = rule.strip_prefix("SWIFT-STYLE-") {
+					("SWIFT", without_head)
+				} else {
+					panic!("Rule IDs must start with `RUST-STYLE-` or `SWIFT-STYLE-`.");
+				};
 			let (prefix, serial) = without_head
 				.rsplit_once('-')
 				.expect("Rule IDs must end with a three-digit serial.");
 			let serial = serial.parse::<usize>().expect("Rule serial must be numeric.");
-			let prefix = prefix.to_string();
+			let prefix = format!("{language}-{prefix}");
 
 			if prefix != current_prefix {
 				if !current_prefix.is_empty() {

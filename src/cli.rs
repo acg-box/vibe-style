@@ -14,7 +14,7 @@ use color_eyre::Result;
 
 use crate::style::{self, CargoOptions, RunSummary};
 
-/// Command-line interface for the Rust style checker.
+/// Command-line interface for the style checker.
 #[derive(Debug, Parser)]
 #[command(
 	version = concat!(

@@ -2,7 +2,7 @@
 
 # vibe-style
 
-Rust style checker with syntax and semantic analysis, plus a safe auto-fixer for deterministic, rule-driven code layout.
+Style checker with Rust syntax and semantic analysis, first-batch Swift checks, and a safe auto-fixer for deterministic code layout.
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Docs](https://img.shields.io/docsrs/vibe-style)](https://docs.rs/vibe-style)
@@ -17,6 +17,8 @@ Rust style checker with syntax and semantic analysis, plus a safe auto-fixer for
 ## Overview
 
 `vibe-style` enforces a strict Rust style contract with stable rule IDs (`RUST-STYLE-*`).
+It also includes a conservative first batch of read-only Swift checks with stable
+`SWIFT-STYLE-*` rule IDs.
 It supports:
 
 - `curate`: check and report violations.
@@ -166,7 +168,8 @@ vstyle tune -p api --all-features --no-default-features
   - Exit `1`: unresolved violations remain and `--strict` is used.
 
 By default, `curate` and `tune` follow cargo default package selection and scan git-tracked `*.rs`
-files inside that package scope.
+and `*.swift` files inside that package scope. With `--workspace`, Rust files are selected from
+workspace package roots and Swift files are selected from the Cargo workspace root.
 
 ### CI policy
 
@@ -335,6 +338,17 @@ Rules are built into the checker.
 
 - `RUST-STYLE-TEST-001`: Use descriptive `snake_case` test names.
 - `RUST-STYLE-TEST-002`: Reserve `#[cfg(test)] mod _test` for keep-alive imports only.
+
+### Swift first batch
+
+- `SWIFT-STYLE-FILE-001`: Do not use `mod.swift`; use flat Swift entry files.
+- `SWIFT-STYLE-IMPORT-004`: Do not import individual Swift symbols; import modules instead.
+- `SWIFT-STYLE-TYPE-001`: Do not add `typealias` declarations that are only pure renames.
+- `SWIFT-STYLE-RUNTIME-001`: Do not use force unwraps, force casts, or `try!` in non-test Swift code.
+- `SWIFT-STYLE-NUM-002`: Use underscore grouping for integers with more than three digits.
+- `SWIFT-STYLE-READ-002`: Keep functions at or under 120 lines.
+
+The governing Swift applicability map lives in `docs/spec/swift_style_rule_applicability.md`.
 
 ## Development
 

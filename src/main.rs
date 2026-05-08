@@ -1,4 +1,4 @@
-//! Rust style checker executable.
+//! Style checker executable.
 
 mod cli;
 mod style;

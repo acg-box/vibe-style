@@ -31,6 +31,8 @@ Question this index answers: "what must remain true?"
   registered in `src/style/shared.rs`.
 - `docs/spec/style_import_derive_interactions.md`: interaction contract for
   derive-related import rules.
+- `docs/spec/swift_style_rule_applicability.md`: Swift applicability, first-batch Swift rules,
+  and Rust-only rule boundaries.
 
 ## Spec document contract
 
