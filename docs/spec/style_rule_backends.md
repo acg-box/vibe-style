@@ -18,7 +18,8 @@ Not this document:
 Defines:
 
 - The backend-class definitions used by this repository.
-- The backend classification for each rule ID listed in `STYLE_RULE_IDS`.
+- The backend classification for each rule ID listed in `STYLE_RULE_IDS`, including
+  first-batch Swift rules.
 
 This document is normative for documentation purposes only. It does not change rule semantics.
 
@@ -28,6 +29,8 @@ This document is normative for documentation purposes only. It does not change r
 - Layout-backed: The rule's primary signal comes from raw source text (`FileContext.text`, `FileContext.lines`), token stream heuristics, or regex.
 - Path-backed: The rule's primary signal comes from the checked file path.
 - Semantic-backed: The rule depends on compiler output (`cargo check --message-format=json`) or compiler-error diffs as part of validation.
+- Swift source-text-backed: The Swift rule uses stable source-text token scanning without
+  requiring SwiftSyntax or Swift compiler semantic output.
 
 ## Rule Backend Classification
 
@@ -82,3 +85,14 @@ Hybrid AST-backed + layout-backed rules (AST classification plus line-aware spac
 Semantic-backed rules:
 
 - `RUST-STYLE-LET-001` (AST edit generation with compiler-error diff validation during `tune`)
+
+Swift source-text-backed rules:
+
+- `SWIFT-STYLE-FILE-001`
+- `SWIFT-STYLE-IMPORT-004`
+- `SWIFT-STYLE-TYPE-001`
+- `SWIFT-STYLE-RUNTIME-001`
+- `SWIFT-STYLE-NUM-002`
+- `SWIFT-STYLE-READ-002`
+
+The Swift applicability boundary is defined in `docs/spec/swift_style_rule_applicability.md`.
