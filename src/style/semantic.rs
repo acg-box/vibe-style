@@ -579,7 +579,7 @@ fn apply_missing_import_suggestions(
 	let mut applied = 0_usize;
 	let mut ordered = suggestions.to_vec();
 
-	ordered.sort_by(|left, right| right.line.cmp(&left.line));
+	ordered.sort_by_key(|suggestion| std::cmp::Reverse(suggestion.line));
 
 	for suggestion in ordered {
 		let line_start = line_start_offset(&text, suggestion.line).unwrap_or(0);

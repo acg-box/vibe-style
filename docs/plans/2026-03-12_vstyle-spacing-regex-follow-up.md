@@ -27,7 +27,7 @@ now that the spacing regex-hoist checkpoint already landed elsewhere.
 - The committed source of truth for the landed spacing change is
   `bb4fae5` together with
   `docs/plans/2026-03-12_vstyle-spacing-regex-hoist.md` and
-  `docs/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`.
+  `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`.
 - `XY-100` remains a tracking/documentation lane only unless a new code delta is
   proposed later.
 
@@ -75,8 +75,8 @@ ambiguous pending checkpoint behind.
 
 **Files**
 
-- Review: `docs/benchmarks/2026-03-12_vstyle-spacing-regex-follow-up.md`
-- Review: `docs/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-follow-up.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
 - Review: `src/style/spacing.rs`
 
 **Changes**
@@ -89,7 +89,7 @@ ambiguous pending checkpoint behind.
 
 **Verification**
 
-- `git show --stat bb4fae5 -- src/style/spacing.rs docs/plans/2026-03-12_vstyle-spacing-regex-hoist.md docs/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
+- `git show --stat bb4fae5 -- src/style/spacing.rs docs/plans/2026-03-12_vstyle-spacing-regex-hoist.md docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
 - `git status --short`
 
 **Dependencies**
@@ -115,7 +115,7 @@ second code delta is needed under `XY-100`.
 
 - Review: `src/style/spacing.rs`
 - Review: `docs/plans/2026-03-12_vstyle-spacing-regex-hoist.md`
-- Review: `docs/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
 
 **Changes**
 
@@ -151,7 +151,7 @@ content.
 **Files**
 
 - Modify: `docs/plans/2026-03-12_vstyle-spacing-regex-follow-up.md`
-- Modify: `docs/benchmarks/2026-03-12_vstyle-spacing-regex-follow-up.md`
+- Modify: `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-follow-up.md`
 
 **Changes**
 

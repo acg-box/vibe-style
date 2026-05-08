@@ -73,7 +73,7 @@ The lane has a preserved draft baseline and scope definition in repo history.
 
 **Files**
 
-- Create: `docs/benchmarks/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`
+- Create: `docs/research/benchmarks/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`
 - Review: `src/style/spacing.rs`
 - Review: `src/style/quality.rs`
 
@@ -111,7 +111,7 @@ reverted.
 **Files**
 
 - Modify: `src/style/quality.rs`
-- Review: `docs/benchmarks/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`
 
 **Changes**
 
@@ -149,7 +149,7 @@ state aligned.
 **Files**
 
 - Modify: `docs/plans/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`
-- Modify: `docs/benchmarks/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`
+- Modify: `docs/research/benchmarks/2026-03-12_vstyle-spacing-quality-regex-hoist-follow-up.md`
 
 **Changes**
 

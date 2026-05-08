@@ -90,9 +90,9 @@ for `XY-99`.
 
 **Files**
 
-- Create: `docs/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
+- Create: `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
 - Review: `scripts/bench-release-vstyle.sh`
-- Review: `docs/benchmarks/2026-03-12_vstyle-module-quality-follow-up.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-module-quality-follow-up.md`
 
 **Changes**
 
@@ -165,7 +165,7 @@ aligned.
 **Files**
 
 - Modify: `docs/plans/2026-03-12_vstyle-spacing-regex-hoist.md`
-- Modify: `docs/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
+- Modify: `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`
 
 **Changes**
 

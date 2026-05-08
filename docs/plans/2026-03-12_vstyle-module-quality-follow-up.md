@@ -85,8 +85,8 @@ that can be accepted or rejected cleanly.
 
 **Files**
 
-- Create: `docs/benchmarks/2026-03-12_vstyle-module-quality-follow-up.md`
-- Review: `docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
+- Create: `docs/research/benchmarks/2026-03-12_vstyle-module-quality-follow-up.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
 - Review: `src/style/module.rs`
 - Review: `src/style/quality.rs`
 
@@ -163,8 +163,8 @@ aligned.
 **Files**
 
 - Modify: `docs/plans/2026-03-12_vstyle-module-quality-follow-up.md`
-- Modify: `docs/benchmarks/2026-03-12_vstyle-module-quality-follow-up.md`
-- Review: `docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
+- Modify: `docs/research/benchmarks/2026-03-12_vstyle-module-quality-follow-up.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
 
 **Changes**
 
