@@ -46,7 +46,7 @@ pub(crate) fn apply_semantic_fixes(
 		return Ok(0);
 	}
 
-	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
+	let style_files = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
 	let mut applied_total = 0_usize;
 	let mut next_stdout = initial_stdout;
 
@@ -59,7 +59,7 @@ pub(crate) fn apply_semantic_fixes(
 		let mut applied_round = 0_usize;
 
 		for (path, imports) in suggestions {
-			if !tracked.contains(&path) {
+			if !style_files.contains(&path) {
 				continue;
 			}
 
@@ -86,11 +86,11 @@ pub(crate) fn collect_compiler_error_files_with_output(
 		return Ok((String::new(), BTreeSet::new()));
 	}
 
-	let tracked = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
+	let style_files = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
 	let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
 	let all = collect_compiler_error_files_from_output(&stdout);
 	let compiler_error_files =
-		all.into_iter().filter(|path| tracked.contains(path)).collect::<BTreeSet<_>>();
+		all.into_iter().filter(|path| style_files.contains(path)).collect::<BTreeSet<_>>();
 
 	Ok((stdout, compiler_error_files))
 }
@@ -283,13 +283,13 @@ fn semantic_cache_key(
 	input.push_str("cargo_args=");
 	input.push_str(&args.join(" "));
 	input.push('\n');
-	input.push_str("tracked_files=");
+	input.push_str("style_files=");
 
-	let mut tracked_files = files.to_vec();
+	let mut style_files = files.to_vec();
 
-	tracked_files.sort();
+	style_files.sort();
 
-	for file in tracked_files {
+	for file in style_files {
 		let fingerprint = file_fingerprint(&file, verbose)?;
 
 		input.push('\n');
@@ -379,13 +379,13 @@ fn file_fingerprint(path: &Path, verbose: bool) -> Result<(PathBuf, String)> {
 			log_verbose_error(
 				verbose,
 				&format!(
-					"Failed to read tracked file '{}' for cache fingerprint: {err}.",
+					"Failed to read style file '{}' for cache fingerprint: {err}.",
 					absolute.display()
 				),
 			);
 
 			return Err(eyre::eyre!(
-				"Failed to read tracked file '{}' for cache fingerprint: {err}.",
+				"Failed to read style file '{}' for cache fingerprint: {err}.",
 				absolute.display()
 			));
 		},

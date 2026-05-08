@@ -8,7 +8,7 @@ semantic-positive benchmark run from the checked-in harness.
 ## Workload
 
 - Fixture source: `tests/let_mut_reorder.rs`
-- Workload shape: a disposable Git-tracked Cargo crate with one semantically safe `let mut`
+- Workload shape: a disposable Git fixture Cargo crate with one semantically safe `let mut`
   reorder candidate and one unsafe closure-capture case that must remain unchanged.
 - Cold run policy: clear `target/vstyle-cache/semantic` before the first `tune --verbose` run.
 - Warm run policy: restore the original fixture sources and rerun without clearing the cache.
@@ -48,7 +48,7 @@ semantic-positive benchmark run from the checked-in harness.
   should distinguish repeated semantic `cargo check` work from cache-key overhead rather than treat
   semantic validation as purely uncached.
 - The warm rerun drops to `0.15s` with `3` hits and `0` misses after restoring the original source
-  texts, which proves the current semantic cache is reusable across invocations when tracked-file
+  texts, which proves the current semantic cache is reusable across invocations when style-file
   fingerprints return to the same state.
 - This checkpoint only adds the benchmark harness and docs, so the binary version string still
   reflects the last Rust-code build metadata refresh. Use the benchmark workload commit and log

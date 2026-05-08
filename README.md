@@ -150,6 +150,9 @@ vstyle coverage
 # Workspace-wide.
 vstyle curate --workspace
 
+# Swift workspace-wide.
+vstyle curate --workspace --language swift
+
 # Selected packages.
 vstyle tune -p api -p db-service
 
@@ -167,14 +170,17 @@ vstyle tune -p api --all-features --no-default-features
   - Exit `0`: even if unresolved violations remain.
   - Exit `1`: unresolved violations remain and `--strict` is used.
 
-By default, `curate` and `tune` follow cargo default package selection and scan git-tracked `*.rs`
-and `*.swift` files inside that package scope. With `--workspace`, Rust files are selected from
-workspace package roots and Swift files are selected from the Cargo workspace root.
+By default, `curate` and `tune` check Rust files. Use `--language swift` to check Swift files.
+File discovery scans every selected `*.rs` or `*.swift` file that is not matched by Git ignore
+rules inside that package scope. Git tracking state is not part of file discovery. With
+`--workspace`, Rust files are selected from workspace package roots and Swift files are selected
+from the Cargo workspace root.
 
 ### CI policy
 
-CI runs `vstyle curate` (read-only verification) to keep feedback fast and deterministic.
-Use `vstyle tune` locally when you want to apply safe automatic fixes (for example, via `cargo make lint-fix`).
+CI runs language-specific `vstyle curate` commands (read-only verification) to keep feedback fast
+and deterministic. Use `vstyle tune` locally when you want to apply safe automatic fixes (for
+example, via `cargo make lint-fix`).
 
 ### Release benchmark
 
@@ -190,7 +196,7 @@ cargo make bench-release-vstyle
 By default the harness builds the shipping `final-release` profile from `Cargo.toml` and runs both
 `vstyle curate --workspace` and `vstyle tune --workspace --verbose` inside a disposable Git
 worktree at the current commit. This keeps `tune` from rewriting the primary checkout while still
-preserving `git ls-files` semantics for file discovery.
+preserving the Git ignore boundary used for file discovery.
 
 Treat the checked-in self-host benchmark as a release-path regression guard, not as a universal
 microbenchmark for every hotspot. On the current workspace it is usually a no-op `tune`; if
@@ -220,7 +226,7 @@ validation fallback behavior:
 cargo make bench-semantic-vstyle
 ```
 
-This harness builds the local release binary once, creates a disposable Git-tracked fixture crate
+This harness builds the local release binary once, creates a disposable Git fixture crate
 based on the `tests/let_mut_reorder.rs` semantic-validation shape, generates a local `Cargo.lock`,
 and runs `vstyle tune --verbose` twice:
 
@@ -271,7 +277,7 @@ Rules are built into the checker.
   - `rustc -Vv` output,
   - `Cargo.lock` hash,
   - selected cargo options,
-  - tracked `*.rs` file fingerprints.
+  - selected `*.rs` style file fingerprints.
 
 ## Rule Catalog
 

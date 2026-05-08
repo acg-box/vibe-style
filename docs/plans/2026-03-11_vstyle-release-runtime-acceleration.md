@@ -20,7 +20,7 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 
 - Acceptance is based on release-binary runtime only. Debug timings are diagnostic only.
 - `Makefile.toml` is the source of truth for existing repo tasks, but direct release-binary commands are required for performance acceptance because `cargo make lint-vstyle` routes through `cargo vstyle curate --workspace`.
-- `vstyle` file discovery depends on `git ls-files` in `src/style/shared.rs`, so benchmarks must run inside a real Git checkout rather than a plain copied directory.
+- `vstyle` file discovery depends on Git ignore evaluation in `src/style/shared.rs`, so benchmarks must run inside a real Git checkout rather than a plain copied directory.
 - `vstyle tune` mutates files; all release benchmarking for `tune` should run in a disposable Git worktree or equivalent isolated checkout.
 - Execution should start from a clean `main` worktree and follow the isolated-workspace flow before code changes begin.
 
@@ -38,7 +38,7 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 ## Decision Notes
 
 - Acceptance and closeout for this stream are release-binary only. Debug-path measurements remain useful for hotspot discovery but do not count as success criteria.
-- The benchmark harness should use a disposable Git worktree at the current commit because `src/style/shared.rs` resolves files through `git ls-files` and `tune` can rewrite tracked files.
+- The benchmark harness should use a disposable Git worktree at the current commit because `src/style/shared.rs` resolves files through Git ignore evaluation and `tune` can rewrite style files.
 - Performance verification should call the locally built release binary directly (`target/release/vstyle` or the selected final shipping profile), not `cargo make lint-vstyle`, to avoid accidentally benchmarking an installed `cargo-vstyle` binary outside the repo build.
 - 2026-03-12: Task 1 defaulted benchmark acceptance to `final-release`, with `release` retained as a diagnostic override and compatibility check.
 - 2026-03-12: Current live runtime executes directly with optional read-only sidecars; Task 1 resumed in the existing isolated worktree after stale Builder-only routing proved inapplicable to the live environment.
@@ -46,12 +46,12 @@ Improve the final release-binary runtime of `vstyle curate --workspace` and `vst
 - 2026-03-12: Task 3 replaced intermediate full-workspace rechecks with incremental per-file refreshes plus a final full pass. On this host, repeated `final-release` reruns dropped `tune` from the `4.35s` baseline to `2.89s`, `2.93s`, and `2.87s`, so the fix engine checkpoint is materially successful and Task 4 is now the next runtime target.
 - 2026-03-12: Task 4 collapsed repeated import-rule analysis into shared per-file state across import rules and cfg-test follow-up scans. On this host, `final-release` reruns landed at `2.98s`, `2.88s`, and `2.92s` tune, which stays inside the prior `2.87s` to `2.93s` band, so the checkpoint is structurally complete but runtime-neutral and Task 5 is now the next target.
 - 2026-03-12: Task 5 module/quality scan-fusion and regex-hoist experiments were benchmarked but not retained. The reverted fresh baseline measured `2.99s` tune, and the exploratory runs stayed in the `2.95s` to `3.07s` range, so that checkpoint remains queued rather than landed.
-- 2026-03-12: Fresh no-op release benchmarks still do not enter semantic validation (`Semantic cache: 0 hit(s), 0 miss(es)`), so Task 6 narrowed to discovery-path reuse only. Caching workspace metadata and tracked-file discovery, then reusing grouped package scopes, moved `final-release tune` to `2.84s`, `2.93s`, `2.93s`, and `2.95s` versus the fresh post-revert `2.99s` baseline, which is a modest improvement without justifying semantic-path work yet.
+- 2026-03-12: Fresh no-op release benchmarks still do not enter semantic validation (`Semantic cache: 0 hit(s), 0 miss(es)`), so Task 6 narrowed to discovery-path reuse only. Caching workspace metadata and style-file discovery, then reusing grouped package scopes, moved `final-release tune` to `2.84s`, `2.93s`, `2.93s`, and `2.95s` versus the fresh post-revert `2.99s` baseline, which is a modest improvement without justifying semantic-path work yet.
 - 2026-03-12: Task 7 closed the current execution wave. README guidance now explains how to interpret the self-host no-op benchmark versus semantic-path workloads, the benchmark doc records the before/after release history, `XY-92` is done, and `XY-95`/`XY-97` remain queued as measured follow-ups.
 
 ## Implementation Outline
 
-Start with `XY-91` and make performance measurement reproducible before touching optimizer code. The harness should build the local release binary once, create a disposable Git worktree anchored to the current commit, run `curate` and `tune` against that isolated checkout, and record enough metadata to keep cache state, profile choice, and commit identity explicit. This protects the main checkout from `tune` rewrites while keeping `git ls-files` semantics intact for `vstyle`.
+Start with `XY-91` and make performance measurement reproducible before touching optimizer code. The harness should build the local release binary once, create a disposable Git worktree anchored to the current commit, run `curate` and `tune` against that isolated checkout, and record enough metadata to keep cache state, profile choice, and commit identity explicit. This protects the main checkout from `tune` rewrites while keeping the Git ignore boundary intact for `vstyle`.
 
 Once the release benchmark exists, attack the highest-confidence runtime multipliers in `src/style.rs` first. Current code shows that `run_fix` triggers an initial `run_check`, then re-runs `run_check` after each tune round, while `collect_fix_outcomes` and `apply_fix_passes` repeatedly read, clone, parse, and sometimes precompute fallback variants even before semantic validation proves they are necessary. These are the first checkpoints because they affect the no-op `tune` path before semantic work dominates.
 
@@ -271,7 +271,7 @@ Release-benchmark evidence showed that the current no-op `tune` workload still b
 
 1. Use fresh post-Task-5 release benchmarks to determine whether semantic validation or discovery work still contributes enough runtime to justify immediate action.
 2. Keep semantic-path work queued when the benchmark does not enter semantic validation, instead of broadening the checkpoint without evidence.
-3. Land a narrow discovery-path reuse checkpoint by caching workspace metadata and tracked-file discovery, then grouping workspace files by package directly instead of rediscovering each package scope separately.
+3. Land a narrow discovery-path reuse checkpoint by caching workspace metadata and style-file discovery, then grouping workspace files by package directly instead of rediscovering each package scope separately.
 
 **Verification**
 

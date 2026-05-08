@@ -13,7 +13,7 @@ mod swift;
 mod test_modules;
 mod types;
 
-pub(crate) use shared::{CargoOptions, RunSummary};
+pub(crate) use shared::{CargoOptions, RunSummary, StyleLanguage};
 
 use std::{
 	collections::{BTreeMap, BTreeSet},

@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::{
-	Args, Parser, Subcommand,
+	Args, Parser, Subcommand, ValueEnum,
 	builder::{
 		Styles,
 		styling::{AnsiColor, Effects},
@@ -12,7 +12,7 @@ use clap::{
 };
 use color_eyre::Result;
 
-use crate::style::{self, CargoOptions, RunSummary};
+use crate::style::{self, CargoOptions, RunSummary, StyleLanguage};
 
 /// Command-line interface for the style checker.
 #[derive(Debug, Parser)]
@@ -109,6 +109,9 @@ enum Command {
 
 #[derive(Clone, Debug, Args)]
 struct CargoCliOptions {
+	/// Source language to check.
+	#[arg(long = "language", value_enum, default_value_t = LanguageCliOption::Rust)]
+	language: LanguageCliOption,
 	/// Check all packages in the workspace.
 	#[arg(long)]
 	workspace: bool,
@@ -128,11 +131,26 @@ struct CargoCliOptions {
 impl CargoCliOptions {
 	fn as_options(&self) -> CargoOptions {
 		CargoOptions {
+			language: self.language.into(),
 			workspace: self.workspace,
 			packages: self.packages.clone(),
 			features: self.features.clone(),
 			all_features: self.all_features,
 			no_default_features: self.no_default_features,
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum LanguageCliOption {
+	Rust,
+	Swift,
+}
+impl From<LanguageCliOption> for StyleLanguage {
+	fn from(value: LanguageCliOption) -> Self {
+		match value {
+			LanguageCliOption::Rust => Self::Rust,
+			LanguageCliOption::Swift => Self::Swift,
 		}
 	}
 }
@@ -177,7 +195,10 @@ fn styles() -> Styles {
 mod tests {
 	use clap::Parser;
 
-	use crate::cli::{Cli, Command};
+	use crate::{
+		cli::{Cli, Command, LanguageCliOption},
+		style::StyleLanguage,
+	};
 
 	#[test]
 	fn parses_curate_subcommand() {
@@ -225,10 +246,23 @@ mod tests {
 		};
 
 		assert!(cargo.workspace);
+		assert_eq!(cargo.language, LanguageCliOption::Rust);
 		assert_eq!(cargo.packages, vec!["api"]);
 		assert_eq!(cargo.features, vec!["serde", "tracing"]);
 		assert!(cargo.all_features);
 		assert!(cargo.no_default_features);
+	}
+
+	#[test]
+	fn parses_curate_with_swift_language() {
+		let cli = Cli::parse_from(["app", "curate", "--workspace", "--language", "swift"]);
+		let Command::Curate { cargo, .. } = cli.command else {
+			panic!("Expected curate command.");
+		};
+
+		assert!(cargo.workspace);
+		assert_eq!(cargo.language, LanguageCliOption::Swift);
+		assert_eq!(StyleLanguage::from(cargo.language), StyleLanguage::Swift);
 	}
 
 	#[test]
