@@ -35,6 +35,8 @@ Verification:
 ## Pre-commit local evidence
 
 - Build the current shipping binary with `cargo build --profile final-release --bins`.
+- File discovery follows Git ignore rules only: every non-ignored style file for the selected
+  language is scanned, and tracking state does not affect local discovery.
 - If the change expands self-host style coverage, run
   `target/final-release/vstyle curate --workspace` first and fix any newly reported repository drift
   before treating timing results as meaningful.
@@ -47,6 +49,9 @@ Verification:
 
 - `cargo make bench-release-vstyle` builds the current binary but runs the workload inside a
   detached Git worktree at `HEAD`.
+- The detached workload does not include uncommitted files from the primary checkout, even though
+  direct local `vstyle` runs include every selected-language, non-ignored style file in the current
+  working tree.
 - If the current working tree contains uncommitted self-host rewrites, the harness can still fail
   on the detached workload even after the local working tree is clean.
 - Use this harness as the authoritative release-path benchmark only after the relevant source

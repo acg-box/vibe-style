@@ -35,13 +35,17 @@ edition = "2021"
 	)
 	.expect("Write package manifest.");
 	fs::write(root.join("crates/app/src/lib.rs"), "").expect("Write Rust lib.");
-	fs::write(root.join(".gitignore"), "/target\n").expect("Write gitignore.");
+	fs::write(
+		root.join(".gitignore"),
+		"/target\n/Sources/App/Ignored.swift\n/Sources/App/IgnoredTracked.swift\n",
+	)
+	.expect("Write gitignore.");
 
 	root
 }
 
 #[test]
-fn curate_reports_swift_workspace_violations_from_tracked_files() {
+fn curate_reports_swift_workspace_violations_from_non_ignored_files() {
 	let temp_dir = create_temp_workspace_root();
 	let long_body = (0..121).map(|idx| format!("\tlet value{idx} = {idx}\n")).collect::<String>();
 	let swift_source = format!(
@@ -68,6 +72,10 @@ func testForceAllowed() {
 	fs::write(temp_dir.join("Sources/App/mod.swift"), swift_source).expect("write Swift source");
 	fs::write(temp_dir.join("Sources/App/Untracked.swift"), "let value = missing!\n")
 		.expect("write untracked Swift source");
+	fs::write(temp_dir.join("Sources/App/Ignored.swift"), "let value = ignored!\n")
+		.expect("write ignored Swift source");
+	fs::write(temp_dir.join("Sources/App/IgnoredTracked.swift"), "let value = trackedIgnored!\n")
+		.expect("write tracked ignored Swift source");
 	fs::write(temp_dir.join("Tests/AppTests.swift"), swift_test_source)
 		.expect("write Swift test source");
 
@@ -84,9 +92,11 @@ func testForceAllowed() {
 		.current_dir(&temp_dir)
 		.args([
 			"add",
+			"-f",
 			"Cargo.toml",
 			"crates/app/Cargo.toml",
 			"crates/app/src/lib.rs",
+			"Sources/App/IgnoredTracked.swift",
 			"Sources/App/mod.swift",
 			"Tests/AppTests.swift",
 		])
@@ -102,6 +112,25 @@ func testForceAllowed() {
 	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
 		.current_dir(&temp_dir)
 		.args(["curate", "--workspace"])
+		.output()
+		.expect("run vstyle");
+
+	assert!(
+		output.status.success(),
+		"default Rust-only curate should ignore Swift violations, stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+
+	assert!(
+		!stdout.contains("Sources/App/mod.swift"),
+		"default Rust-only curate should not scan Swift files:\n{stdout}"
+	);
+
+	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["curate", "--workspace", "--language", "swift"])
 		.output()
 		.expect("run vstyle");
 
@@ -124,5 +153,13 @@ func testForceAllowed() {
 		!stdout.contains("Tests/AppTests.swift:2:1: [SWIFT-STYLE-RUNTIME-001]"),
 		"Swift test files should not report force operators:\n{stdout}"
 	);
-	assert!(!stdout.contains("Untracked.swift"), "untracked Swift files should not be scanned");
+	assert!(
+		stdout.contains("Untracked.swift"),
+		"non-ignored Swift files should be scanned regardless of tracking state"
+	);
+	assert!(!stdout.contains("Ignored.swift"), "git-ignored Swift files should not be scanned");
+	assert!(
+		!stdout.contains("IgnoredTracked.swift"),
+		"git-ignored Swift files should not be scanned even when tracked"
+	);
 }

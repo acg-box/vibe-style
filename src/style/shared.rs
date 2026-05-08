@@ -1,8 +1,9 @@
 use std::{
 	collections::{BTreeMap, HashSet},
 	env, fs,
+	io::Write as _,
 	path::{Path, PathBuf},
-	process::Command,
+	process::{Command, Stdio},
 	sync::{LazyLock, Mutex},
 };
 
@@ -13,6 +14,9 @@ use ra_ap_syntax::{
 	ast::{self, HasAttrs, HasModuleItem, HasName, HasVisibility, Item},
 };
 use regex::Regex;
+
+type StyleFilesCacheKey = (PathBuf, PathBuf);
+type StyleFilesCache = BTreeMap<StyleFilesCacheKey, Vec<PathBuf>>;
 
 pub(crate) const STYLE_RULE_IDS: [&str; 43] = [
 	"RUST-STYLE-FILE-001",
@@ -95,7 +99,7 @@ pub(crate) static WORKSPACE_IMPORT_ROOTS: LazyLock<HashSet<String>> = LazyLock::
 	roots
 });
 
-static GIT_STYLE_FILES_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, Vec<PathBuf>>>> =
+static STYLE_FILES_CACHE: LazyLock<Mutex<StyleFilesCache>> =
 	LazyLock::new(|| Mutex::new(BTreeMap::new()));
 static WORKSPACE_LAYOUT_CACHE: LazyLock<Mutex<BTreeMap<PathBuf, WorkspaceLayout>>> =
 	LazyLock::new(|| Mutex::new(BTreeMap::new()));
@@ -140,11 +144,19 @@ pub(crate) struct RunSummary {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CargoOptions {
+	pub(crate) language: StyleLanguage,
 	pub(crate) workspace: bool,
 	pub(crate) packages: Vec<String>,
 	pub(crate) features: Vec<String>,
 	pub(crate) all_features: bool,
 	pub(crate) no_default_features: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum StyleLanguage {
+	#[default]
+	Rust,
+	Swift,
 }
 
 #[derive(Clone, Debug)]
@@ -224,22 +236,31 @@ pub(crate) fn push_violation(
 }
 
 pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>> {
-	let git_files = git_ls_files_style_sources()?;
 	let workspace_layout = workspace_layout()?;
 	let mut selected_rust_roots = HashSet::new();
 	let mut selected_swift_roots = HashSet::new();
 
 	if cargo_options.workspace {
-		for package in &workspace_layout.workspace_packages {
-			selected_rust_roots.insert(package.root.clone());
+		match cargo_options.language {
+			StyleLanguage::Rust =>
+				for package in &workspace_layout.workspace_packages {
+					selected_rust_roots.insert(package.root.clone());
+				},
+			StyleLanguage::Swift => {
+				selected_swift_roots.insert(workspace_layout.workspace_root.clone());
+			},
 		}
-
-		selected_swift_roots.insert(workspace_layout.workspace_root.clone());
 	}
 	if !cargo_options.workspace && cargo_options.packages.is_empty() {
 		for root in &workspace_layout.default_roots {
-			selected_rust_roots.insert(root.clone());
-			selected_swift_roots.insert(root.clone());
+			match cargo_options.language {
+				StyleLanguage::Rust => {
+					selected_rust_roots.insert(root.clone());
+				},
+				StyleLanguage::Swift => {
+					selected_swift_roots.insert(root.clone());
+				},
+			}
 		}
 	}
 	if !cargo_options.packages.is_empty() {
@@ -261,8 +282,14 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 			}
 
 			if matched {
-				selected_rust_roots.insert(package.root.clone());
-				selected_swift_roots.insert(package.root.clone());
+				match cargo_options.language {
+					StyleLanguage::Rust => {
+						selected_rust_roots.insert(package.root.clone());
+					},
+					StyleLanguage::Swift => {
+						selected_swift_roots.insert(package.root.clone());
+					},
+				}
 			}
 		}
 
@@ -282,9 +309,10 @@ pub(crate) fn resolve_files(cargo_options: &CargoOptions) -> Result<Vec<PathBuf>
 	}
 
 	let cwd = current_dir_normalized()?;
+	let style_files = gitignore_visible_style_sources(&workspace_layout.workspace_root)?;
 	let mut files = Vec::new();
 
-	for relative in git_files {
+	for relative in style_files {
 		let absolute = normalize_path(&cwd.join(&relative));
 		let selected_roots =
 			if is_swift_file(&relative) { &selected_swift_roots } else { &selected_rust_roots };
@@ -522,36 +550,133 @@ fn collect_package_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()
 	Ok(())
 }
 
-fn git_ls_files_style_sources() -> Result<Vec<PathBuf>> {
+fn gitignore_visible_style_sources(workspace_root: &Path) -> Result<Vec<PathBuf>> {
 	let cwd = current_dir_normalized()?;
+	let workspace_root = normalize_path(workspace_root);
+	let cache_key = (cwd.clone(), workspace_root.clone());
 
 	if let Some(files) =
-		GIT_STYLE_FILES_CACHE.lock().expect("Lock git ls-files cache.").get(&cwd).cloned()
+		STYLE_FILES_CACHE.lock().expect("Lock style files cache.").get(&cache_key).cloned()
 	{
 		return Ok(files);
 	}
 
-	let output = Command::new("git")
-		.args(["ls-files", "*.rs", "*.swift"])
-		.output()
-		.map_err(|err| eyre::eyre!("Failed to run git ls-files: {err}."))?;
-
-	if !output.status.success() {
-		return Err(eyre::eyre!("git ls-files failed with status {}.", output.status));
-	}
-
-	let stdout = String::from_utf8(output.stdout)?;
 	let mut files = Vec::new();
 
-	for line in stdout.lines() {
-		if !line.is_empty() {
-			files.push(PathBuf::from(line));
+	collect_gitignore_visible_style_sources(&workspace_root, &cwd, &mut files)?;
+
+	files.sort();
+	files.dedup();
+	STYLE_FILES_CACHE.lock().expect("Lock style files cache.").insert(cache_key, files.clone());
+
+	Ok(files)
+}
+
+fn collect_gitignore_visible_style_sources(
+	dir: &Path,
+	cwd: &Path,
+	files: &mut Vec<PathBuf>,
+) -> Result<()> {
+	let entries = fs::read_dir(dir)
+		.map_err(|err| eyre::eyre!("Failed to read style directory `{}`: {err}.", dir.display()))?;
+	let mut entries = entries
+		.map(|entry| {
+			let entry =
+				entry.map_err(|err| eyre::eyre!("Failed to read style directory entry: {err}."))?;
+			let path = entry.path();
+			let file_type = entry.file_type().map_err(|err| {
+				eyre::eyre!("Failed to read file type for style path `{}`: {err}.", path.display())
+			})?;
+
+			Ok((path, file_type, entry.file_name()))
+		})
+		.collect::<Result<Vec<_>>>()?;
+
+	entries.sort_by(|left, right| left.0.cmp(&right.0));
+
+	let ignored = gitignored_paths(entries.iter().map(|(path, _, _)| path.as_path()), cwd)?;
+
+	for (path, file_type, name) in entries {
+		let relative = path_for_cwd(&path, cwd);
+		let is_ignored = ignored.contains(&relative);
+		let name = name.to_string_lossy();
+
+		if file_type.is_dir() {
+			if name == ".git" || is_ignored {
+				continue;
+			}
+
+			collect_gitignore_visible_style_sources(&path, cwd, files)?;
+
+			continue;
+		}
+		if file_type.is_file() && is_style_source_file(&path) && !is_ignored {
+			files.push(relative);
 		}
 	}
 
-	GIT_STYLE_FILES_CACHE.lock().expect("Lock git ls-files cache.").insert(cwd, files.clone());
+	Ok(())
+}
 
-	Ok(files)
+fn gitignored_paths<'a>(
+	paths: impl IntoIterator<Item = &'a Path>,
+	cwd: &Path,
+) -> Result<HashSet<PathBuf>> {
+	let paths = paths.into_iter().map(|path| path_for_cwd(path, cwd)).collect::<Vec<_>>();
+
+	if paths.is_empty() {
+		return Ok(HashSet::new());
+	}
+
+	let mut child = Command::new("git")
+		.current_dir(cwd)
+		.args(["check-ignore", "--no-index", "--stdin"])
+		.stdin(Stdio::piped())
+		.stdout(Stdio::piped())
+		.spawn()
+		.map_err(|err| eyre::eyre!("Failed to run git check-ignore: {err}."))?;
+
+	{
+		let mut stdin = child
+			.stdin
+			.take()
+			.ok_or_else(|| eyre::eyre!("Failed to open git check-ignore stdin."))?;
+
+		for path in &paths {
+			writeln!(stdin, "{}", path.display())
+				.map_err(|err| eyre::eyre!("Failed to write git check-ignore input: {err}."))?;
+		}
+	}
+
+	let output = child
+		.wait_with_output()
+		.map_err(|err| eyre::eyre!("Failed to wait for git check-ignore: {err}."))?;
+
+	match output.status.code() {
+		Some(0) | Some(1) => {},
+		_ => return Err(eyre::eyre!("git check-ignore failed with status {}.", output.status)),
+	}
+
+	let stdout = String::from_utf8(output.stdout)?;
+	let mut ignored = HashSet::new();
+
+	for line in stdout.lines() {
+		if !line.is_empty() {
+			ignored.insert(PathBuf::from(line));
+		}
+	}
+
+	Ok(ignored)
+}
+
+fn is_style_source_file(path: &Path) -> bool {
+	matches!(path.extension().and_then(|ext| ext.to_str()), Some("rs" | "swift"))
+}
+
+fn path_for_cwd(path: &Path, cwd: &Path) -> PathBuf {
+	let normalized = normalize_path(path);
+
+	normalized.strip_prefix(cwd).map_or(normalized.clone(), Path::to_path_buf)
 }
 
 fn workspace_layout() -> Result<WorkspaceLayout> {

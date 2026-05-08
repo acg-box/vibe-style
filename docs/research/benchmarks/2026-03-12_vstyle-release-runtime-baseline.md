@@ -186,7 +186,7 @@ continuing, and the post-revert rerun became the fresh baseline for Task 6.
 Task 6 stayed evidence-gated. The current self-host benchmark is still a no-op `tune`
 (`Checked 21 file(s). Applied 0 fix(es). Semantic cache: 0 hit(s), 0 miss(es).`), so semantic
 follow-ups remain queued. The landed checkpoint only targets discovery-path reuse by caching
-workspace metadata and tracked-file discovery, then grouping workspace files into per-package
+workspace metadata and style-file discovery, then grouping workspace files into per-package
 scopes directly instead of rediscovering each package scope separately.
 
 On this host, that narrowed checkpoint moved `final-release tune` from the fresh `2.99s`

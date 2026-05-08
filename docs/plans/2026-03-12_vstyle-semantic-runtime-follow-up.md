@@ -26,8 +26,8 @@ the change.
 
 - Acceptance for this lane is still based on the locally built `final-release` binary, not an
   installed `cargo-vstyle` subcommand and not debug/profile-development timings.
-- `vstyle` file discovery still depends on `git ls-files`, so the benchmark workload must run inside
-  a real Git checkout.
+- `vstyle` file discovery still depends on Git ignore evaluation, so the benchmark workload must
+  run inside a real Git checkout.
 - `vstyle tune` mutates files; semantic benchmarking must use a disposable fixture checkout and keep
   the main worktree untouched.
 - A meaningful `XY-95` checkpoint must preserve semantic-validation behavior and cache semantics; it
