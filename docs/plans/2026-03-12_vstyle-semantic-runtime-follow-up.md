@@ -93,7 +93,7 @@ baseline is captured for future `XY-95` checkpoints.
 - Modify: `Makefile.toml`
 - Modify: `README.md`
 - Create: `scripts/bench-semantic-vstyle.sh`
-- Create: `docs/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`
+- Create: `docs/research/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`
 - Review: `tests/let_mut_reorder.rs`
 - Review: `src/style/semantic.rs`
 
@@ -137,7 +137,7 @@ specific cost instead of guessing from the self-host workload.
 
 - Modify: `src/style/semantic.rs`
 - Review: `src/style.rs`
-- Review: `docs/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`
 
 **Changes**
 
@@ -177,7 +177,7 @@ landed optimization or a measured re-queue decision.
 **Files**
 
 - Modify: `docs/plans/2026-03-12_vstyle-semantic-runtime-follow-up.md`
-- Modify: `docs/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`
+- Modify: `docs/research/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`
 - Review: `README.md`
 
 **Changes**

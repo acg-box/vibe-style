@@ -20,7 +20,7 @@ Depends on:
 Verification:
 
 - the selected benchmark command(s) match the touched lane
-- local evidence is recorded in `docs/benchmarks/...` when a fresh baseline matters
+- local evidence is recorded in `docs/research/benchmarks/...` when a fresh baseline matters
 - project-level evidence is available through the `Benchmarks` workflow after commit or merge
 
 ## Pick the benchmark lane
@@ -56,7 +56,7 @@ Verification:
 
 - Use the non-blocking `Benchmarks` workflow on `main` for periodic baseline refreshes and
   artifact-backed history.
-- Record meaningful checkpoint results in `docs/benchmarks/...` so later work has a stable local
+- Record meaningful checkpoint results in `docs/research/benchmarks/...` so later work has a stable local
   comparison point.
 - Do not turn the benchmark workflow into a mandatory PR gate unless runner noise and alert policy
   are already understood.

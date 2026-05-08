@@ -44,7 +44,7 @@ were collected while the spacing regex-hoist was still only in the working tree.
   baseline.
 - The actual committed spacing checkpoint is `bb4fae5`.
 - The source-of-truth benchmark note for the landed spacing change is
-  `docs/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`.
+  `docs/research/benchmarks/2026-03-12_vstyle-spacing-regex-hoist.md`.
 
 ## Verification
 

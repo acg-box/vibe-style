@@ -1,4 +1,4 @@
-# Style Import Derive Interactions
+# Style Import-Derive Interactions
 
 Purpose: Define the normative interaction between `RUST-STYLE-IMPORT-008`, `RUST-STYLE-IMPORT-009`, and `RUST-STYLE-IMPORT-011` when the same `#[derive(...)]` attribute is eligible for more than one rule.
 

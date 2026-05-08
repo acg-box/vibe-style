@@ -76,7 +76,7 @@ A reproducible, release-only benchmark path exists for `curate` and `tune`, and 
 - Modify: `Makefile.toml`
 - Modify: `README.md`
 - Create: `scripts/bench-release-vstyle.sh`
-- Create: `docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
+- Create: `docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
 - Review: `Cargo.toml`
 
 **Changes**
@@ -84,7 +84,7 @@ A reproducible, release-only benchmark path exists for `curate` and `tune`, and 
 1. Create a benchmark script that builds the local release binary, creates a disposable Git worktree at the current commit, and runs the selected-profile `vstyle curate --workspace` plus `vstyle tune --workspace --verbose` inside that isolated checkout.
 2. Add a repo-native entrypoint in `Makefile.toml` for the benchmark script so executors do not need to rediscover the invocation pattern.
 3. Document the benchmark policy in `README.md`, including that debug timings are diagnostic only and that `tune` benchmarks must not run in the primary checkout.
-4. Capture the initial baseline in `docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`.
+4. Capture the initial baseline in `docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`.
 
 **Verification**
 
@@ -265,7 +265,7 @@ Release-benchmark evidence showed that the current no-op `tune` workload still b
 - Modify: `src/style/shared.rs`
 - Modify: `src/style.rs`
 - Review: `src/style/semantic.rs`
-- Review: `docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
+- Review: `docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
 
 **Changes**
 
@@ -305,7 +305,7 @@ The repository and Linear stream now show the current release-performance eviden
 **Files**
 
 - Modify: `README.md`
-- Modify: `docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
+- Modify: `docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`
 - Review: `docs/plans/2026-03-11_vstyle-release-runtime-acceleration.md`
 
 **Changes**

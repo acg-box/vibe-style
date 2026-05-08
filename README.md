@@ -196,7 +196,7 @@ validation and should not be used to judge semantic-path changes in `src/style/s
 Use a semantic-positive workload before drawing conclusions about semantic validation performance.
 
 The current baseline and checkpoint history live in
-`docs/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`.
+`docs/research/benchmarks/2026-03-12_vstyle-release-runtime-baseline.md`.
 
 To compare the plain `release` profile diagnostically:
 
@@ -228,7 +228,7 @@ Use this semantic benchmark to judge `XY-95`-style work; do not compare semantic
 against the self-host no-op benchmark above.
 
 The current semantic-path baseline and follow-up history live in
-`docs/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`.
+`docs/research/benchmarks/2026-03-12_vstyle-semantic-runtime-baseline.md`.
 
 ### Benchmark tracking
 
@@ -246,7 +246,7 @@ quality-path changes. Use the semantic benchmark for `src/style/semantic.rs`, se
 changes, or semantic-validation fallback changes. Run both when a change touches both lanes.
 
 The operational runbook for selecting the right benchmark evidence lives in
-`docs/guide/benchmark_tracking.md`.
+`docs/runbook/benchmark_tracking.md`.
 
 ## Configuration
 
@@ -296,6 +296,7 @@ Rules are built into the checker.
 - `RUST-STYLE-IMPORT-003`: Do not alias imports, except `as _` keep-alive imports. Trait imports used only for method resolution must use `as _`.
 - `RUST-STYLE-IMPORT-004`: Do not import free functions or macros into scope; use qualified paths. If imported symbols are ambiguous, use fully qualified paths.
 - `RUST-STYLE-IMPORT-005`: In `error.rs`, do not add `use` imports.
+- `RUST-STYLE-IMPORT-006`: Keep `use` items only at file top level or module top level.
 - `RUST-STYLE-IMPORT-007`: Do not use glob imports (`use ...::*` or equivalent). Use explicit imports only.
 - `RUST-STYLE-IMPORT-008`: For non-function, non-macro symbols in type paths and `#[derive(...)]` attributes, prefer unqualified usage with `use` imports when unambiguous; keep fully qualified paths when ambiguous.
 - `RUST-STYLE-IMPORT-009`: If a symbol is both imported and also used via other qualified type paths, stop importing that symbol and use fully qualified paths consistently.
@@ -359,6 +360,11 @@ cargo make test-rust
 # Full checks.
 cargo make checks
 ```
+
+## Documentation
+
+Durable repository docs start at `docs/index.md`.
+Documentation placement and naming rules live in `docs/policy.md`.
 
 ## License
 

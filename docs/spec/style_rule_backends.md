@@ -1,6 +1,7 @@
-# Style Rule Backend Map
+# Style Rule Backends
 
-Purpose: Document which style rules are primarily AST-backed versus layout-backed, and where semantic (compiler) signals are involved.
+Purpose: Document the primary evidence backend for every style rule registered in
+`src/style/shared.rs`.
 
 Status: normative
 
@@ -17,7 +18,7 @@ Not this document:
 Defines:
 
 - The backend-class definitions used by this repository.
-- The backend classification for each listed style rule.
+- The backend classification for each rule ID listed in `STYLE_RULE_IDS`.
 
 This document is normative for documentation purposes only. It does not change rule semantics.
 
@@ -25,24 +26,32 @@ This document is normative for documentation purposes only. It does not change r
 
 - AST-backed: The rule's primary signal comes from `ra_ap_syntax` (`SourceFile` and `ast::*` nodes).
 - Layout-backed: The rule's primary signal comes from raw source text (`FileContext.text`, `FileContext.lines`), token stream heuristics, or regex.
+- Path-backed: The rule's primary signal comes from the checked file path.
 - Semantic-backed: The rule depends on compiler output (`cargo check --message-format=json`) or compiler-error diffs as part of validation.
 
 ## Rule Backend Classification
 
-AST-backed rules (some may also use limited text for replacement formatting):
+Path-backed rules:
 
 - `RUST-STYLE-FILE-001`
+
+AST-backed rules (some may also use limited text for replacement formatting):
+
+- `RUST-STYLE-MOD-004`
+- `RUST-STYLE-MOD-007`
 - `RUST-STYLE-SERDE-001`
 - `RUST-STYLE-IMPORT-001`
 - `RUST-STYLE-IMPORT-002`
 - `RUST-STYLE-IMPORT-003`
 - `RUST-STYLE-IMPORT-004`
 - `RUST-STYLE-IMPORT-005`
+- `RUST-STYLE-IMPORT-006`
 - `RUST-STYLE-IMPORT-007`
 - `RUST-STYLE-IMPORT-008`
 - `RUST-STYLE-IMPORT-009`
 - `RUST-STYLE-IMPORT-010`
 - `RUST-STYLE-IMPORT-011`
+- `RUST-STYLE-IMPORT-012`
 - `RUST-STYLE-GENERICS-001`
 - `RUST-STYLE-GENERICS-002`
 - `RUST-STYLE-GENERICS-003`
@@ -55,7 +64,6 @@ AST-backed rules (some may also use limited text for replacement formatting):
 - `RUST-STYLE-READ-002`
 - `RUST-STYLE-TEST-001`
 - `RUST-STYLE-TEST-002`
-- `RUST-STYLE-MOD-007`
 
 Layout-backed rules (source-text driven by design):
 

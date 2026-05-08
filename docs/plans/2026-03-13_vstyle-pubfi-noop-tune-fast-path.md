@@ -108,7 +108,7 @@ to `1.54s-1.56s`.
 **Files**
 
 - Review: `src/style.rs`
-- Create: `docs/benchmarks/2026-03-13_vstyle-pubfi-noop-tune-fast-path.md`
+- Create: `docs/research/benchmarks/2026-03-13_vstyle-pubfi-noop-tune-fast-path.md`
 
 **Changes**
 
@@ -143,7 +143,7 @@ evidence aligned around the clean-workspace fast path.
 **Files**
 
 - Create: `docs/plans/2026-03-13_vstyle-pubfi-noop-tune-fast-path.md`
-- Create: `docs/benchmarks/2026-03-13_vstyle-pubfi-noop-tune-fast-path.md`
+- Create: `docs/research/benchmarks/2026-03-13_vstyle-pubfi-noop-tune-fast-path.md`
 
 **Changes**
 
