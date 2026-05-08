@@ -179,7 +179,6 @@ fn check_function_length(path: &Path, masked_lines: &[String], violations: &mut 
 		if pending_func_line.is_none() && FUNC_RE.is_match(line) {
 			pending_func_line = Some(idx);
 		}
-
 		if pending_func_line.is_some()
 			&& let Some(open_brace) = line.find('{')
 		{
@@ -228,44 +227,50 @@ fn mask_swift_code_line(line: &str, state: &mut MaskState) -> String {
 		if state.block_comment_depth > 0 {
 			if ch == '/' && next == Some('*') {
 				state.block_comment_depth += 1;
+
 				masked.push(' ');
 				masked.push(' ');
+
 				idx += 2;
 
 				continue;
 			}
 			if ch == '*' && next == Some('/') {
 				state.block_comment_depth = state.block_comment_depth.saturating_sub(1);
+
 				masked.push(' ');
 				masked.push(' ');
+
 				idx += 2;
 
 				continue;
 			}
 
 			masked.push(' ');
+
 			idx += 1;
 
 			continue;
 		}
-
 		if state.in_multiline_string {
 			if ch == '"' && next == Some('"') && third == Some('"') {
 				state.in_multiline_string = false;
+
 				masked.push(' ');
 				masked.push(' ');
 				masked.push(' ');
+
 				idx += 3;
 
 				continue;
 			}
 
 			masked.push(' ');
+
 			idx += 1;
 
 			continue;
 		}
-
 		if state.in_string {
 			if state.escape {
 				state.escape = false;
@@ -276,40 +281,47 @@ fn mask_swift_code_line(line: &str, state: &mut MaskState) -> String {
 			}
 
 			masked.push(' ');
+
 			idx += 1;
 
 			continue;
 		}
-
 		if ch == '/' && next == Some('/') {
 			break;
 		}
 		if ch == '/' && next == Some('*') {
 			state.block_comment_depth += 1;
+
 			masked.push(' ');
 			masked.push(' ');
+
 			idx += 2;
 
 			continue;
 		}
 		if ch == '"' && next == Some('"') && third == Some('"') {
 			state.in_multiline_string = true;
+
 			masked.push(' ');
 			masked.push(' ');
 			masked.push(' ');
+
 			idx += 3;
 
 			continue;
 		}
 		if ch == '"' {
 			state.in_string = true;
+
 			masked.push(' ');
+
 			idx += 1;
 
 			continue;
 		}
 
 		masked.push(ch);
+
 		idx += 1;
 	}
 
