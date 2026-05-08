@@ -8,30 +8,18 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**/*.md'
-      - '.gitignore'
-      - 'docs/**'
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - '**/*.md'
-      - '.gitignore'
-      - 'docs/**'
   merge_group:
-    paths-ignore:
-      - '**/*.md'
-      - '.gitignore'
-      - 'docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  rust:
-    name: Rust checks
+  cargo-clippy:
+    name: Task cargo clippy
     runs-on: ubuntu-latest
     steps:
       - name: Fetch latest code
@@ -73,14 +61,38 @@ jobs:
       - name: Run lint
         run: cargo make lint
 
-      - name: Run Rust format checks
-        run: cargo make fmt-rust-check
+  cargo-fmt:
+    name: Task cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch latest code
+        uses: actions/checkout@v6
 
-      - name: Run tests
-        run: cargo make test-rust
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+          rustflags: ''
+          components: rustfmt
 
-  toml:
-    name: TOML checks
+      - name: Install nightly rustfmt
+        run: rustup toolchain install nightly --component rustfmt
+
+      - name: Install cargo-make
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+
+      - name: Install taplo
+        uses: taiki-e/install-action@v2
+        with:
+          tool: taplo
+
+      - name: Run format checks
+        run: cargo make fmt-check
+
+  cargo-nextest:
+    name: Task cargo nextest
     runs-on: ubuntu-latest
     steps:
       - name: Fetch latest code
@@ -97,10 +109,10 @@ jobs:
         with:
           tool: cargo-make
 
-      - name: Install taplo
+      - name: Install nextest
         uses: taiki-e/install-action@v2
         with:
-          tool: taplo
+          tool: nextest
 
-      - name: Run TOML format checks
-        run: cargo make fmt-toml-check
+      - name: Run tests
+        run: cargo make test-rust
