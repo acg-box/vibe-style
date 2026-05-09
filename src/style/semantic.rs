@@ -1,4 +1,5 @@
 use std::{
+	cmp::Reverse,
 	collections::{BTreeMap, BTreeSet},
 	env, fs,
 	io::ErrorKind,
@@ -579,7 +580,7 @@ fn apply_missing_import_suggestions(
 	let mut applied = 0_usize;
 	let mut ordered = suggestions.to_vec();
 
-	ordered.sort_by_key(|suggestion| std::cmp::Reverse(suggestion.line));
+	ordered.sort_by_key(|suggestion| Reverse(suggestion.line));
 
 	for suggestion in ordered {
 		let line_start = line_start_offset(&text, suggestion.line).unwrap_or(0);
