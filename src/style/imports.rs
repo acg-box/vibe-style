@@ -30,7 +30,7 @@ type Import009Plan<'a> = (
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Import008CandidateKind {
 	TypePath,
-	ValueConstructor,
+	ValuePath,
 	ValueReceiver,
 	MacroModule,
 	Derive,
@@ -3344,7 +3344,7 @@ fn build_import008_blocked_symbols(
 
 		if !matches!(
 			candidate.kind,
-			Import008CandidateKind::ValueReceiver | Import008CandidateKind::ValueConstructor
+			Import008CandidateKind::ValueReceiver | Import008CandidateKind::ValuePath
 		) {
 			non_value_receiver_candidate_symbols.insert(candidate.symbol.clone());
 		}
@@ -4115,6 +4115,9 @@ fn collect_import008_from_type_like_value_paths(
 		if is_non_importable_root(root) {
 			continue;
 		}
+		if is_primitive_associated_value_path(&segments) {
+			continue;
+		}
 
 		let import_path = segments.join("::");
 		let range = candidate.path.syntax().text_range();
@@ -4131,12 +4134,37 @@ fn collect_import008_from_type_like_value_paths(
 			line,
 			start,
 			end,
-			kind: Import008CandidateKind::ValueConstructor,
+			kind: Import008CandidateKind::ValuePath,
 			symbol,
 			import_path,
 			replacement: candidate.name_ref.text().to_string(),
 		});
 	}
+}
+
+fn is_primitive_associated_value_path(segments: &[String]) -> bool {
+	match segments {
+		[receiver, _] => is_rust_primitive_type_ident(receiver),
+		[root, primitive_module, receiver, _]
+			if matches!(root.as_str(), "core" | "std") && primitive_module == "primitive" =>
+			is_rust_primitive_type_ident(receiver),
+		_ => false,
+	}
+}
+
+fn is_rust_primitive_type_ident(segment: &str) -> bool {
+	matches!(
+		normalize_ident(segment),
+		"bool"
+			| "char" | "f32"
+			| "f64" | "i8"
+			| "i16" | "i32"
+			| "i64" | "i128"
+			| "isize" | "str"
+			| "u8" | "u16"
+			| "u32" | "u64"
+			| "u128" | "usize"
+	)
 }
 
 fn collect_import008_from_value_receivers(

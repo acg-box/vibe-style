@@ -25,7 +25,7 @@ use color_eyre::Result;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use semantic::SemanticCacheStats;
-use shared::{Edit, FileContext, Violation};
+use shared::{Edit, FileContext, STYLE_RULE_IDS, Violation};
 
 type FixRoundScope = (Vec<PathBuf>, CargoOptions);
 
@@ -225,7 +225,7 @@ pub(crate) fn semantic_cache_stats() -> SemanticCacheStats {
 }
 
 pub(crate) fn print_coverage() {
-	for rule in shared::STYLE_RULE_IDS {
+	for rule in STYLE_RULE_IDS {
 		println!("{rule}\timplemented");
 	}
 }
@@ -4358,6 +4358,48 @@ fn sort(values: &mut [usize]) {
 		assert!(rewritten.contains("use std::cmp::Reverse;"), "{rewritten}");
 		assert!(rewritten.contains("Reverse(*value)"), "{rewritten}");
 		assert!(!rewritten.contains("std::cmp::Reverse(*value)"), "{rewritten}");
+	}
+
+	#[test]
+	fn import008_shortens_type_like_value_constants_without_primitive_constants() {
+		let original = r#"
+mod shared {
+	pub const STYLE_RULE_IDS: [&str; 0] = [];
+}
+
+fn max_value() -> usize {
+	usize::MAX
+}
+
+fn print_coverage() {
+	for rule in shared::STYLE_RULE_IDS {
+		println!("{rule}");
+	}
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_type_like_value_constants.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("use shared::STYLE_RULE_IDS;"), "{rewritten}");
+		assert!(rewritten.contains("for rule in STYLE_RULE_IDS"), "{rewritten}");
+		assert!(rewritten.contains("usize::MAX"), "{rewritten}");
+		assert!(!rewritten.contains("use usize::MAX"), "{rewritten}");
+		assert!(!rewritten.contains("for rule in shared::STYLE_RULE_IDS"), "{rewritten}");
 	}
 
 	#[test]
