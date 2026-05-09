@@ -1,0 +1,171 @@
+name: vibe-style
+description: Install vibe-style and run a language-specific style check.
+
+inputs:
+  language:
+    description: Source language to check. Supported values are rust and swift.
+    required: true
+  workspace:
+    description: Pass --workspace to vstyle.
+    required: false
+    default: "true"
+  args:
+    description: Extra arguments appended after the action-managed vstyle arguments.
+    required: false
+    default: ""
+  version:
+    description: vibe-style release tag to install, latest, or checkout.
+    required: false
+    default: "latest"
+
+runs:
+  using: composite
+  steps:
+    - name: Install vibe-style (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        VSTYLE_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        version="${VSTYLE_VERSION}"
+        install_dir="${RUNNER_TEMP}/vibe-style/bin"
+
+        if [[ "${version}" == "checkout" ]]; then
+          cargo install \
+            --path "${GITHUB_ACTION_PATH}" \
+            --bin vstyle \
+            --bin cargo-vstyle \
+            --locked \
+            --root "${RUNNER_TEMP}/vibe-style"
+          echo "${install_dir}" >> "${GITHUB_PATH}"
+          exit 0
+        fi
+
+        if [[ "${version}" == "latest" ]]; then
+          version="$(
+            curl -fsSL https://api.github.com/repos/hack-ink/vibe-style/releases/latest |
+              grep -oE '"tag_name": "v[^"]+"' |
+              cut -d'"' -f4
+          )"
+        fi
+
+        os="$(uname -s)"
+        arch="$(uname -m)"
+        case "${os}:${arch}" in
+          Linux:x86_64) target="x86_64-unknown-linux-gnu" ;;
+          Darwin:arm64) target="aarch64-apple-darwin" ;;
+          *) echo "Unsupported platform: ${os}/${arch}" >&2; exit 1 ;;
+        esac
+
+        asset="vibe-style-${target}-${version}.tgz"
+        curl -fsSLO "https://github.com/hack-ink/vibe-style/releases/download/${version}/${asset}"
+        tar -xzf "${asset}"
+
+        mkdir -p "${install_dir}"
+        install -m 0755 "vibe-style-${target}-${version}/vstyle" "${install_dir}/vstyle"
+        install -m 0755 "vibe-style-${target}-${version}/cargo-vstyle" "${install_dir}/cargo-vstyle"
+        echo "${install_dir}" >> "${GITHUB_PATH}"
+
+    - name: Install vibe-style (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        VSTYLE_VERSION: ${{ inputs.version }}
+      run: |
+        $ErrorActionPreference = "Stop"
+
+        $version = $env:VSTYLE_VERSION
+        $installDir = Join-Path $env:RUNNER_TEMP "vibe-style/bin"
+
+        if ($version -eq "checkout") {
+          cargo install `
+            --path $env:GITHUB_ACTION_PATH `
+            --bin vstyle `
+            --bin cargo-vstyle `
+            --locked `
+            --root (Join-Path $env:RUNNER_TEMP "vibe-style")
+          Add-Content -Path $env:GITHUB_PATH -Value $installDir
+          exit 0
+        }
+
+        if ($version -eq "latest") {
+          $version = (Invoke-RestMethod -Uri "https://api.github.com/repos/hack-ink/vibe-style/releases/latest").tag_name
+        }
+
+        $target = "x86_64-pc-windows-msvc"
+        $asset = "vibe-style-$target-$version.zip"
+        Invoke-WebRequest `
+          -Uri "https://github.com/hack-ink/vibe-style/releases/download/$version/$asset" `
+          -OutFile $asset
+        Expand-Archive -Path $asset -DestinationPath .
+
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        Copy-Item "vibe-style-$target-$version/vstyle.exe" "$installDir/vstyle.exe" -Force
+        Copy-Item "vibe-style-$target-$version/cargo-vstyle.exe" "$installDir/cargo-vstyle.exe" -Force
+        Add-Content -Path $env:GITHUB_PATH -Value $installDir
+
+    - name: Run vibe-style (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        VSTYLE_LANGUAGE: ${{ inputs.language }}
+        VSTYLE_WORKSPACE: ${{ inputs.workspace }}
+        VSTYLE_ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+
+        case "${VSTYLE_LANGUAGE}" in
+          rust | swift) ;;
+          *) echo "Unsupported language: ${VSTYLE_LANGUAGE}" >&2; exit 1 ;;
+        esac
+
+        args=(curate --language "${VSTYLE_LANGUAGE}")
+        case "${VSTYLE_WORKSPACE}" in
+          true) args+=(--workspace) ;;
+          false) ;;
+          *) echo "workspace must be true or false" >&2; exit 1 ;;
+        esac
+
+        if [[ -n "${VSTYLE_ARGS}" ]]; then
+          read -r -a extra_args <<< "${VSTYLE_ARGS}"
+          args+=("${extra_args[@]}")
+        fi
+
+        vstyle "${args[@]}"
+
+    - name: Run vibe-style (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        VSTYLE_LANGUAGE: ${{ inputs.language }}
+        VSTYLE_WORKSPACE: ${{ inputs.workspace }}
+        VSTYLE_ARGS: ${{ inputs.args }}
+      run: |
+        $ErrorActionPreference = "Stop"
+
+        switch ($env:VSTYLE_LANGUAGE) {
+          "rust" {}
+          "swift" {}
+          default {
+            Write-Error "Unsupported language: $env:VSTYLE_LANGUAGE"
+            exit 1
+          }
+        }
+
+        $argsList = @("curate", "--language", $env:VSTYLE_LANGUAGE)
+        switch ($env:VSTYLE_WORKSPACE) {
+          "true" { $argsList += "--workspace" }
+          "false" {}
+          default {
+            Write-Error "workspace must be true or false"
+            exit 1
+          }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($env:VSTYLE_ARGS)) {
+          $argsList += $env:VSTYLE_ARGS -split "\s+"
+        }
+
+        & vstyle @argsList

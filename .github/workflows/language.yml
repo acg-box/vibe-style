@@ -40,16 +40,16 @@ jobs:
         with:
           tool: cargo-make
 
-      - name: Install vibe-style from checkout
-        run: cargo install --path . --bin vstyle --bin cargo-vstyle --locked
-
-      - name: Install nextest
-        uses: taiki-e/install-action@v2
+      - name: Run vibe-style
+        uses: ./
         with:
-          tool: nextest
+          language: rust
+          workspace: true
+          args: --all-features
+          version: checkout
 
-      - name: Run lint
-        run: cargo make lint
+      - name: Run Rust lint
+        run: cargo make lint-rust
 
   cargo-fmt:
     name: Task cargo fmt

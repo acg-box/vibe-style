@@ -83,6 +83,25 @@ Supported prebuilt targets:
 - `aarch64-apple-darwin`
 - `x86_64-pc-windows-msvc`
 
+### GitHub Actions
+
+Use the composite action to install a prebuilt release and run a read-only style check:
+
+```yaml
+- uses: actions/checkout@v6
+- uses: hack-ink/vibe-style@v1
+  with:
+    language: rust
+    workspace: true
+    args: --all-features
+```
+
+The action runs `vstyle curate --language <language>`, adds `--workspace` when
+`workspace: true`, and appends `args`. Use `language: swift` for Swift checks, and use
+`version: v0.2.0` when CI should pin a specific `vibe-style` release. Use
+`version: checkout` only when the workflow should build `vibe-style` from the action
+checkout, such as this repository's own local `uses: ./` workflow.
+
 ### Install from crates.io (requires Rust/Cargo)
 
 ```sh
