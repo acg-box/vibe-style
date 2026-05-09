@@ -92,15 +92,10 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
 
-      - name: Hash
+      - name: Collect release assets
         run: |
           mkdir -p artifacts
           mv vibe-style-*/* artifacts/
-          cd artifacts
-          find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum | tee ../SHA256
-          find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 md5sum | tee ../MD5
-          mv ../SHA256 .
-          mv ../MD5 .
 
       - name: Publish
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
