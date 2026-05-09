@@ -75,15 +75,15 @@ jobs:
           fi
 
           {
-            printf '## %s\n\n' "${{ matrix.name }}"
-            printf 'Summary file: `%s`\n\n' "${summary_file#./}"
-            printf '```text\n'
+            printf "## %s\n\n" "${{ matrix.name }}"
+            printf "Summary file: \`%s\`\n\n" "${summary_file#./}"
+            printf "%s\n" '```text'
             cat "${summary_file}"
-            printf '```\n'
+            printf "%s\n" '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: benchmarks-${{ matrix.key }}-${{ github.run_number }}-${{ github.run_attempt }}
           path: ${{ matrix.artifact_path }}

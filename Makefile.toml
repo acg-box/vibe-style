@@ -205,11 +205,11 @@ args = [
 
 
 # Meta
-# | task   | type      | cwd |
-# | ------ | --------- | --- |
-# | bench-release-vstyle | command | |
-# | bench-semantic-vstyle | command | |
-# | checks | composite |     |
+# | task                  | type      | cwd |
+# | --------------------- | --------- | --- |
+# | bench-release-vstyle  | command   |     |
+# | bench-semantic-vstyle | command   |     |
+# | checks                | composite |     |
 
 [tasks.bench-release-vstyle]
 workspace = false
