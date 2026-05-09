@@ -38,7 +38,7 @@ vergen-gitcl = { version = "9.1", features = ["cargo"] }
 cargo_metadata = { version = "0.23" }
 clap           = { version = "4.6", features = ["derive"] }
 color-eyre     = { version = "0.6" }
-ra_ap_syntax   = { version = "0.0.319" }
+ra_ap_syntax   = { version = "0.0.331" }
 rayon          = { version = "1.12" }
 regex          = { version = "1.12" }
 serde_json     = { version = "1.0" }

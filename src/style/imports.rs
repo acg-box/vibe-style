@@ -3710,7 +3710,10 @@ fn collect_import011_candidates(
 			continue;
 		}
 
-		let Some(token_tree) = meta.token_tree() else {
+		let Some(token_tree) = (match meta {
+			ast::Meta::TokenTreeMeta(meta) => meta.token_tree(),
+			_ => None,
+		}) else {
 			continue;
 		};
 		let tree_text = token_tree.syntax().text().to_string();
@@ -4884,7 +4887,10 @@ fn unqualified_derive_attr_symbol_rewrites(
 			continue;
 		}
 
-		let Some(token_tree) = meta.token_tree() else {
+		let Some(token_tree) = (match meta {
+			ast::Meta::TokenTreeMeta(meta) => meta.token_tree(),
+			_ => None,
+		}) else {
 			continue;
 		};
 		let tree_text = token_tree.syntax().text().to_string();
