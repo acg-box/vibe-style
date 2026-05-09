@@ -199,10 +199,9 @@ from the Cargo workspace root.
 
 ### CI policy
 
-CI installs `vstyle` and `cargo-vstyle` from the current checkout, then runs language-specific
-`vstyle curate` commands (read-only verification) to keep feedback fast and deterministic. Use
-language-specific `vstyle tune` commands locally when you want to apply safe automatic fixes (for
-example, via `cargo make lint-fix`).
+CI runs the checked-out action for Rust read-only style verification to keep feedback fast and
+deterministic. Use `vstyle tune` locally when you want to apply safe automatic fixes (for example,
+via `cargo make lint`).
 
 ### Release benchmark
 
@@ -388,24 +387,23 @@ This repository uses `cargo make` tasks from `Makefile.toml`.
 cargo make fmt
 cargo make fmt-check
 
-# Lint (clippy + vibe-style).
+# Full read-only verification.
+cargo make check
+
+# Rust-only clippy check.
+cargo make check-rust
+
+# vibe-style read-only check.
+cargo make check-vstyle
+
+# Apply lint fixes (clippy + vibe-style).
 cargo make lint
 
-# Rust-only clippy.
-cargo make lint-rust
-
-# vibe-style only.
+# Apply vibe-style fixes.
 cargo make lint-vstyle
-
-# vibe-style by language.
-cargo make lint-vstyle-rust
-cargo make lint-vstyle-swift
 
 # Rust tests.
 cargo make test-rust
-
-# Full checks.
-cargo make checks
 ```
 
 ## Documentation

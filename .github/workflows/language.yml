@@ -8,9 +8,17 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - 'docs/**'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - 'docs/**'
   merge_group:
 
 concurrency:
@@ -18,8 +26,8 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  cargo-clippy:
-    name: Task cargo clippy
+  rust-check:
+    name: Rust check
     runs-on: ubuntu-latest
     steps:
       - name: Fetch latest code
@@ -40,7 +48,15 @@ jobs:
         with:
           tool: cargo-make
 
-      - name: Run vibe-style
+      - name: Install nextest
+        uses: taiki-e/install-action@3fa6878dc4ae603f73960271565a082bf196ab96 # v2.77.2
+        with:
+          tool: nextest
+
+      - name: Run Rust format check
+        run: cargo make fmt-rust-check
+
+      - name: Run Rust style check
         uses: ./
         with:
           language: rust
@@ -48,11 +64,14 @@ jobs:
           args: --all-features
           version: checkout
 
-      - name: Run Rust lint
-        run: cargo make lint-rust
+      - name: Run Rust clippy
+        run: cargo make check-rust
 
-  cargo-fmt:
-    name: Task cargo fmt
+      - name: Run tests
+        run: cargo make test-rust
+
+  toml-check:
+    name: TOML check
     runs-on: ubuntu-latest
     steps:
       - name: Fetch latest code
@@ -63,10 +82,6 @@ jobs:
         with:
           cache: true
           rustflags: ''
-          components: rustfmt
-
-      - name: Install nightly rustfmt
-        run: rustup toolchain install nightly --component rustfmt
 
       - name: Install cargo-make
         uses: taiki-e/install-action@3fa6878dc4ae603f73960271565a082bf196ab96 # v2.77.2
@@ -78,31 +93,5 @@ jobs:
         with:
           tool: taplo
 
-      - name: Run format checks
-        run: cargo make fmt-check
-
-  cargo-nextest:
-    name: Task cargo nextest
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fetch latest code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
-        with:
-          cache: true
-          rustflags: ''
-
-      - name: Install cargo-make
-        uses: taiki-e/install-action@3fa6878dc4ae603f73960271565a082bf196ab96 # v2.77.2
-        with:
-          tool: cargo-make
-
-      - name: Install nextest
-        uses: taiki-e/install-action@3fa6878dc4ae603f73960271565a082bf196ab96 # v2.77.2
-        with:
-          tool: nextest
-
-      - name: Run tests
-        run: cargo make test-rust
+      - name: Run TOML format check
+        run: cargo make fmt-toml-check
