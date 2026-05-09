@@ -9,10 +9,10 @@ Use `vstyle` as a language-aware style gate. Do not treat one language lane as m
 important than another. Choose the lane from the user's request, changed files,
 repository wrappers, and current `vstyle` help.
 
-Current CLI fact: when `--language` is omitted, `vstyle curate` and `vstyle tune`
-use the default language lane. Today that default is Rust. Select Swift explicitly
-with `--language swift`. For future language lanes, inspect the repository wrapper
-or `vstyle <command> --help` instead of hard-coding assumptions.
+Current CLI fact: `vstyle curate` and `vstyle tune` require an explicit
+`--language`. Use `--language rust` for Rust and `--language swift` for Swift. For
+future language lanes, inspect the repository wrapper or `vstyle <command> --help`
+instead of hard-coding assumptions.
 
 ## Quick Workflow
 
@@ -49,33 +49,33 @@ or `vstyle <command> --help` instead of hard-coding assumptions.
 
 ## Command Recipes
 
-Current direct-command default lane validation. Today this default is Rust:
+Rust lane validation:
 
 ```sh
-vstyle curate
-vstyle curate --workspace
+vstyle curate --language rust
+vstyle curate --language rust --workspace
 ```
 
 Swift lane validation:
 
 ```sh
-vstyle curate --workspace --language swift
+vstyle curate --language swift --workspace
 ```
 
 Rust Cargo package and feature scoped validation:
 
 ```sh
-vstyle curate -p api --features serde,tracing
-vstyle curate -p api --all-features --no-default-features
+vstyle curate --language rust -p api --features serde,tracing
+vstyle curate --language rust -p api --all-features --no-default-features
 ```
 
 Safe fixes where the selected lane supports them:
 
 ```sh
-vstyle tune
-vstyle tune --strict
-vstyle tune -p api --all-features --strict
-vstyle tune --workspace --all-features --strict
+vstyle tune --language rust
+vstyle tune --language rust --strict
+vstyle tune --language rust -p api --all-features --strict
+vstyle tune --language rust --workspace --all-features --strict
 ```
 
 Rule discovery:
@@ -97,7 +97,7 @@ before assuming the right `--language` value or scope flags.
 - `coverage` prints implemented rule IDs for supported language lanes, such as
   `RUST-STYLE-*` and `SWIFT-STYLE-*`.
 - `curate` and `tune` use Cargo-like scope flags. They do not accept positional file
-  paths such as `vstyle curate src/lib.rs`.
+  paths such as `vstyle curate --language rust src/lib.rs`.
 - File discovery scans selected style files that are not Git-ignored. Git tracking
   state is not the filter, so non-ignored untracked files can be checked.
 - Today, `--workspace` selects Rust files from Cargo workspace package roots, and

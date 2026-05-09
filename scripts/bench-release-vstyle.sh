@@ -117,8 +117,8 @@ summary_file="${log_dir}/summary.txt"
 	printf 'WORKTREE=%s\n' "$bench_worktree"
 	printf 'LOG_DIR=%s\n' "$log_dir"
 	printf 'VSTYLE_VERSION=%s\n' "$("$binary_path" --version)"
-	run_bench curate "$binary_path" curate --workspace
-	run_bench tune "$binary_path" tune --workspace --verbose
+	run_bench curate "$binary_path" curate --language rust --workspace
+	run_bench tune "$binary_path" tune --language rust --workspace --verbose
 } | tee "$summary_file"
 
 printf 'Benchmark summary saved to %s\n' "$summary_file"

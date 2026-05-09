@@ -68,7 +68,7 @@ pub fn build_error() -> MyError {
 
 	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
 		.current_dir(&temp_dir)
-		.arg("tune")
+		.args(["tune", "--language", "rust"])
 		.output()
 		.expect("run vstyle");
 

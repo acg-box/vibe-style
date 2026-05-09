@@ -182,9 +182,9 @@ summary_file="${log_dir}/summary.txt"
 	printf 'FIXTURE_ROOT=%s\n' "$fixture_root"
 	printf 'LOG_DIR=%s\n' "$log_dir"
 	printf 'VSTYLE_VERSION=%s\n' "$("$binary_path" --version)"
-	run_bench cold_tune "$binary_path" tune --verbose
+	run_bench cold_tune "$binary_path" tune --language rust --verbose
 	write_fixture_sources
-	run_bench warm_tune "$binary_path" tune --verbose
+	run_bench warm_tune "$binary_path" tune --language rust --verbose
 } | tee "$summary_file"
 
 printf 'Benchmark summary saved to %s\n' "$summary_file"
