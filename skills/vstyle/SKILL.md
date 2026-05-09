@@ -20,7 +20,7 @@ instead of hard-coding assumptions.
    - Prefer checked-in wrappers from `Makefile.toml`, `justfile`, `Makefile`,
      package scripts, CI workflows, or repository docs.
    - Wrapper names may be generic (`style`, `style-check`, `fmt`, `fmt-check`,
-     `lint`, `checks`) or language-specific (`lint-vstyle`, `lint-vstyle-swift`).
+     `check`, `lint`) or style-specific (`check-vstyle`, `lint-vstyle`).
    - Use direct `vstyle` commands only when no relevant repository wrapper exists.
 2. Determine language lanes.
    - Rust lane: changed `*.rs` files or a Rust-focused wrapper.
