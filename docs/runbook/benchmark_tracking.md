@@ -38,11 +38,11 @@ Verification:
 - File discovery follows Git ignore rules only: every non-ignored style file for the selected
   language is scanned, and tracking state does not affect local discovery.
 - If the change expands self-host style coverage, run
-  `target/final-release/vstyle curate --workspace` first and fix any newly reported repository drift
-  before treating timing results as meaningful.
+  `target/final-release/vstyle curate --language rust --workspace` first and fix any newly
+  reported repository drift before treating timing results as meaningful.
 - For an uncommitted current-worktree snapshot, time the local binary directly:
-  - `target/final-release/vstyle curate --workspace`
-  - `target/final-release/vstyle tune --workspace --verbose`
+  - `target/final-release/vstyle curate --language rust --workspace`
+  - `target/final-release/vstyle tune --language rust --workspace --verbose`
 - Treat those direct timings as pre-commit local evidence only.
 
 ## Commit-anchored release harness

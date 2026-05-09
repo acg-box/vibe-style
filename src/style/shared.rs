@@ -142,7 +142,7 @@ pub(crate) struct RunSummary {
 	pub(crate) output_lines: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct CargoOptions {
 	pub(crate) language: StyleLanguage,
 	pub(crate) workspace: bool,
@@ -151,10 +151,22 @@ pub(crate) struct CargoOptions {
 	pub(crate) all_features: bool,
 	pub(crate) no_default_features: bool,
 }
+impl CargoOptions {
+	#[cfg(test)]
+	pub(crate) fn new(language: StyleLanguage) -> Self {
+		Self {
+			language,
+			workspace: false,
+			packages: Vec::new(),
+			features: Vec::new(),
+			all_features: false,
+			no_default_features: false,
+		}
+	}
+}
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StyleLanguage {
-	#[default]
 	Rust,
 	Swift,
 }

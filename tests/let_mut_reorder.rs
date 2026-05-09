@@ -74,7 +74,7 @@ pub fn closure_carries_binding() {
 
 	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
 		.current_dir(&temp_dir)
-		.arg("tune")
+		.args(["tune", "--language", "rust"])
 		.output()
 		.expect("run vstyle");
 
@@ -143,7 +143,7 @@ pub fn closure_carries_binding() {
 
 	let cold = Command::new(env!("CARGO_BIN_EXE_vstyle"))
 		.current_dir(&temp_dir)
-		.args(["tune", "--verbose"])
+		.args(["tune", "--language", "rust", "--verbose"])
 		.output()
 		.expect("run cold vstyle");
 
@@ -165,7 +165,7 @@ pub fn closure_carries_binding() {
 
 	let warm = Command::new(env!("CARGO_BIN_EXE_vstyle"))
 		.current_dir(&temp_dir)
-		.args(["tune", "--verbose"])
+		.args(["tune", "--language", "rust", "--verbose"])
 		.output()
 		.expect("run warm vstyle");
 

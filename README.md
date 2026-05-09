@@ -127,18 +127,20 @@ After installation, you can run `cargo vstyle ...`.
 
 ### Basic commands
 
+`curate` and `tune` require an explicit `--language`.
+
 ```sh
 # Check style.
-vstyle curate
+vstyle curate --language rust
 
 # Apply safe fixes, then re-check.
-vstyle tune
+vstyle tune --language rust
 
 # Same as tune, but fail if violations remain.
-vstyle tune --strict
+vstyle tune --language rust --strict
 
 # Enable verbose output.
-vstyle tune --verbose
+vstyle tune --language rust --verbose
 
 # Print implemented rule IDs.
 vstyle coverage
@@ -148,17 +150,17 @@ vstyle coverage
 
 ```sh
 # Workspace-wide.
-vstyle curate --workspace
+vstyle curate --language rust --workspace
 
 # Swift workspace-wide.
-vstyle curate --workspace --language swift
+vstyle curate --language swift --workspace
 
 # Selected packages.
-vstyle tune -p api -p db-service
+vstyle tune --language rust -p api -p db-service
 
 # Feature flags.
-vstyle tune -p api --features serde,tracing
-vstyle tune -p api --all-features --no-default-features
+vstyle tune --language rust -p api --features serde,tracing
+vstyle tune --language rust -p api --all-features --no-default-features
 ```
 
 ### Exit behavior
@@ -170,7 +172,7 @@ vstyle tune -p api --all-features --no-default-features
   - Exit `0`: even if unresolved violations remain.
   - Exit `1`: unresolved violations remain and `--strict` is used.
 
-By default, `curate` and `tune` check Rust files. Use `--language swift` to check Swift files.
+Use `--language rust` to check Rust files and `--language swift` to check Swift files.
 File discovery scans every selected `*.rs` or `*.swift` file that is not matched by Git ignore
 rules inside that package scope. Git tracking state is not part of file discovery. With
 `--workspace`, Rust files are selected from workspace package roots and Swift files are selected
@@ -179,8 +181,8 @@ from the Cargo workspace root.
 ### CI policy
 
 CI runs language-specific `vstyle curate` commands (read-only verification) to keep feedback fast
-and deterministic. Use `vstyle tune` locally when you want to apply safe automatic fixes (for
-example, via `cargo make lint-fix`).
+and deterministic. Use language-specific `vstyle tune` commands locally when you want to apply safe
+automatic fixes (for example, via `cargo make lint-fix`).
 
 ### Release benchmark
 
@@ -194,7 +196,8 @@ cargo make bench-release-vstyle
 ```
 
 By default the harness builds the shipping `final-release` profile from `Cargo.toml` and runs both
-`vstyle curate --workspace` and `vstyle tune --workspace --verbose` inside a disposable Git
+`vstyle curate --language rust --workspace` and
+`vstyle tune --language rust --workspace --verbose` inside a disposable Git
 worktree at the current commit. This keeps `tune` from rewriting the primary checkout while still
 preserving the Git ignore boundary used for file discovery.
 
@@ -214,8 +217,8 @@ VSTYLE_BENCH_PROFILE=release cargo make bench-release-vstyle
 ```
 
 `cargo make lint-vstyle` remains the repo-native style gate, but it is not the release benchmark
-source of truth because it routes through `cargo vstyle curate --workspace` and can resolve to an
-installed subcommand outside the locally built binary under test.
+source of truth because it routes through language-specific `cargo vstyle curate` tasks and can
+resolve to an installed subcommand outside the locally built binary under test.
 
 ### Semantic benchmark
 
@@ -228,7 +231,7 @@ cargo make bench-semantic-vstyle
 
 This harness builds the local release binary once, creates a disposable Git fixture crate
 based on the `tests/let_mut_reorder.rs` semantic-validation shape, generates a local `Cargo.lock`,
-and runs `vstyle tune --verbose` twice:
+and runs `vstyle tune --language rust --verbose` twice:
 
 - a cold run after clearing `target/vstyle-cache/semantic`
 - a warm rerun after restoring the original fixture sources while keeping the cache directory
@@ -373,6 +376,10 @@ cargo make lint-rust
 
 # vibe-style only.
 cargo make lint-vstyle
+
+# vibe-style by language.
+cargo make lint-vstyle-rust
+cargo make lint-vstyle-swift
 
 # Rust tests.
 cargo make test-rust

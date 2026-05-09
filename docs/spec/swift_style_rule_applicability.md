@@ -27,8 +27,10 @@ Defines:
 
 ## Backend Policy
 
-Rust remains the `vstyle` product shell: command-line parsing, file selection,
-diagnostic formatting, rule coverage, and exit behavior stay in Rust.
+The shared `vstyle` product shell remains implemented in Rust: command-line
+parsing, file selection, diagnostic formatting, rule coverage, and exit behavior
+stay in one host. This is an implementation boundary, not a priority order between
+Rust, Swift, or future language lanes.
 
 Swift rules that require Swift AST fidelity should use a SwiftSyntax-backed backend.
 The first Swift batch may use source-text checks only for rules whose syntax shape is

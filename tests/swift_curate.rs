@@ -2,7 +2,7 @@
 
 use std::{
 	env, fs,
-	path::PathBuf,
+	path::{Path, PathBuf},
 	process::{self, Command},
 	time::{SystemTime, UNIX_EPOCH},
 };
@@ -44,9 +44,7 @@ edition = "2021"
 	root
 }
 
-#[test]
-fn curate_reports_swift_workspace_violations_from_non_ignored_files() {
-	let temp_dir = create_temp_workspace_root();
+fn write_swift_fixture(temp_dir: &Path) {
 	let long_body = (0..121).map(|idx| format!("\tlet value{idx} = {idx}\n")).collect::<String>();
 	let swift_source = format!(
 		"import Foundation\n\
@@ -78,9 +76,11 @@ func testForceAllowed() {
 		.expect("write tracked ignored Swift source");
 	fs::write(temp_dir.join("Tests/AppTests.swift"), swift_test_source)
 		.expect("write Swift test source");
+}
 
+fn initialize_git_fixture(temp_dir: &Path) {
 	let status =
-		Command::new("git").current_dir(&temp_dir).args(["init"]).output().expect("git init");
+		Command::new("git").current_dir(temp_dir).args(["init"]).output().expect("git init");
 
 	assert!(
 		status.status.success(),
@@ -89,7 +89,7 @@ func testForceAllowed() {
 	);
 
 	let status = Command::new("git")
-		.current_dir(&temp_dir)
+		.current_dir(temp_dir)
 		.args([
 			"add",
 			"-f",
@@ -108,16 +108,32 @@ func testForceAllowed() {
 		"expected git add to succeed, stderr: {}",
 		String::from_utf8_lossy(&status.stderr)
 	);
+}
 
+fn assert_curate_requires_explicit_language(temp_dir: &Path) {
 	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
-		.current_dir(&temp_dir)
+		.current_dir(temp_dir)
 		.args(["curate", "--workspace"])
+		.output()
+		.expect("run vstyle");
+
+	assert!(!output.status.success(), "curate without an explicit language should fail");
+
+	let stderr = String::from_utf8_lossy(&output.stderr);
+
+	assert!(stderr.contains("--language"), "expected missing language diagnostic:\n{stderr}");
+}
+
+fn assert_rust_curate_ignores_swift(temp_dir: &Path) {
+	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(temp_dir)
+		.args(["curate", "--language", "rust", "--workspace"])
 		.output()
 		.expect("run vstyle");
 
 	assert!(
 		output.status.success(),
-		"default Rust-only curate should ignore Swift violations, stderr: {}",
+		"explicit Rust curate should ignore Swift violations, stderr: {}",
 		String::from_utf8_lossy(&output.stderr)
 	);
 
@@ -125,12 +141,14 @@ func testForceAllowed() {
 
 	assert!(
 		!stdout.contains("Sources/App/mod.swift"),
-		"default Rust-only curate should not scan Swift files:\n{stdout}"
+		"explicit Rust curate should not scan Swift files:\n{stdout}"
 	);
+}
 
+fn assert_swift_curate_reports_expected_violations(temp_dir: &Path) {
 	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
-		.current_dir(&temp_dir)
-		.args(["curate", "--workspace", "--language", "swift"])
+		.current_dir(temp_dir)
+		.args(["curate", "--language", "swift", "--workspace"])
 		.output()
 		.expect("run vstyle");
 
@@ -162,4 +180,15 @@ func testForceAllowed() {
 		!stdout.contains("IgnoredTracked.swift"),
 		"git-ignored Swift files should not be scanned even when tracked"
 	);
+}
+
+#[test]
+fn curate_reports_swift_workspace_violations_from_non_ignored_files() {
+	let temp_dir = create_temp_workspace_root();
+
+	write_swift_fixture(&temp_dir);
+	initialize_git_fixture(&temp_dir);
+	assert_curate_requires_explicit_language(&temp_dir);
+	assert_rust_curate_ignores_swift(&temp_dir);
+	assert_swift_curate_reports_expected_violations(&temp_dir);
 }

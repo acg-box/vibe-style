@@ -110,7 +110,7 @@ enum Command {
 #[derive(Clone, Debug, Args)]
 struct CargoCliOptions {
 	/// Source language to check.
-	#[arg(long = "language", value_enum, default_value_t = LanguageCliOption::Rust)]
+	#[arg(long = "language", value_enum, required = true)]
 	language: LanguageCliOption,
 	/// Check all packages in the workspace.
 	#[arg(long)]
@@ -202,30 +202,44 @@ mod tests {
 
 	#[test]
 	fn parses_curate_subcommand() {
-		let cli = Cli::parse_from(["app", "curate"]);
+		let cli = Cli::parse_from(["app", "curate", "--language", "rust"]);
 
 		assert!(matches!(cli.command, Command::Curate { strict: false, .. }));
 	}
 
 	#[test]
 	fn parses_curate_strict_subcommand() {
-		let cli = Cli::parse_from(["app", "curate", "--strict"]);
+		let cli = Cli::parse_from(["app", "curate", "--language", "rust", "--strict"]);
 
 		assert!(matches!(cli.command, Command::Curate { strict: true, .. }));
 	}
 
 	#[test]
 	fn parses_tune_subcommand() {
-		let cli = Cli::parse_from(["app", "tune"]);
+		let cli = Cli::parse_from(["app", "tune", "--language", "rust"]);
 
 		assert!(matches!(cli.command, Command::Tune { strict: false, .. }));
 	}
 
 	#[test]
 	fn parses_tune_strict_subcommand() {
-		let cli = Cli::parse_from(["app", "tune", "--strict"]);
+		let cli = Cli::parse_from(["app", "tune", "--language", "rust", "--strict"]);
 
 		assert!(matches!(cli.command, Command::Tune { strict: true, .. }));
+	}
+
+	#[test]
+	fn rejects_curate_without_language() {
+		let parsed = Cli::try_parse_from(["app", "curate"]);
+
+		assert!(parsed.is_err());
+	}
+
+	#[test]
+	fn rejects_tune_without_language() {
+		let parsed = Cli::try_parse_from(["app", "tune"]);
+
+		assert!(parsed.is_err());
 	}
 
 	#[test]
@@ -233,6 +247,8 @@ mod tests {
 		let cli = Cli::parse_from([
 			"app",
 			"tune",
+			"--language",
+			"rust",
 			"--workspace",
 			"-p",
 			"api",
@@ -255,7 +271,7 @@ mod tests {
 
 	#[test]
 	fn parses_curate_with_swift_language() {
-		let cli = Cli::parse_from(["app", "curate", "--workspace", "--language", "swift"]);
+		let cli = Cli::parse_from(["app", "curate", "--language", "swift", "--workspace"]);
 		let Command::Curate { cargo, .. } = cli.command else {
 			panic!("Expected curate command.");
 		};
@@ -267,14 +283,14 @@ mod tests {
 
 	#[test]
 	fn rejects_curate_positional_paths() {
-		let parsed = Cli::try_parse_from(["app", "curate", "src/main.rs"]);
+		let parsed = Cli::try_parse_from(["app", "curate", "--language", "rust", "src/main.rs"]);
 
 		assert!(parsed.is_err());
 	}
 
 	#[test]
 	fn rejects_tune_positional_paths() {
-		let parsed = Cli::try_parse_from(["app", "tune", "src/main.rs"]);
+		let parsed = Cli::try_parse_from(["app", "tune", "--language", "rust", "src/main.rs"]);
 
 		assert!(parsed.is_err());
 	}

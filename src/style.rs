@@ -7986,7 +7986,10 @@ fn sample() {
 
 	#[test]
 	fn resolve_fix_round_scopes_workspace_splits_to_package_scopes() {
-		let cargo_options = shared::CargoOptions { workspace: true, ..Default::default() };
+		let cargo_options = shared::CargoOptions {
+			workspace: true,
+			..shared::CargoOptions::new(shared::StyleLanguage::Rust)
+		};
 		let workspace_files =
 			shared::resolve_files(&cargo_options).expect("resolve workspace files");
 		let scopes = super::resolve_fix_round_scopes(&cargo_options).expect("resolve fix scopes");
@@ -8007,11 +8010,17 @@ fn sample() {
 		let scopes = vec![
 			(
 				vec![PathBuf::from("a/src/lib.rs"), PathBuf::from("a/src/mod.rs")],
-				shared::CargoOptions { packages: vec!["a".to_owned()], ..Default::default() },
+				shared::CargoOptions {
+					packages: vec!["a".to_owned()],
+					..shared::CargoOptions::new(shared::StyleLanguage::Rust)
+				},
 			),
 			(
 				vec![PathBuf::from("b/src/lib.rs")],
-				shared::CargoOptions { packages: vec!["b".to_owned()], ..Default::default() },
+				shared::CargoOptions {
+					packages: vec!["b".to_owned()],
+					..shared::CargoOptions::new(shared::StyleLanguage::Rust)
+				},
 			),
 		];
 
@@ -8023,11 +8032,17 @@ fn sample() {
 		let scopes = vec![
 			(
 				vec![PathBuf::from("shared/src/lib.rs")],
-				shared::CargoOptions { packages: vec!["a".to_owned()], ..Default::default() },
+				shared::CargoOptions {
+					packages: vec!["a".to_owned()],
+					..shared::CargoOptions::new(shared::StyleLanguage::Rust)
+				},
 			),
 			(
 				vec![PathBuf::from("shared/src/lib.rs"), PathBuf::from("b/src/lib.rs")],
-				shared::CargoOptions { packages: vec!["b".to_owned()], ..Default::default() },
+				shared::CargoOptions {
+					packages: vec!["b".to_owned()],
+					..shared::CargoOptions::new(shared::StyleLanguage::Rust)
+				},
 			),
 		];
 
@@ -8117,7 +8132,7 @@ fn sample() {
 
 		let summary = super::run_fix_round(
 			slice::from_ref(&path),
-			&shared::CargoOptions::default(),
+			&shared::CargoOptions::new(shared::StyleLanguage::Rust),
 			false,
 			false,
 		)
