@@ -180,9 +180,10 @@ from the Cargo workspace root.
 
 ### CI policy
 
-CI runs language-specific `vstyle curate` commands (read-only verification) to keep feedback fast
-and deterministic. Use language-specific `vstyle tune` commands locally when you want to apply safe
-automatic fixes (for example, via `cargo make lint-fix`).
+CI installs `vstyle` and `cargo-vstyle` from the current checkout, then runs language-specific
+`vstyle curate` commands (read-only verification) to keep feedback fast and deterministic. Use
+language-specific `vstyle tune` commands locally when you want to apply safe automatic fixes (for
+example, via `cargo make lint-fix`).
 
 ### Release benchmark
 

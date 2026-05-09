@@ -30,6 +30,7 @@ type Import009Plan<'a> = (
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Import008CandidateKind {
 	TypePath,
+	ValueConstructor,
 	ValueReceiver,
 	MacroModule,
 	Derive,
@@ -3341,7 +3342,10 @@ fn build_import008_blocked_symbols(
 			.or_default()
 			.insert(candidate.import_path.clone());
 
-		if candidate.kind != Import008CandidateKind::ValueReceiver {
+		if !matches!(
+			candidate.kind,
+			Import008CandidateKind::ValueReceiver | Import008CandidateKind::ValueConstructor
+		) {
 			non_value_receiver_candidate_symbols.insert(candidate.symbol.clone());
 		}
 	}
@@ -3991,6 +3995,7 @@ fn collect_import008_candidates(ctx: &FileContext) -> Vec<Import008Candidate> {
 	let mut seen_ranges = HashSet::new();
 
 	collect_import008_from_paths(ctx, &mut candidates, &mut seen_ranges);
+	collect_import008_from_type_like_value_paths(ctx, &mut candidates, &mut seen_ranges);
 	collect_import008_from_value_receivers(ctx, &mut candidates, &mut seen_ranges);
 	collect_import008_from_macro_calls(ctx, &mut candidates, &mut seen_ranges);
 	collect_import008_from_derive_attrs(ctx, &derive_path_re, &mut candidates, &mut seen_ranges);
@@ -4065,6 +4070,71 @@ fn collect_import008_from_paths(
 			symbol,
 			import_path,
 			replacement,
+		});
+	}
+}
+
+fn collect_import008_from_type_like_value_paths(
+	ctx: &FileContext,
+	candidates: &mut Vec<Import008Candidate>,
+	seen_ranges: &mut HashSet<(usize, usize)>,
+) {
+	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+		let Some(candidate) = classify_value_path_candidate(
+			ctx,
+			path,
+			PathQualificationRequirement::Qualified,
+			false,
+			true,
+		) else {
+			continue;
+		};
+		let mut segments = Vec::new();
+
+		if !collect_path_segment_texts(&candidate.path, &mut segments) {
+			continue;
+		}
+		if segments.len() < 2 {
+			continue;
+		}
+
+		let symbol = normalize_ident(segments[segments.len() - 1].as_str()).to_owned();
+
+		if !is_import009_type_like_symbol(&symbol) {
+			continue;
+		}
+		if segments
+			.get(segments.len().saturating_sub(2))
+			.is_some_and(|segment| is_import009_type_like_symbol(normalize_ident(segment)))
+		{
+			continue;
+		}
+
+		let root = segments[0].as_str();
+
+		if is_non_importable_root(root) {
+			continue;
+		}
+
+		let import_path = segments.join("::");
+		let range = candidate.path.syntax().text_range();
+		let start = usize::from(range.start());
+		let end = usize::from(range.end());
+
+		if start >= end || !seen_ranges.insert((start, end)) {
+			continue;
+		}
+
+		let line = shared::line_from_offset(&ctx.line_starts, start);
+
+		candidates.push(Import008Candidate {
+			line,
+			start,
+			end,
+			kind: Import008CandidateKind::ValueConstructor,
+			symbol,
+			import_path,
+			replacement: candidate.name_ref.text().to_string(),
 		});
 	}
 }

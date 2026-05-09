@@ -4331,6 +4331,36 @@ fn demo(v: Vec<shared::Violation>) -> Option<shared::Violation> {
 	}
 
 	#[test]
+	fn import008_shortens_type_like_value_constructor_paths() {
+		let original = r#"
+fn sort(values: &mut [usize]) {
+	values.sort_by_key(|value| std::cmp::Reverse(*value));
+}
+"#;
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..4 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import008_type_like_value_constructor.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_violations, edits) = crate::style::collect_violations(&ctx, true);
+
+			if edits.is_empty() {
+				break;
+			}
+
+			let _applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+		}
+
+		assert!(rewritten.contains("use std::cmp::Reverse;"), "{rewritten}");
+		assert!(rewritten.contains("Reverse(*value)"), "{rewritten}");
+		assert!(!rewritten.contains("std::cmp::Reverse(*value)"), "{rewritten}");
+	}
+
+	#[test]
 	fn import008_skips_non_importable_self_root_paths() {
 		let text = r#"
 trait Job {
