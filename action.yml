@@ -1,4 +1,4 @@
-name: vibe-style
+name: VStyle Curate
 description: Install vibe-style and run a language-specific style check.
 
 inputs:
