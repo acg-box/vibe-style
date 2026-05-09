@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vstyle"
+  short_description: "Run language-aware vstyle checks"
+  default_prompt: "Use $vstyle to enforce vibe-style constraints for the affected language lanes in this repository."
