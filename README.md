@@ -98,7 +98,7 @@ Use the composite action to install a prebuilt release and run a read-only style
 
 The action runs `vstyle curate --language <language>`, adds `--workspace` when
 `workspace: true`, and appends `args`. Use `language: swift` for Swift checks, and use
-`version: v0.2.1` when CI should pin a specific `vibe-style` release. Use
+`version: v0.2.2` when CI should pin a specific `vibe-style` release. Use
 `version: checkout` only when the workflow should build `vibe-style` from the action
 checkout, such as this repository's own local `uses: ./` workflow.
 
@@ -158,12 +158,17 @@ vstyle tune --language rust
 # Same as tune, but fail if violations remain.
 vstyle tune --language rust --strict
 
-# Enable verbose output.
+# Include verbose cache diagnostics in addition to tune progress.
 vstyle tune --language rust --verbose
 
 # Print implemented rule IDs.
 vstyle coverage
 ```
+
+`tune` prints progress telemetry to stderr for the initial scan, each fix round, scoped
+fix batches, semantic validation, and the final scan when fixes were applied. This
+output is emitted even when stderr is redirected so long-running workspace repairs
+remain observable in logs.
 
 ### Cargo-like target selection
 

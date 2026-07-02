@@ -277,24 +277,29 @@ fn apply_import012_crate_keep_alive_rule(
 	use_item_analyses: &[UseItemAnalysis<'_>],
 	local_module_roots: &HashSet<String>,
 ) {
-	let package_contexts = shared::package_rust_files_for_path(&ctx.path).ok().flatten().map(
-		|(current_path, package_files)| {
-			package_files
-				.into_iter()
-				.filter(|path| *path != current_path)
-				.filter_map(|path| shared::read_file_context(&path).ok().flatten())
-				.collect::<Vec<_>>()
-		},
-	);
+	let keep_alive_imports = use_item_analyses
+		.iter()
+		.filter_map(|use_item_analysis| {
+			import012_keep_alive_root(&use_item_analysis.path, local_module_roots)
+				.map(|root| (use_item_analysis.item, root))
+		})
+		.collect::<Vec<_>>();
 
-	for use_item_analysis in use_item_analyses {
-		let item = use_item_analysis.item;
-		let Some(root) = import012_keep_alive_root(&use_item_analysis.path, local_module_roots)
-		else {
+	if keep_alive_imports.is_empty() {
+		return;
+	}
+
+	let mut package_contexts = None;
+
+	for (item, root) in keep_alive_imports {
+		if import012_context_mentions_root(ctx, Some(item.start_offset), root.as_str()) {
 			continue;
-		};
+		}
 
-		if import012_has_other_root_usage(ctx, item, root.as_str(), package_contexts.as_deref()) {
+		let package_contexts =
+			package_contexts.get_or_insert_with(|| import012_package_contexts(ctx));
+
+		if import012_package_contexts_mention_root(package_contexts, root.as_str()) {
 			continue;
 		}
 
@@ -307,6 +312,20 @@ fn apply_import012_crate_keep_alive_rule(
 			false,
 		);
 	}
+}
+
+fn import012_package_contexts(ctx: &FileContext) -> Vec<FileContext> {
+	shared::package_rust_files_for_path(&ctx.path)
+		.ok()
+		.flatten()
+		.map(|(current_path, package_files)| {
+			package_files
+				.into_iter()
+				.filter(|path| *path != current_path)
+				.filter_map(|path| shared::read_file_context(&path).ok().flatten())
+				.collect::<Vec<_>>()
+		})
+		.unwrap_or_default()
 }
 
 fn import012_keep_alive_root(path: &str, local_module_roots: &HashSet<String>) -> Option<String> {
@@ -336,25 +355,10 @@ fn import012_keep_alive_root(path: &str, local_module_roots: &HashSet<String>) -
 	Some(base.to_owned())
 }
 
-fn import012_has_other_root_usage(
-	ctx: &FileContext,
-	current_item: &TopItem,
-	root: &str,
-	package_contexts: Option<&[FileContext]>,
-) -> bool {
-	if import012_context_mentions_root(ctx, Some(current_item.start_offset), root) {
-		return true;
-	}
-
-	if let Some(package_contexts) = package_contexts {
-		for package_ctx in package_contexts {
-			if import012_context_mentions_root(package_ctx, None, root) {
-				return true;
-			}
-		}
-	}
-
-	false
+fn import012_package_contexts_mention_root(package_contexts: &[FileContext], root: &str) -> bool {
+	package_contexts
+		.iter()
+		.any(|package_ctx| import012_context_mentions_root(package_ctx, None, root))
 }
 
 fn import012_context_mentions_root(
