@@ -1,7 +1,4 @@
-use std::{
-	io::{self, IsTerminal},
-	process::ExitCode,
-};
+use std::process::ExitCode;
 
 use clap::{
 	Args, Parser, Subcommand, ValueEnum,
@@ -59,8 +56,7 @@ impl Cli {
 				}
 			},
 			Command::Tune { strict, cargo } => {
-				let summary =
-					style::run_fix(&cargo.as_options(), verbose, io::stderr().is_terminal())?;
+				let summary = style::run_fix(&cargo.as_options(), verbose, true)?;
 
 				print_summary(&summary, true);
 				print_semantic_cache_stats(verbose);

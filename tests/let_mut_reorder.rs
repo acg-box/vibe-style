@@ -93,6 +93,26 @@ pub fn closure_carries_binding() {
 	assert!(safe_immutable_pos < safe_mut_pos);
 	assert_eq!(unsafe_after, unsafe_source);
 	assert!(
+		stderr.contains("vstyle tune: starting initial scan."),
+		"expected initial scan telemetry on captured stderr:\n{stderr}"
+	);
+	assert!(
+		stderr.contains("vstyle tune: initial scan checked"),
+		"expected initial scan summary telemetry on captured stderr:\n{stderr}"
+	);
+	assert!(
+		stderr.contains("vstyle tune: round 1/"),
+		"expected fix round telemetry on captured stderr:\n{stderr}"
+	);
+	assert!(
+		stderr.contains("vstyle tune: starting final scan."),
+		"expected final scan start telemetry on captured stderr:\n{stderr}"
+	);
+	assert!(
+		stderr.contains("vstyle tune: final scan checked"),
+		"expected final scan summary telemetry on captured stderr:\n{stderr}"
+	);
+	assert!(
 		!stderr.contains("Skipped RUST-STYLE-LET-001 reorder in"),
 		"did not expect a semantic validation skip diagnostic for the unfixable fixture"
 	);

@@ -19,6 +19,7 @@ use std::{
 	collections::{BTreeMap, BTreeSet},
 	fs, mem,
 	path::{Path, PathBuf},
+	time::{Duration, Instant},
 };
 
 use color_eyre::Result;
@@ -115,6 +116,16 @@ struct SemanticValidationFallbacks<'a> {
 	type_alias_rename_files: &'a BTreeMap<PathBuf, ()>,
 }
 
+#[derive(Debug)]
+struct FileFixApplication {
+	changed_files: Vec<PathBuf>,
+	total_applied: usize,
+	import_fallbacks: BTreeMap<PathBuf, ImportFallbackPlan>,
+	changed_originals: BTreeMap<PathBuf, (PathBuf, String)>,
+	let_mut_reorder_files: BTreeMap<PathBuf, ()>,
+	type_alias_rename_files: BTreeMap<PathBuf, ()>,
+}
+
 pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
 	let (summary, _state) = run_check_with_state(cargo_options)?;
 
@@ -128,7 +139,7 @@ pub(crate) fn run_fix(
 ) -> Result<RunSummary> {
 	semantic::reset_cache_stats();
 
-	let (initial_checked, mut check_state) = run_check_with_state(cargo_options)?;
+	let (initial_checked, mut check_state) = run_initial_check(cargo_options, progress)?;
 	let mut total_applied = 0_usize;
 	let mut previous_fixable_count = check_state.fixable_count();
 
@@ -207,7 +218,7 @@ pub(crate) fn run_fix(
 		previous_fixable_count = fixable_count;
 	}
 
-	let mut checked = if total_applied > 0 { run_check(cargo_options)? } else { initial_checked };
+	let mut checked = run_final_check(cargo_options, initial_checked, total_applied, progress)?;
 
 	checked.applied_fix_count = total_applied;
 
@@ -228,6 +239,70 @@ pub(crate) fn print_coverage() {
 	for rule in STYLE_RULE_IDS {
 		println!("{rule}\timplemented");
 	}
+}
+
+fn run_initial_check(
+	cargo_options: &CargoOptions,
+	progress: bool,
+) -> Result<(RunSummary, CheckState)> {
+	if progress {
+		eprintln!("vstyle tune: starting initial scan.");
+	}
+
+	let started = Instant::now();
+	let (summary, state) = run_check_with_state(cargo_options)?;
+
+	if progress {
+		eprintln!(
+			"vstyle tune: initial scan checked {} file(s), found {} violation(s), {} fixable, {} manual ({}).",
+			summary.file_count,
+			summary.violation_count,
+			state.fixable_count(),
+			summary.unfixable_count,
+			format_duration(started.elapsed()),
+		);
+	}
+
+	Ok((summary, state))
+}
+
+fn run_final_check(
+	cargo_options: &CargoOptions,
+	initial_checked: RunSummary,
+	total_applied: usize,
+	progress: bool,
+) -> Result<RunSummary> {
+	if total_applied == 0 {
+		return Ok(initial_checked);
+	}
+	if progress {
+		eprintln!("vstyle tune: starting final scan.");
+	}
+
+	let started = Instant::now();
+	let checked = run_check(cargo_options)?;
+
+	if progress {
+		eprintln!(
+			"vstyle tune: final scan checked {} file(s), found {} remaining violation(s), {} manual ({}).",
+			checked.file_count,
+			checked.violation_count,
+			checked.unfixable_count,
+			format_duration(started.elapsed()),
+		);
+	}
+
+	Ok(checked)
+}
+
+fn format_duration(duration: Duration) -> String {
+	let millis = duration.as_millis();
+
+	if millis < 1_000 {
+		return format!("{millis}ms");
+	}
+
+	format!("{}.{:03}s", millis / 1_000, millis % 1_000)
 }
 
 fn run_check_with_state(cargo_options: &CargoOptions) -> Result<(RunSummary, CheckState)> {
@@ -389,97 +464,80 @@ fn run_fix_round(
 	}
 
 	let round_start_snapshot = collect_file_snapshots(files);
-	let type_alias_plan = collect_type_alias_rename_plan(files)?;
-	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan)?;
-	let changed_files = changed_file_paths(&outcomes_all);
-	let mut total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
-	let mut import_fallbacks: BTreeMap<PathBuf, ImportFallbackPlan> = BTreeMap::new();
-	let mut changed_originals: BTreeMap<PathBuf, (PathBuf, String)> = BTreeMap::new();
-	let mut let_mut_reorder_files: BTreeMap<PathBuf, ()> = BTreeMap::new();
-	let mut type_alias_rename_files: BTreeMap<PathBuf, ()> = BTreeMap::new();
+	let mut file_fixes = collect_and_apply_file_fixes(files, &scope_label, progress)?;
 
-	for outcome in outcomes_all {
-		if let Some(text) = outcome.rewritten_text {
-			fs::write(&outcome.path, text)?;
-		}
-		if let Some(original_text) = outcome.original_text {
-			changed_originals
-				.insert(normalize_path(&outcome.path), (outcome.path.clone(), original_text));
-		}
-		if let Some(source_text) = outcome.import_fallback_source_text {
-			let normalized = normalize_path(&outcome.path);
-
-			import_fallbacks
-				.insert(normalized, ImportFallbackPlan { path: outcome.path.clone(), source_text });
-		}
-
-		if outcome.had_let_mut_reorder_edits {
-			let_mut_reorder_files.insert(normalize_path(&outcome.path), ());
-		}
-		if outcome.had_type_alias_rename_edits {
-			type_alias_rename_files.insert(normalize_path(&outcome.path), ());
-		}
-	}
-
-	if changed_files.is_empty() {
+	if file_fixes.changed_files.is_empty() {
 		if progress {
-			eprintln!("vstyle tune: [{scope_label}] applied {} fix(es) this round.", total_applied);
+			eprintln!(
+				"vstyle tune: [{scope_label}] applied {} fix(es) this round.",
+				file_fixes.total_applied
+			);
 		}
 
 		return Ok(FixRoundSummary::default());
 	}
 
-	let semantic_cargo_options = scoped_semantic_cargo_options(cargo_options, &changed_files)?;
+	let semantic_cargo_options =
+		scoped_semantic_cargo_options(cargo_options, &file_fixes.changed_files)?;
 
 	if progress {
 		eprintln!("vstyle tune: [{scope_label}] running semantic validation.");
 	}
 
+	let semantic_started = Instant::now();
 	let (baseline_stdout, baseline_error_files) =
 		semantic::collect_compiler_error_files_with_output(
-			&changed_files,
+			&file_fixes.changed_files,
 			&semantic_cargo_options,
 			verbose,
 			progress,
 		)?;
-	let semantic_phase_start_snapshot = collect_file_snapshots(&changed_files);
+	let semantic_phase_start_snapshot = collect_file_snapshots(&file_fixes.changed_files);
 	let semantic_applied = semantic::apply_semantic_fixes(
-		&changed_files,
+		&file_fixes.changed_files,
 		&semantic_cargo_options,
 		Some(baseline_stdout),
 		verbose,
 		progress,
 	)?;
 
-	total_applied += semantic_applied;
+	file_fixes.total_applied += semantic_applied;
 
+	if progress {
+		eprintln!(
+			"vstyle tune: [{scope_label}] semantic validation found {} baseline error file(s) and applied {} import fix(es) ({}).",
+			baseline_error_files.len(),
+			semantic_applied,
+			format_duration(semantic_started.elapsed()),
+		);
+	}
 	if semantic_applied > 0 {
-		total_applied += apply_post_semantic_cleanup(
-			&changed_files,
+		file_fixes.total_applied += apply_post_semantic_cleanup(
+			&file_fixes.changed_files,
 			&semantic_phase_start_snapshot,
-			&mut import_fallbacks,
-			&mut changed_originals,
-			&mut let_mut_reorder_files,
+			&mut file_fixes.import_fallbacks,
+			&mut file_fixes.changed_originals,
+			&mut file_fixes.let_mut_reorder_files,
 		)?;
 	}
 
 	handle_semantic_validation_fallbacks(SemanticValidationFallbacks {
-		files: &changed_files,
+		files: &file_fixes.changed_files,
 		semantic_cargo_options: &semantic_cargo_options,
 		baseline_error_files: &baseline_error_files,
 		post_error_files: (semantic_applied == 0).then_some(&baseline_error_files),
 		verbose,
 		progress,
-		import_fallbacks: &import_fallbacks,
-		changed_originals: &changed_originals,
-		let_mut_reorder_files: &let_mut_reorder_files,
-		type_alias_rename_files: &type_alias_rename_files,
+		import_fallbacks: &file_fixes.import_fallbacks,
+		changed_originals: &file_fixes.changed_originals,
+		let_mut_reorder_files: &file_fixes.let_mut_reorder_files,
+		type_alias_rename_files: &file_fixes.type_alias_rename_files,
 	})?;
 
 	let net_changed_files = changed_files_since_snapshot(&round_start_snapshot);
 
 	// Count this round as no-op when all edits are eventually rolled back.
-	if total_applied > 0 && net_changed_files.is_empty() {
+	if file_fixes.total_applied > 0 && net_changed_files.is_empty() {
 		return Ok(FixRoundSummary::default());
 	}
 
@@ -490,14 +548,84 @@ fn run_fix_round(
 	};
 
 	if progress {
-		eprintln!("vstyle tune: [{scope_label}] applied {} fix(es) this round.", total_applied);
+		eprintln!(
+			"vstyle tune: [{scope_label}] applied {} fix(es) this round across {} net changed file(s).",
+			file_fixes.total_applied,
+			net_changed_files.len(),
+		);
 	}
 
 	Ok(FixRoundSummary {
-		applied_count: total_applied,
+		applied_count: file_fixes.total_applied,
 		requires_follow_up_round,
 		changed_files: net_changed_files,
 	})
+}
+
+fn collect_and_apply_file_fixes(
+	files: &[PathBuf],
+	scope_label: &str,
+	progress: bool,
+) -> Result<FileFixApplication> {
+	let collect_started = Instant::now();
+	let type_alias_plan = collect_type_alias_rename_plan(files)?;
+	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan, scope_label, progress)?;
+	let changed_files = changed_file_paths(&outcomes_all);
+	let total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
+
+	if progress {
+		eprintln!(
+			"vstyle tune: [{scope_label}] collected {} fix(es) across {} changed file(s) ({}).",
+			total_applied,
+			changed_files.len(),
+			format_duration(collect_started.elapsed()),
+		);
+	}
+
+	let mut application = FileFixApplication {
+		changed_files,
+		total_applied,
+		import_fallbacks: BTreeMap::new(),
+		changed_originals: BTreeMap::new(),
+		let_mut_reorder_files: BTreeMap::new(),
+		type_alias_rename_files: BTreeMap::new(),
+	};
+
+	for outcome in outcomes_all {
+		apply_file_fix_outcome(outcome, &mut application)?;
+	}
+
+	Ok(application)
+}
+
+fn apply_file_fix_outcome(
+	outcome: FileFixOutcome,
+	application: &mut FileFixApplication,
+) -> Result<()> {
+	if let Some(text) = outcome.rewritten_text {
+		fs::write(&outcome.path, text)?;
+	}
+	if let Some(original_text) = outcome.original_text {
+		application
+			.changed_originals
+			.insert(normalize_path(&outcome.path), (outcome.path.clone(), original_text));
+	}
+	if let Some(source_text) = outcome.import_fallback_source_text {
+		let normalized = normalize_path(&outcome.path);
+
+		application
+			.import_fallbacks
+			.insert(normalized, ImportFallbackPlan { path: outcome.path.clone(), source_text });
+	}
+
+	if outcome.had_let_mut_reorder_edits {
+		application.let_mut_reorder_files.insert(normalize_path(&outcome.path), ());
+	}
+	if outcome.had_type_alias_rename_edits {
+		application.type_alias_rename_files.insert(normalize_path(&outcome.path), ());
+	}
+
+	Ok(())
 }
 
 fn fix_scope_label(cargo_options: &CargoOptions) -> String {
@@ -767,10 +895,15 @@ fn apply_type_alias_rename_plan(
 fn collect_fix_outcomes(
 	files: &[PathBuf],
 	type_alias_plan: &TypeAliasRenamePlan,
+	scope_label: &str,
+	progress: bool,
 ) -> Result<Vec<FileFixOutcome>> {
+	let batch_count = files.len().div_ceil(FILE_BATCH_SIZE);
 	let mut outcomes_all = Vec::<FileFixOutcome>::new();
+	let mut processed = 0_usize;
 
-	for batch in files.chunks(FILE_BATCH_SIZE) {
+	for (batch_idx, batch) in files.chunks(FILE_BATCH_SIZE).enumerate() {
+		let batch_started = Instant::now();
 		let outcomes = batch
 			.par_iter()
 			.map(|file| -> Result<FileFixOutcome> {
@@ -808,9 +941,34 @@ fn collect_fix_outcomes(
 				})
 			})
 			.collect::<Vec<_>>();
+		let mut batch_applied = 0_usize;
+		let mut batch_changed = 0_usize;
 
 		for outcome in outcomes {
-			outcomes_all.push(outcome?);
+			let outcome = outcome?;
+
+			batch_applied += outcome.applied_count;
+
+			if outcome.rewritten_text.is_some() {
+				batch_changed += 1;
+			}
+
+			outcomes_all.push(outcome);
+		}
+
+		processed += batch.len();
+
+		if progress && batch_count > 1 {
+			eprintln!(
+				"vstyle tune: [{scope_label}] fix scan batch {}/{} checked {}/{} file(s), changed {}, found {} fix(es) ({}).",
+				batch_idx + 1,
+				batch_count,
+				processed,
+				files.len(),
+				batch_changed,
+				batch_applied,
+				format_duration(batch_started.elapsed()),
+			);
 		}
 	}
 
@@ -2356,6 +2514,8 @@ use crate::z::Z;
 		let outcomes = super::collect_fix_outcomes(
 			slice::from_ref(&path),
 			&super::TypeAliasRenamePlan::default(),
+			"test",
+			false,
 		)
 		.expect("collect fix outcomes");
 		let outcome = outcomes.first().expect("one outcome");
