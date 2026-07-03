@@ -77,6 +77,8 @@ pub(crate) fn check_serde_option_default(
 			}
 		}
 	}
+
+	check_macro_serde_option_default(ctx, violations, edits, emit_edits);
 }
 
 pub(crate) fn check_error_rs_no_use(
@@ -186,6 +188,57 @@ pub(crate) fn check_error_rs_no_use(
 			shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
 
 		edits.push(Edit { start, end, replacement: String::new(), rule: "RUST-STYLE-IMPORT-005" });
+	}
+}
+
+fn check_macro_serde_option_default(
+	ctx: &FileContext,
+	violations: &mut Vec<Violation>,
+	edits: &mut Vec<Edit>,
+	emit_edits: bool,
+) {
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
+		let Some(token_tree) = macro_call.token_tree() else {
+			continue;
+		};
+		let tree_text = token_tree.syntax().text().to_string();
+		let tree_start = usize::from(token_tree.syntax().text_range().start());
+
+		for (attr_start, attr_end) in macro_serde_option_default_attr_ranges(&tree_text) {
+			let start = tree_start + attr_start;
+			let end = tree_start + attr_end;
+			let line = shared::line_from_offset(&ctx.line_starts, start);
+
+			shared::push_violation(
+				violations,
+				ctx,
+				line,
+				"RUST-STYLE-SERDE-001",
+				"Do not use #[serde(default)] on Option<T> fields.",
+				true,
+			);
+
+			if !emit_edits || end <= start {
+				continue;
+			}
+
+			let attr_text = &tree_text[attr_start..attr_end];
+
+			match rewrite_serde_default_attr_line(attr_text) {
+				Some(rewritten) => edits.push(Edit {
+					start,
+					end,
+					replacement: rewritten,
+					rule: "RUST-STYLE-SERDE-001",
+				}),
+				None => edits.push(Edit {
+					start,
+					end,
+					replacement: String::new(),
+					rule: "RUST-STYLE-SERDE-001",
+				}),
+			}
+		}
 	}
 }
 
@@ -496,6 +549,336 @@ fn is_serde_default_attr(attr_text: &str) -> bool {
 
 		arg == "default" || arg.starts_with("default=")
 	})
+}
+
+fn macro_serde_option_default_attr_ranges(text: &str) -> Vec<(usize, usize)> {
+	let mut ranges = Vec::new();
+	let mut cursor = 0_usize;
+
+	while let Some(found) = text[cursor..].find("#[serde") {
+		let attr_start = cursor + found;
+
+		if offset_is_inside_macro_inert_text(text, attr_start) {
+			cursor = attr_start + 2;
+
+			continue;
+		}
+
+		let bracket_start = attr_start + 1;
+		let Some(bracket_end) = find_matching_delimiter(text, bracket_start, '[', ']') else {
+			cursor = attr_start + 2;
+
+			continue;
+		};
+		let attr_end = bracket_end + 1;
+		let attr_text = &text[attr_start..attr_end];
+
+		if is_serde_default_attr(attr_text) && macro_attr_followed_by_option_field(text, attr_end) {
+			ranges.push((attr_start, attr_end));
+		}
+
+		cursor = attr_end;
+	}
+
+	ranges
+}
+
+fn offset_is_inside_macro_inert_text(text: &str, target: usize) -> bool {
+	let mut cursor = 0_usize;
+
+	while cursor < target {
+		if text[cursor..].starts_with("//") {
+			let end = text[cursor..].find('\n').map_or(text.len(), |newline| cursor + newline + 1);
+
+			if target < end {
+				return true;
+			}
+
+			cursor = end;
+
+			continue;
+		}
+		if text[cursor..].starts_with("/*") {
+			let Some(end) = skip_block_comment(text, cursor) else {
+				return true;
+			};
+
+			if target < end {
+				return true;
+			}
+
+			cursor = end;
+
+			continue;
+		}
+
+		if let Some(end) = skip_raw_string_literal(text, cursor) {
+			if target < end {
+				return true;
+			}
+
+			cursor = end;
+
+			continue;
+		}
+		if let Some(end) = skip_quoted_literal(text, cursor) {
+			if target < end {
+				return true;
+			}
+
+			cursor = end;
+
+			continue;
+		}
+
+		let Some(ch) = text[cursor..].chars().next() else {
+			break;
+		};
+
+		cursor += ch.len_utf8();
+	}
+
+	false
+}
+
+fn skip_block_comment(text: &str, cursor: usize) -> Option<usize> {
+	let mut depth = 0_i32;
+	let mut idx = cursor;
+
+	while idx < text.len() {
+		if text[idx..].starts_with("/*") {
+			depth += 1;
+			idx += 2;
+		} else if text[idx..].starts_with("*/") {
+			depth -= 1;
+			idx += 2;
+
+			if depth == 0 {
+				return Some(idx);
+			}
+		} else {
+			idx += text[idx..].chars().next()?.len_utf8();
+		}
+	}
+
+	None
+}
+
+fn skip_raw_string_literal(text: &str, cursor: usize) -> Option<usize> {
+	let mut prefix_len = 0_usize;
+
+	if text[cursor..].starts_with('b') {
+		prefix_len = 1;
+	}
+
+	let raw_start = cursor + prefix_len;
+
+	if !text[raw_start..].starts_with('r') {
+		return None;
+	}
+
+	let mut quote_idx = raw_start + 1;
+
+	while text[quote_idx..].starts_with('#') {
+		quote_idx += 1;
+	}
+
+	if !text[quote_idx..].starts_with('"') {
+		return None;
+	}
+
+	let hashes = quote_idx - raw_start - 1;
+	let mut close = String::from("\"");
+
+	for _ in 0..hashes {
+		close.push('#');
+	}
+
+	Some(
+		text[quote_idx + 1..]
+			.find(&close)
+			.map_or(text.len(), |found| quote_idx + 1 + found + close.len()),
+	)
+}
+
+fn skip_quoted_literal(text: &str, cursor: usize) -> Option<usize> {
+	let mut quote_idx = cursor;
+
+	if text[cursor..].starts_with('b') || text[cursor..].starts_with('c') {
+		quote_idx += 1;
+	}
+
+	let quote = text[quote_idx..].chars().next()?;
+
+	if quote != '"' && quote != '\'' {
+		return None;
+	}
+	if quote == '\'' && text[quote_idx + 1..].chars().next().is_some_and(is_ident_start) {
+		return None;
+	}
+
+	let mut escaped = false;
+
+	for (rel_idx, ch) in text[quote_idx + 1..].char_indices() {
+		if escaped {
+			escaped = false;
+		} else if ch == '\\' {
+			escaped = true;
+		} else if ch == quote {
+			return Some(quote_idx + 1 + rel_idx + ch.len_utf8());
+		}
+	}
+
+	Some(text.len())
+}
+
+fn macro_attr_followed_by_option_field(text: &str, attr_end: usize) -> bool {
+	let mut cursor = skip_whitespace(text, attr_end);
+
+	while text[cursor..].starts_with("#[") {
+		let Some(bracket_end) = find_matching_delimiter(text, cursor + 1, '[', ']') else {
+			return false;
+		};
+
+		cursor = skip_whitespace(text, bracket_end + 1);
+	}
+
+	cursor = skip_field_visibility(text, cursor);
+
+	let Some(after_ident) = skip_field_ident(text, cursor) else {
+		return false;
+	};
+
+	cursor = skip_whitespace(text, after_ident);
+
+	if !text[cursor..].starts_with(':') {
+		return false;
+	}
+
+	cursor = skip_whitespace(text, cursor + 1);
+
+	macro_field_type_starts_with_option(text, cursor)
+}
+
+fn find_matching_delimiter(text: &str, open_idx: usize, open: char, close: char) -> Option<usize> {
+	if text[open_idx..].chars().next()? != open {
+		return None;
+	}
+
+	let mut depth = 0_i32;
+	let mut in_str = false;
+	let mut escaped = false;
+
+	for (rel_idx, ch) in text[open_idx..].char_indices() {
+		if in_str {
+			if escaped {
+				escaped = false;
+			} else if ch == '\\' {
+				escaped = true;
+			} else if ch == '"' {
+				in_str = false;
+			}
+
+			continue;
+		}
+		if ch == '"' {
+			in_str = true;
+		} else if ch == open {
+			depth += 1;
+		} else if ch == close {
+			depth -= 1;
+
+			if depth == 0 {
+				return Some(open_idx + rel_idx);
+			}
+		}
+	}
+
+	None
+}
+
+fn skip_whitespace(text: &str, mut cursor: usize) -> usize {
+	while let Some(ch) = text[cursor..].chars().next() {
+		if !ch.is_whitespace() {
+			break;
+		}
+
+		cursor += ch.len_utf8();
+	}
+
+	cursor
+}
+
+fn skip_field_visibility(text: &str, cursor: usize) -> usize {
+	if !text[cursor..].starts_with("pub")
+		|| text[cursor + 3..].chars().next().is_some_and(is_ident_continue)
+	{
+		return cursor;
+	}
+
+	let mut next = skip_whitespace(text, cursor + 3);
+
+	if text[next..].starts_with('(') {
+		let Some(close) = find_matching_delimiter(text, next, '(', ')') else {
+			return cursor;
+		};
+
+		next = skip_whitespace(text, close + 1);
+	}
+
+	next
+}
+
+fn skip_field_ident(text: &str, cursor: usize) -> Option<usize> {
+	let mut cursor = cursor;
+
+	if text[cursor..].starts_with("r#") {
+		cursor += 2;
+	}
+
+	let first = text[cursor..].chars().next()?;
+
+	if !is_ident_start(first) {
+		return None;
+	}
+
+	cursor += first.len_utf8();
+
+	while let Some(ch) = text[cursor..].chars().next() {
+		if !is_ident_continue(ch) {
+			break;
+		}
+
+		cursor += ch.len_utf8();
+	}
+
+	Some(cursor)
+}
+
+fn macro_field_type_starts_with_option(text: &str, cursor: usize) -> bool {
+	let mut ty_text = String::new();
+
+	for ch in text[cursor..].chars() {
+		if ch == ',' || ch == '}' || ch == ';' {
+			break;
+		}
+		if !ch.is_whitespace() {
+			ty_text.push(ch);
+		}
+		if ty_text.len() >= "core::option::Option<".len() {
+			break;
+		}
+	}
+
+	is_option_type_text(&ty_text)
+}
+
+fn is_ident_start(ch: char) -> bool {
+	ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_ident_continue(ch: char) -> bool {
+	ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn split_top_level_csv(text: &str) -> Vec<String> {

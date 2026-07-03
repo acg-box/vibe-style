@@ -1309,8 +1309,11 @@ struct Payload {
 		.expect("has ctx");
 		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
-		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable));
-		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
+		assert_eq!(
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable).count(),
+			1
+		);
+		assert_eq!(edits.iter().filter(|e| e.rule == "RUST-STYLE-SERDE-001").count(), 1);
 
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
@@ -1337,8 +1340,11 @@ struct Payload {
 		.expect("has ctx");
 		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 
-		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable));
-		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
+		assert_eq!(
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable).count(),
+			1
+		);
+		assert_eq!(edits.iter().filter(|e| e.rule == "RUST-STYLE-SERDE-001").count(), 1);
 
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
@@ -1346,6 +1352,87 @@ struct Payload {
 		assert!(applied >= 1);
 		assert!(!rewritten.contains("default"));
 		assert!(rewritten.contains(r#"#[serde(rename = "value")]"#));
+	}
+
+	#[test]
+	fn serde001_fix_removes_default_attr_inside_field_like_macro_tokens() {
+		let original = r#"
+define_payload! {
+	struct Payload {
+		#[serde(
+			default = "outputs::downstream_quality_readback::default_pubfi_scheduled_catalyst_clock_readback"
+		)]
+		value: Option<String>,
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("serde001_macro_option_default.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert_eq!(
+			violations.iter().filter(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable).count(),
+			1
+		);
+		assert_eq!(edits.iter().filter(|e| e.rule == "RUST-STYLE-SERDE-001").count(), 1);
+
+		let mut rewritten = original.to_owned();
+		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(applied >= 1);
+		assert!(!rewritten.contains("default_pubfi_scheduled_catalyst_clock_readback"));
+		assert!(rewritten.contains("value: Option<String>,"));
+	}
+
+	#[test]
+	fn serde001_macro_scan_ignores_non_option_field() {
+		let original = r#"
+define_payload! {
+	struct Payload {
+		#[serde(default = "default_value")]
+		value: String,
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("serde001_macro_non_option_default.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
+	}
+
+	#[test]
+	fn serde001_macro_scan_ignores_string_and_comment_text() {
+		let original = r##"
+quote_like! {
+	"#[serde(default)] value: Option<String>,"
+	r#"
+		#[serde(default)]
+		raw_value: Option<String>,
+	"#
+	// #[serde(default)] comment_value: Option<String>,
+	/* #[serde(default)] block_value: Option<String>, */
+}
+"##;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("serde001_macro_string_comment_default.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001"));
+		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
 	}
 
 	#[test]
