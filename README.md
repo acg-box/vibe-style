@@ -98,7 +98,7 @@ Use the composite action to install a prebuilt release and run a read-only style
 
 The action runs `vstyle curate --language <language>`, adds `--workspace` when
 `workspace: true`, and appends `args`. Use `language: swift` for Swift checks, and use
-`version: v0.2.2` when CI should pin a specific `vibe-style` release. Use
+`version: v0.2.3` when CI should pin a specific `vibe-style` release. Use
 `version: checkout` only when the workflow should build `vibe-style` from the action
 checkout, such as this repository's own local `uses: ./` workflow.
 
