@@ -6,11 +6,11 @@ Style checker with Rust syntax and semantic analysis, first-batch Swift checks, 
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Docs](https://img.shields.io/docsrs/vibe-style)](https://docs.rs/vibe-style)
-[![Language Checks](https://github.com/hack-ink/vibe-style/actions/workflows/language.yml/badge.svg?branch=main)](https://github.com/hack-ink/vibe-style/actions/workflows/language.yml)
-[![Release](https://github.com/hack-ink/vibe-style/actions/workflows/release.yml/badge.svg)](https://github.com/hack-ink/vibe-style/actions/workflows/release.yml)
-[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/hack-ink/vibe-style)](https://github.com/hack-ink/vibe-style/tags)
-[![GitHub last commit](https://img.shields.io/github/last-commit/hack-ink/vibe-style?color=red&style=plastic)](https://github.com/hack-ink/vibe-style)
-[![GitHub code lines](https://tokei.rs/b1/github/hack-ink/vibe-style)](https://github.com/hack-ink/vibe-style)
+[![Language Checks](https://github.com/acgxv/vibe-style/actions/workflows/language.yml/badge.svg?branch=main)](https://github.com/acgxv/vibe-style/actions/workflows/language.yml)
+[![Release](https://github.com/acgxv/vibe-style/actions/workflows/release.yml/badge.svg)](https://github.com/acgxv/vibe-style/actions/workflows/release.yml)
+[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/acgxv/vibe-style)](https://github.com/acgxv/vibe-style/tags)
+[![GitHub last commit](https://img.shields.io/github/last-commit/acgxv/vibe-style?color=red&style=plastic)](https://github.com/acgxv/vibe-style)
+[![GitHub code lines](https://tokei.rs/b1/github/acgxv/vibe-style)](https://github.com/acgxv/vibe-style)
 
 </div>
 
@@ -36,7 +36,7 @@ Methods are listed from easiest to most advanced.
 #### Unix (Linux/macOS)
 
 ```sh
-VERSION="$(curl -fsSL https://api.github.com/repos/hack-ink/vibe-style/releases/latest | grep -oE '"tag_name": "v[^"]+"' | cut -d'"' -f4)"
+VERSION="$(curl -fsSL https://api.github.com/repos/acgxv/vibe-style/releases/latest | grep -oE '"tag_name": "v[^"]+"' | cut -d'"' -f4)"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -47,7 +47,7 @@ case "${OS}:${ARCH}" in
 esac
 
 ASSET="vibe-style-${TARGET}-${VERSION}.tgz"
-curl -fsSLO "https://github.com/hack-ink/vibe-style/releases/download/${VERSION}/${ASSET}"
+curl -fsSLO "https://github.com/acgxv/vibe-style/releases/download/${VERSION}/${ASSET}"
 tar -xzf "${ASSET}"
 
 INSTALL_DIR="$HOME/.cargo/bin"
@@ -59,7 +59,7 @@ install -m 0755 "vibe-style-${TARGET}-${VERSION}/cargo-vstyle" "${INSTALL_DIR}/c
 #### Windows (PowerShell)
 
 ```powershell
-$Repo = "hack-ink/vibe-style"
+$Repo = "acgxv/vibe-style"
 $Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest").tag_name
 $Target = "x86_64-pc-windows-msvc"
 $Asset = "vibe-style-$Target-$Version.zip"
@@ -89,7 +89,7 @@ Use the composite action to install a prebuilt release and run a read-only style
 
 ```yaml
 - uses: actions/checkout@v6
-- uses: hack-ink/vibe-style@v1
+- uses: acgxv/vibe-style@v1
   with:
     language: rust
     workspace: true
@@ -124,7 +124,7 @@ cargo binstall vibe-style
 ### Build from source
 
 ```sh
-git clone https://github.com/hack-ink/vibe-style
+git clone https://github.com/acgxv/vibe-style
 cd vibe-style
 cargo build --release
 ```

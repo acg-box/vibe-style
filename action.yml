@@ -45,7 +45,7 @@ runs:
 
         if [[ "${version}" == "latest" ]]; then
           version="$(
-            curl -fsSL https://api.github.com/repos/hack-ink/vibe-style/releases/latest |
+            curl -fsSL https://api.github.com/repos/acgxv/vibe-style/releases/latest |
               grep -oE '"tag_name": "v[^"]+"' |
               cut -d'"' -f4
           )"
@@ -60,7 +60,7 @@ runs:
         esac
 
         asset="vibe-style-${target}-${version}.tgz"
-        curl -fsSLO "https://github.com/hack-ink/vibe-style/releases/download/${version}/${asset}"
+        curl -fsSLO "https://github.com/acgxv/vibe-style/releases/download/${version}/${asset}"
         tar -xzf "${asset}"
 
         mkdir -p "${install_dir}"
@@ -91,13 +91,13 @@ runs:
         }
 
         if ($version -eq "latest") {
-          $version = (Invoke-RestMethod -Uri "https://api.github.com/repos/hack-ink/vibe-style/releases/latest").tag_name
+          $version = (Invoke-RestMethod -Uri "https://api.github.com/repos/acgxv/vibe-style/releases/latest").tag_name
         }
 
         $target = "x86_64-pc-windows-msvc"
         $asset = "vibe-style-$target-$version.zip"
         Invoke-WebRequest `
-          -Uri "https://github.com/hack-ink/vibe-style/releases/download/$version/$asset" `
+          -Uri "https://github.com/acgxv/vibe-style/releases/download/$version/$asset" `
           -OutFile $asset
         Expand-Archive -Path $asset -DestinationPath .
 
