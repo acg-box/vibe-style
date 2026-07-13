@@ -4,7 +4,7 @@
 
 Style checker with Rust syntax and semantic analysis, first-batch Swift checks, and a safe auto-fixer for deterministic code layout.
 
-[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License](https://img.shields.io/badge/License-GPLv3%20only-blue.svg)](https://spdx.org/licenses/GPL-3.0-only.html)
 [![Language Checks](https://github.com/acgxv/vibe-style/actions/workflows/language.yml/badge.svg?branch=main)](https://github.com/acgxv/vibe-style/actions/workflows/language.yml)
 [![Release](https://github.com/acgxv/vibe-style/actions/workflows/release.yml/badge.svg)](https://github.com/acgxv/vibe-style/actions/workflows/release.yml)
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/acgxv/vibe-style)](https://github.com/acgxv/vibe-style/tags)
@@ -416,4 +416,4 @@ Documentation placement and naming rules live in `docs/policy.md`.
 
 ## License
 
-Licensed under [GPL-3.0](LICENSE).
+Licensed under [GPL-3.0-only](LICENSE).
