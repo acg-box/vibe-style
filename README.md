@@ -5,12 +5,10 @@
 Style checker with Rust syntax and semantic analysis, first-batch Swift checks, and a safe auto-fixer for deterministic code layout.
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Docs](https://img.shields.io/docsrs/vibe-style)](https://docs.rs/vibe-style)
 [![Language Checks](https://github.com/acgxv/vibe-style/actions/workflows/language.yml/badge.svg?branch=main)](https://github.com/acgxv/vibe-style/actions/workflows/language.yml)
 [![Release](https://github.com/acgxv/vibe-style/actions/workflows/release.yml/badge.svg)](https://github.com/acgxv/vibe-style/actions/workflows/release.yml)
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/acgxv/vibe-style)](https://github.com/acgxv/vibe-style/tags)
 [![GitHub last commit](https://img.shields.io/github/last-commit/acgxv/vibe-style?color=red&style=plastic)](https://github.com/acgxv/vibe-style)
-[![GitHub code lines](https://tokei.rs/b1/github/acgxv/vibe-style)](https://github.com/acgxv/vibe-style)
 
 </div>
 
