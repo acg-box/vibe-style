@@ -32,6 +32,8 @@ Question this index answers: "what must remain true?"
   derive-related import rules.
 - `docs/spec/swift_style_rule_applicability.md`: Swift applicability, first-batch Swift rules,
   and Rust-only rule boundaries.
+- `docs/spec/tune_failure_atomicity.md`: semantic commit conditions and rollback behavior for
+  failed `vstyle tune` runs.
 
 ## Spec document contract
 

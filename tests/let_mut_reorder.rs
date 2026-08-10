@@ -37,6 +37,28 @@ fn main() {}
 	root
 }
 
+fn create_atomicity_crate_root() -> PathBuf {
+	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Clock.").as_nanos();
+	let root = env::temp_dir().join(format!("vstyle-tune-atomicity-{stamp}"));
+	let _ = fs::remove_dir_all(&root);
+
+	fs::create_dir_all(root.join("src")).expect("Create source directory.");
+	fs::write(
+		root.join("Cargo.toml"),
+		r#"
+[package]
+name = "vstyle-tune-atomicity-fixture"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+"#,
+	)
+	.expect("Write Cargo manifest.");
+	fs::write(root.join(".gitignore"), "/target\n").expect("Write gitignore.");
+
+	root
+}
+
 #[test]
 fn let_mut_reorder_is_semantically_validated_by_compiler() {
 	let temp_dir = create_temp_crate_root();
@@ -176,8 +198,8 @@ pub fn closure_carries_binding() {
 	);
 
 	assert!(
-		cold_output.contains("Semantic cache: 0 hit(s), 1 miss(es)."),
-		"expected one cold semantic miss, output: {cold_output}"
+		cold_output.contains("Semantic cache: 0 hit(s), 2 miss(es)."),
+		"expected cold pre-edit and post-edit semantic misses, output: {cold_output}"
 	);
 
 	fs::write(temp_dir.join("src/safe.rs"), safe_source).expect("restore safe source");
@@ -198,7 +220,168 @@ pub fn closure_carries_binding() {
 	);
 
 	assert!(
-		warm_output.contains("Semantic cache: 1 hit(s), 0 miss(es)."),
-		"expected one warm semantic hit, output: {warm_output}"
+		warm_output.contains("Semantic cache: 2 hit(s), 0 miss(es)."),
+		"expected warm pre-edit and post-edit semantic hits, output: {warm_output}"
 	);
+}
+
+#[test]
+fn tune_keeps_io_result_qualified_during_semantic_validation() {
+	let temp_dir = create_temp_crate_root();
+	let main_source = r#"fn business_result() -> Result<(), i32> {
+	Ok(())
+}
+
+fn read_state() -> std::io::Result<String> {
+	Ok(String::new())
+}
+
+fn apply_test_override() -> Result<(), i32> {
+	Ok(())
+}
+
+fn main() {
+	let value = 10f32;
+
+	println!("{value}");
+}
+"#;
+
+	fs::write(temp_dir.join("src/main.rs"), main_source).expect("Write main source.");
+
+	let output = Command::new("git")
+		.current_dir(&temp_dir)
+		.args(["init"])
+		.output()
+		.expect("Initialize Git repository.");
+
+	assert!(output.status.success());
+
+	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--language", "rust", "--verbose"])
+		.output()
+		.expect("Run vstyle tune.");
+	let main_after = fs::read_to_string(temp_dir.join("src/main.rs")).expect("Read main source.");
+	let stderr = String::from_utf8_lossy(&output.stderr);
+
+	if !output.status.success() {
+		assert_eq!(main_after, main_source, "Failed tune did not roll back its edits.");
+	}
+
+	assert!(output.status.success(), "tune unexpectedly failed:\n{stderr}");
+	assert!(!main_after.contains("use std::io::Result;"));
+	assert!(main_after.contains("fn read_state() -> std::io::Result<String>"));
+	assert!(main_after.contains("fn apply_test_override() -> Result<(), i32>"));
+	assert!(main_after.contains("let value = 10_f32;"));
+	assert!(
+		stderr.contains("validating the edited files"),
+		"missing semantic validation telemetry:\n{stderr}"
+	);
+
+	let output = Command::new("cargo")
+		.current_dir(&temp_dir)
+		.arg("check")
+		.output()
+		.expect("Check tuned fixture.");
+
+	assert!(
+		output.status.success(),
+		"tuned fixture did not compile:\n{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["curate", "--language", "rust", "--strict"])
+		.output()
+		.expect("Run strict vstyle check.");
+
+	assert!(
+		output.status.success(),
+		"strict check failed:\n{}{}",
+		String::from_utf8_lossy(&output.stdout),
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--language", "rust", "--strict"])
+		.output()
+		.expect("Repeat vstyle tune.");
+	let repeated = fs::read_to_string(temp_dir.join("src/main.rs")).expect("Read tuned source.");
+
+	assert!(
+		output.status.success(),
+		"repeated tune failed:\n{}{}",
+		String::from_utf8_lossy(&output.stdout),
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert_eq!(repeated, main_after);
+
+	let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn tune_rolls_back_the_run_when_semantic_validation_fails() {
+	let temp_dir = create_atomicity_crate_root();
+	let main_source = r#"fn business_result() -> Result<(), i32> {
+	Ok(())
+}
+
+fn read_state() -> std::io::Result<String> {
+	Ok(String::new())
+}
+
+fn apply_test_override() -> Result<(), i32> {
+	Ok(())
+}
+
+fn main() {
+	let value = 10f32;
+
+	println!("{value}");
+}
+"#;
+	let build_source = r#"use std::fs;
+
+fn main() {
+	let _build_value = 20f32;
+
+	println!("cargo:rerun-if-changed=src/main.rs");
+
+	let source = fs::read_to_string("src/main.rs").unwrap_or_default();
+
+	if source.contains("10_f32") {
+		panic!("reject the edited fixture");
+	}
+}
+"#;
+
+	fs::write(temp_dir.join("src/main.rs"), main_source).expect("Write main source.");
+	fs::write(temp_dir.join("build.rs"), build_source).expect("Write build source.");
+
+	let output = Command::new("git")
+		.current_dir(&temp_dir)
+		.args(["init"])
+		.output()
+		.expect("Initialize Git repository.");
+
+	assert!(output.status.success());
+
+	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--language", "rust"])
+		.output()
+		.expect("Run vstyle tune.");
+	let main_after = fs::read_to_string(temp_dir.join("src/main.rs")).expect("Read main source.");
+	let build_after = fs::read_to_string(temp_dir.join("build.rs")).expect("Read build source.");
+	let stderr = String::from_utf8_lossy(&output.stderr);
+
+	assert!(!output.status.success(), "tune unexpectedly succeeded:\n{stderr}");
+	assert_eq!(main_after, main_source);
+	assert_eq!(build_after, build_source);
+	assert!(stderr.contains("semantic validation"), "missing semantic error:\n{stderr}");
+
+	let _ = fs::remove_dir_all(temp_dir);
 }

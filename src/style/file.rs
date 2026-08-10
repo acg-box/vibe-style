@@ -432,7 +432,7 @@ fn unqualified_path_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
+		if !is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -473,7 +473,7 @@ fn unqualified_macro_call_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
+		if !is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 
