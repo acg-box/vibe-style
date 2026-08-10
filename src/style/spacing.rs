@@ -3,6 +3,7 @@ use std::{
 	sync::LazyLock,
 };
 
+use ra_ap_syntax::{AstNode, ast::IfExpr};
 use regex::Regex;
 
 use crate::style::{
@@ -122,13 +123,46 @@ impl StatementPair {
 	}
 }
 
+struct VerticalSpacingTraversal {
+	visited_blocks: HashSet<(usize, usize)>,
+	if_condition_body_boundaries: HashSet<(usize, usize)>,
+}
+impl VerticalSpacingTraversal {
+	fn new(ctx: &FileContext) -> Self {
+		let if_condition_body_boundaries = ctx
+			.source_file
+			.syntax()
+			.descendants()
+			.filter_map(IfExpr::cast)
+			.filter_map(|if_expr| {
+				let condition = if_expr.condition()?;
+				let then_branch = if_expr.then_branch()?;
+				let condition_end_offset =
+					usize::from(condition.syntax().text_range().end()).checked_sub(1)?;
+				let condition_end_line =
+					shared::line_from_offset(&ctx.line_starts, condition_end_offset)
+						.saturating_sub(1);
+				let body_start_line = shared::line_from_offset(
+					&ctx.line_starts,
+					usize::from(then_branch.syntax().text_range().start()),
+				)
+				.saturating_sub(1);
+
+				Some((condition_end_line, body_start_line))
+			})
+			.collect();
+
+		Self { visited_blocks: HashSet::new(), if_condition_body_boundaries }
+	}
+}
+
 pub(crate) fn check_vertical_spacing(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
-	let mut visited_blocks: HashSet<(usize, usize)> = HashSet::new();
+	let mut traversal = VerticalSpacingTraversal::new(ctx);
 
 	for (start, end) in quality::function_ranges(ctx) {
 		check_vertical_spacing_block(
@@ -136,7 +170,7 @@ pub(crate) fn check_vertical_spacing(
 			violations,
 			edits,
 			emit_edits,
-			&mut visited_blocks,
+			&mut traversal,
 			start,
 			end,
 		);
@@ -148,15 +182,20 @@ fn check_vertical_spacing_block(
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
-	visited_blocks: &mut HashSet<(usize, usize)>,
+	traversal: &mut VerticalSpacingTraversal,
 	start: usize,
 	end: usize,
 ) {
-	if end <= start || !visited_blocks.insert((start, end)) {
+	if end <= start || !traversal.visited_blocks.insert((start, end)) {
 		return;
 	}
 
-	let statements = extract_top_level_statements(&ctx.lines, start, end);
+	let statements = extract_top_level_statements(
+		&ctx.lines,
+		&traversal.if_condition_body_boundaries,
+		start,
+		end,
+	);
 
 	if statements.is_empty() {
 		return;
@@ -185,7 +224,7 @@ fn check_vertical_spacing_block(
 		violations,
 		edits,
 		emit_edits,
-		visited_blocks,
+		traversal,
 		start,
 		end,
 		&statements,
@@ -444,7 +483,7 @@ fn recurse_spacing_child_blocks(
 	violations: &mut Vec<Violation>,
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
-	visited_blocks: &mut HashSet<(usize, usize)>,
+	traversal: &mut VerticalSpacingTraversal,
 	start: usize,
 	end: usize,
 	statements: &[StatementSpan],
@@ -465,7 +504,7 @@ fn recurse_spacing_child_blocks(
 				violations,
 				edits,
 				emit_edits,
-				visited_blocks,
+				traversal,
 				child_start,
 				child_end,
 			);
@@ -987,31 +1026,28 @@ fn classify_statement_type(statement_lines: &[String]) -> String {
 
 fn extract_top_level_statements(
 	lines: &[String],
+	if_condition_body_boundaries: &HashSet<(usize, usize)>,
 	fn_start: usize,
 	fn_end: usize,
 ) -> Vec<(usize, usize, String)> {
-	fn next_significant_line_starts_with_dot(
+	fn next_significant_line(
 		lines: &[String],
 		mut mask_state: CodeMaskState,
 		from_idx: usize,
 		fn_end: usize,
-	) -> bool {
-		for line in lines.iter().take(fn_end).skip(from_idx + 1) {
+	) -> Option<(usize, String)> {
+		for (idx, line) in lines.iter().enumerate().take(fn_end).skip(from_idx + 1) {
 			let code = mask_code_line(line, &mut mask_state);
 			let stripped = code.trim();
 
 			if stripped.is_empty() {
 				continue;
 			}
-			// Attributes apply to the next statement. Treat them as a hard boundary.
-			if stripped.starts_with('#') {
-				return false;
-			}
 
-			return stripped.starts_with('.');
+			return Some((idx, stripped.to_owned()));
 		}
 
-		false
+		None
 	}
 
 	let mut statements = Vec::new();
@@ -1052,13 +1088,20 @@ fn extract_top_level_statements(
 			continue;
 		};
 		let stripped_code = code.trim();
+		let next_significant = next_significant_line(lines, mask_state, idx, fn_end);
+		let continues_method_chain =
+			next_significant.as_ref().is_some_and(|(_, stripped)| stripped.starts_with('.'));
+		let continues_if_condition = next_significant
+			.as_ref()
+			.is_some_and(|(next_idx, _)| if_condition_body_boundaries.contains(&(idx, *next_idx)));
 		let statement_closed = brace_depth == 1
 			&& paren_depth == 0
 			&& bracket_depth == 0
 			&& !stripped_code.is_empty()
 			&& (stripped_code.ends_with(';')
 				|| (stripped_code.ends_with('}')
-					&& !next_significant_line_starts_with_dot(lines, mask_state, idx, fn_end)));
+					&& !continues_method_chain
+					&& !continues_if_condition));
 
 		if statement_closed {
 			let span_lines = lines[current_start_value..=idx].to_vec();

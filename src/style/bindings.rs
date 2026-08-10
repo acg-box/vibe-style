@@ -83,14 +83,18 @@ fn let_stmt_is_mut_ident(let_stmt: &LetStmt) -> bool {
 }
 
 fn let_stmt_mut_ident_name(let_stmt: &LetStmt) -> Option<String> {
+	if !let_stmt_is_mut_ident(let_stmt) {
+		return None;
+	}
+
+	let_stmt_ident_name(let_stmt)
+}
+
+fn let_stmt_ident_name(let_stmt: &LetStmt) -> Option<String> {
 	let pat = let_stmt.pat()?;
 
 	match pat {
-		ast::Pat::IdentPat(ident_pat) => {
-			ident_pat.mut_token()?;
-
-			Some(ident_pat.name()?.text().to_string())
-		},
+		ast::Pat::IdentPat(ident_pat) => Some(ident_pat.name()?.text().to_string()),
 		_ => None,
 	}
 }
@@ -198,6 +202,40 @@ fn let_stmt_by_value_unqualified_idents(let_stmt: &LetStmt) -> BTreeSet<String> 
 	out
 }
 
+fn let_stmt_initializer_is_reorder_safe(let_stmt: &LetStmt) -> bool {
+	let_stmt.let_else().is_none() && matches!(let_stmt.initializer(), Some(ast::Expr::Literal(_)))
+}
+
+fn run_preserves_initializer_order_semantics(run: &[LetStmtInfo]) -> bool {
+	let mut binding_names = BTreeSet::<String>::new();
+
+	for stmt in run {
+		if let Some(name) = let_stmt_ident_name(&stmt.stmt)
+			&& !binding_names.insert(name)
+		{
+			return false;
+		}
+	}
+	for (idx, stmt) in run.iter().enumerate() {
+		if !stmt.is_mut {
+			continue;
+		}
+
+		for later in &run[idx + 1..] {
+			if later.is_mut {
+				continue;
+			}
+			if !let_stmt_initializer_is_reorder_safe(&stmt.stmt)
+				|| !let_stmt_initializer_is_reorder_safe(&later.stmt)
+			{
+				return false;
+			}
+		}
+	}
+
+	true
+}
+
 fn run_is_reorderable_without_binding_errors(run: &[LetStmtInfo]) -> bool {
 	if run.len() <= 1 {
 		return false;
@@ -288,11 +326,15 @@ fn emit_run_fix(
 
 	if !run_is_reorderable_without_binding_errors(run) {
 		// The project convention is to only enforce this rule when the `let` bindings can be
-		// safely reordered. If not, treat it as compliant rather than emitting a violation.
+		// reordered without changing binding dependencies. Otherwise, treat the run as compliant.
 		return;
 	}
 
-	let can_edit = can_rewrite_run(ctx, run);
+	// Compiler validation cannot prove evaluation, failure, drop order, or shadowing equivalence.
+	// Report these runs, but only offer an edit when unique bindings with literal initializer pairs
+	// may cross.
+	let preserves_initializer_order = run_preserves_initializer_order_semantics(run);
+	let can_edit = preserves_initializer_order && can_rewrite_run(ctx, run);
 
 	shared::push_violation(violations, ctx, offending_line, RULE_ID, MESSAGE, can_edit);
 
@@ -430,5 +472,103 @@ fn demo(scored: Vec<u8>) -> usize {
 			super::RULE_ID
 		);
 		assert!(edits.iter().all(|e| e.rule != super::RULE_ID));
+	}
+
+	#[test]
+	fn side_effecting_initializers_are_not_reordered() {
+		let text = r#"
+fn record(events: &mut Vec<&'static str>, event: &'static str) -> usize {
+	events.push(event);
+
+	events.len()
+}
+
+fn demo(events: &mut Vec<&'static str>) {
+	let mut scratch = record(events, "scratch");
+	let marker = record(events, "marker");
+
+	scratch += marker;
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("let_initializer_side_effect_order.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let mut violations = Vec::new();
+		let mut edits = Vec::new();
+
+		bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, true);
+
+		let violation = violations
+			.iter()
+			.find(|violation| violation.rule == super::RULE_ID)
+			.expect("report unsafe initializer order");
+
+		assert!(!violation.fixable);
+		assert!(edits.iter().all(|edit| edit.rule != super::RULE_ID));
+	}
+
+	#[test]
+	fn fallible_initializers_are_not_reordered() {
+		let text = r#"
+fn demo() -> Result<(), String> {
+	let mut scratch = create_scratch()?;
+	let marker = read_marker()?;
+
+	scratch.push_str(&marker);
+
+	Ok(())
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("let_initializer_failure_order.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let mut violations = Vec::new();
+		let mut edits = Vec::new();
+
+		bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, true);
+
+		let violation = violations
+			.iter()
+			.find(|violation| violation.rule == super::RULE_ID)
+			.expect("report unsafe initializer order");
+
+		assert!(!violation.fixable);
+		assert!(edits.iter().all(|edit| edit.rule != super::RULE_ID));
+	}
+
+	#[test]
+	fn shadowed_literal_bindings_are_not_reordered() {
+		let text = r#"
+fn demo() -> usize {
+	let mut value = 1;
+	let value = 2;
+
+	value
+}
+"#;
+		let ctx = shared::read_file_context_from_text(
+			Path::new("let_initializer_shadowing.rs"),
+			text.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let mut violations = Vec::new();
+		let mut edits = Vec::new();
+
+		bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, true);
+
+		let violation = violations
+			.iter()
+			.find(|violation| violation.rule == super::RULE_ID)
+			.expect("report shadowing-sensitive reorder");
+
+		assert!(!violation.fixable);
+		assert!(edits.iter().all(|edit| edit.rule != super::RULE_ID));
 	}
 }

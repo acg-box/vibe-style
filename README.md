@@ -193,6 +193,8 @@ vstyle tune --language rust -p api --all-features --no-default-features
 - `tune`
   - Exit `0`: even if unresolved violations remain.
   - Exit `1`: unresolved violations remain and `--strict` is used.
+  - Internal fix or semantic-validation error: restore all selected source files to their
+    start-of-command contents, then return a failure.
 
 Use `--language rust` to check Rust files and `--language swift` to check Swift files.
 File discovery scans every selected `*.rs` or `*.swift` file that is not matched by Git ignore
@@ -202,9 +204,11 @@ from the Cargo workspace root.
 
 ### CI policy
 
-CI runs the checked-out action for Rust read-only style verification to keep feedback fast and
-deterministic. Use `vstyle tune` locally when you want to apply safe automatic fixes (for example,
-via `cargo make lint`).
+CI runs the current checkout directly for Rust read-only style verification so the style gate can
+reuse the same Cargo build graph as Clippy and tests. The release workflow then runs the composite
+action against the exact tag and newly published binary asset before it publishes the crate to
+crates.io. Use `vstyle tune` locally when you want to apply safe automatic fixes (for example, via
+`cargo make lint`).
 
 ### Release benchmark
 
