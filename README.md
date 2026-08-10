@@ -284,7 +284,7 @@ quality-path changes. Use the semantic benchmark for `src/style/semantic.rs`, se
 changes, or semantic-validation fallback changes. Run both when a change touches both lanes.
 
 The operational runbook for selecting the right benchmark evidence lives in
-`docs/runbook/benchmark_tracking.md`.
+`openwiki/runbooks/benchmark-tracking.md`.
 
 ## Configuration
 
@@ -383,7 +383,7 @@ Rules are built into the checker.
 - `SWIFT-STYLE-NUM-002`: Use underscore grouping for integers with more than three digits.
 - `SWIFT-STYLE-READ-002`: Keep functions at or under 120 lines.
 
-The governing Swift applicability map lives in `docs/spec/swift_style_rule_applicability.md`.
+The governing Swift applicability map lives in `openwiki/specifications/swift-style-rule-applicability.md`.
 
 ## Development
 
@@ -415,8 +415,8 @@ cargo make test-rust
 
 ## Documentation
 
-Durable repository docs start at `docs/index.md`.
-Documentation placement and naming rules live in `docs/policy.md`.
+Durable repository docs start at `openwiki/quickstart.md`.
+Documentation placement and naming rules live in `openwiki/agent-context.md`.
 
 ## License
 
