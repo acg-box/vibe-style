@@ -87,13 +87,20 @@ pub(crate) fn collect_compiler_error_files_with_output(
 		return Ok((String::new(), BTreeSet::new()));
 	}
 
-	let style_files = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
 	let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
-	let all = collect_compiler_error_files_from_output(&stdout);
-	let compiler_error_files =
-		all.into_iter().filter(|path| style_files.contains(path)).collect::<BTreeSet<_>>();
+	let compiler_error_files = collect_compiler_error_files_from_output(&stdout);
 
 	Ok((stdout, compiler_error_files))
+}
+
+pub(crate) fn semantic_check_succeeded(output: &str) -> Option<bool> {
+	output.lines().rev().find_map(|line| {
+		let value = serde_json::from_str::<Value>(line).ok()?;
+
+		(value.get("reason").and_then(Value::as_str) == Some("build-finished"))
+			.then(|| value.get("success").and_then(Value::as_bool))
+			.flatten()
+	})
 }
 
 pub(crate) fn collect_compiler_error_files(
@@ -174,12 +181,12 @@ fn run_semantic_cargo_check(
 
 	if let Some(cache_path) = cache_path.as_ref() {
 		match read_cached_semantic_output(cache_path, verbose) {
-			Some(stdout) => {
+			Some(stdout) if semantic_check_succeeded(&stdout).is_some() => {
 				record_cache_hit();
 
 				return Ok(stdout);
 			},
-			None => {
+			Some(_) | None => {
 				record_cache_miss();
 			},
 		}
@@ -202,6 +209,13 @@ fn run_semantic_cargo_check(
 		cmd.output().map_err(|err| eyre::eyre!("Failed to run semantic cargo check: {err}."))?;
 	let stdout = String::from_utf8(output.stdout)
 		.map_err(|err| eyre::eyre!("Failed to parse cargo check output: {err}."))?;
+
+	if semantic_check_succeeded(&stdout).is_none() {
+		return Err(eyre::eyre!(
+			"Semantic cargo check exited with status {} without a `build-finished` result.",
+			output.status
+		));
+	}
 
 	if let Some(cache_path) = cache_path {
 		write_cached_semantic_output(&cache_path, &stdout, verbose);
@@ -730,6 +744,16 @@ mod tests {
 				.flat_map(|suggestion| suggestion.imports.iter())
 				.any(|import| import == "use std::collections::HashMap;")
 		);
+	}
+
+	#[test]
+	fn reads_semantic_build_finished_status() {
+		let succeeded = r#"{"reason":"build-finished","success":true}"#;
+		let failed = r#"{"reason":"build-finished","success":false}"#;
+
+		assert_eq!(semantic::semantic_check_succeeded(succeeded), Some(true));
+		assert_eq!(semantic::semantic_check_succeeded(failed), Some(false));
+		assert_eq!(semantic::semantic_check_succeeded("not json"), None);
 	}
 
 	#[test]

@@ -70,7 +70,6 @@ AST-backed rules (some may also use limited text for replacement formatting):
 
 Layout-backed rules (source-text driven by design):
 
-- `RUST-STYLE-SPACE-003`
 - `RUST-STYLE-SPACE-004`
 
 Hybrid AST-backed + layout-backed rules (AST classification plus line-aware spacing or reorder planning):
@@ -81,10 +80,15 @@ Hybrid AST-backed + layout-backed rules (AST classification plus line-aware spac
 - `RUST-STYLE-MOD-005`
 - `RUST-STYLE-IMPL-001`
 - `RUST-STYLE-IMPL-003`
+- `RUST-STYLE-SPACE-003` (AST control-flow boundaries plus line-aware statement spacing)
 
 Semantic-backed rules:
 
-- `RUST-STYLE-LET-001` (AST edit generation with compiler-error diff validation during `tune`)
+- `RUST-STYLE-LET-001` (AST literal-initializer safety proof and edit generation, with
+  compiler-error diff validation during `tune`)
+
+`RUST-STYLE-LET-001` reports an ordering violation without an automatic fix when initializer or
+binding-shadowing safety is not proven.
 
 Swift source-text-backed rules:
 
