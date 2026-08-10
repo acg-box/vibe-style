@@ -95,7 +95,7 @@ pub(crate) fn build_type_alias_usage_rename_edits(
 		let Some(name_ref) = segment.name_ref() else {
 			continue;
 		};
-		let Some(replacement) = renames.get(name_ref.text().as_str()) else {
+		let Some(replacement) = renames.get(name_ref.text()) else {
 			continue;
 		};
 		let range = name_ref.syntax().text_range();

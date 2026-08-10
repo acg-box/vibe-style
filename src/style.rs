@@ -22,7 +22,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use color_eyre::Result;
+use color_eyre::{Result, eyre};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use semantic::SemanticCacheStats;
@@ -126,10 +126,27 @@ struct FileFixApplication {
 	type_alias_rename_files: BTreeMap<PathBuf, ()>,
 }
 
+#[derive(Debug)]
+struct CollectedFileFixes {
+	outcomes: Vec<FileFixOutcome>,
+	changed_files: Vec<PathBuf>,
+	total_applied: usize,
+}
+
 pub(crate) fn run_check(cargo_options: &CargoOptions) -> Result<RunSummary> {
 	let (summary, _state) = run_check_with_state(cargo_options)?;
 
 	Ok(summary)
+}
+
+pub(crate) fn semantic_cache_stats() -> SemanticCacheStats {
+	semantic::cache_stats()
+}
+
+pub(crate) fn print_coverage() {
+	for rule in STYLE_RULE_IDS {
+		println!("{rule}\timplemented");
+	}
 }
 
 pub(crate) fn run_fix(
@@ -139,6 +156,40 @@ pub(crate) fn run_fix(
 ) -> Result<RunSummary> {
 	semantic::reset_cache_stats();
 
+	let files = shared::resolve_files(cargo_options)?;
+	let run_start_snapshot = collect_file_snapshots(&files);
+	let result = run_fix_inner(cargo_options, verbose, progress);
+
+	match result {
+		Ok(summary) => Ok(summary),
+		Err(error) => {
+			let changed_files = changed_files_since_snapshot(&run_start_snapshot);
+
+			if changed_files.is_empty() {
+				return Err(error);
+			}
+
+			if let Err(rollback_error) = restore_file_snapshots(&run_start_snapshot) {
+				return Err(eyre::eyre!(
+					"vstyle tune failed and rollback also failed. Original error: {error:?}. Rollback error: {rollback_error:?}."
+				));
+			}
+
+			eprintln!(
+				"vstyle tune: rolled back {} file(s) because the run failed.",
+				changed_files.len()
+			);
+
+			Err(error)
+		},
+	}
+}
+
+fn run_fix_inner(
+	cargo_options: &CargoOptions,
+	verbose: bool,
+	progress: bool,
+) -> Result<RunSummary> {
 	let (initial_checked, mut check_state) = run_initial_check(cargo_options, progress)?;
 	let mut total_applied = 0_usize;
 	let mut previous_fixable_count = check_state.fixable_count();
@@ -229,16 +280,6 @@ pub(crate) fn run_fix(
 		applied_fix_count: total_applied,
 		output_lines: checked.output_lines,
 	})
-}
-
-pub(crate) fn semantic_cache_stats() -> SemanticCacheStats {
-	semantic::cache_stats()
-}
-
-pub(crate) fn print_coverage() {
-	for rule in STYLE_RULE_IDS {
-		println!("{rule}\timplemented");
-	}
 }
 
 fn run_initial_check(
@@ -451,52 +492,59 @@ fn fix_scope_files_are_disjoint(fix_round_scopes: &[FixRoundScope]) -> bool {
 	true
 }
 
-fn run_fix_round(
+fn validate_pre_edit_semantic_baseline(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
+	scope_label: &str,
 	verbose: bool,
 	progress: bool,
-) -> Result<FixRoundSummary> {
-	let scope_label = fix_scope_label(cargo_options);
-
+) -> Result<BTreeSet<PathBuf>> {
 	if progress {
-		eprintln!("vstyle tune: [{scope_label}] collecting fixes for {} file(s).", files.len());
+		eprintln!("vstyle tune: [{scope_label}] validating the pre-edit semantic baseline.");
 	}
 
-	let round_start_snapshot = collect_file_snapshots(files);
-	let mut file_fixes = collect_and_apply_file_fixes(files, &scope_label, progress)?;
+	let (stdout, error_files) = semantic::collect_compiler_error_files_with_output(
+		files,
+		cargo_options,
+		verbose,
+		progress,
+	)?;
 
-	if file_fixes.changed_files.is_empty() {
-		if progress {
-			eprintln!(
-				"vstyle tune: [{scope_label}] applied {} fix(es) this round.",
-				file_fixes.total_applied
-			);
-		}
-
-		return Ok(FixRoundSummary::default());
+	if semantic::semantic_check_succeeded(&stdout) != Some(true) {
+		return Err(eyre::eyre!(
+			"vstyle tune: [{scope_label}] pre-edit semantic validation failed; no fixes were written."
+		));
 	}
 
-	let semantic_cargo_options =
-		scoped_semantic_cargo_options(cargo_options, &file_fixes.changed_files)?;
+	Ok(error_files)
+}
 
+fn apply_semantic_validation(
+	scope_label: &str,
+	file_fixes: &mut FileFixApplication,
+	cargo_options: &CargoOptions,
+	baseline_error_files: &BTreeSet<PathBuf>,
+	verbose: bool,
+	progress: bool,
+) -> Result<usize> {
 	if progress {
-		eprintln!("vstyle tune: [{scope_label}] running semantic validation.");
+		eprintln!("vstyle tune: [{scope_label}] validating the edited files.");
 	}
 
 	let semantic_started = Instant::now();
-	let (baseline_stdout, baseline_error_files) =
+	let (post_edit_stdout, post_edit_error_files) =
 		semantic::collect_compiler_error_files_with_output(
 			&file_fixes.changed_files,
-			&semantic_cargo_options,
+			cargo_options,
 			verbose,
 			progress,
 		)?;
+	let post_edit_succeeded = semantic::semantic_check_succeeded(&post_edit_stdout) == Some(true);
 	let semantic_phase_start_snapshot = collect_file_snapshots(&file_fixes.changed_files);
 	let semantic_applied = semantic::apply_semantic_fixes(
 		&file_fixes.changed_files,
-		&semantic_cargo_options,
-		Some(baseline_stdout),
+		cargo_options,
+		Some(post_edit_stdout),
 		verbose,
 		progress,
 	)?;
@@ -505,8 +553,8 @@ fn run_fix_round(
 
 	if progress {
 		eprintln!(
-			"vstyle tune: [{scope_label}] semantic validation found {} baseline error file(s) and applied {} import fix(es) ({}).",
-			baseline_error_files.len(),
+			"vstyle tune: [{scope_label}] semantic validation found {} post-edit error file(s) and applied {} import fix(es) ({}).",
+			post_edit_error_files.len(),
 			semantic_applied,
 			format_duration(semantic_started.elapsed()),
 		);
@@ -523,9 +571,9 @@ fn run_fix_round(
 
 	handle_semantic_validation_fallbacks(SemanticValidationFallbacks {
 		files: &file_fixes.changed_files,
-		semantic_cargo_options: &semantic_cargo_options,
-		baseline_error_files: &baseline_error_files,
-		post_error_files: (semantic_applied == 0).then_some(&baseline_error_files),
+		semantic_cargo_options: cargo_options,
+		baseline_error_files,
+		post_error_files: (semantic_applied == 0).then_some(&post_edit_error_files),
 		verbose,
 		progress,
 		import_fallbacks: &file_fixes.import_fallbacks,
@@ -534,6 +582,69 @@ fn run_fix_round(
 		type_alias_rename_files: &file_fixes.type_alias_rename_files,
 	})?;
 
+	if semantic_applied > 0 || !post_edit_succeeded {
+		let (final_stdout, _final_error_files) =
+			semantic::collect_compiler_error_files_with_output(
+				&file_fixes.changed_files,
+				cargo_options,
+				verbose,
+				progress,
+			)?;
+
+		if semantic::semantic_check_succeeded(&final_stdout) != Some(true) {
+			return Err(eyre::eyre!(
+				"vstyle tune: [{scope_label}] final semantic validation failed after fixer recovery."
+			));
+		}
+	}
+
+	Ok(semantic_applied)
+}
+
+fn run_fix_round(
+	files: &[PathBuf],
+	cargo_options: &CargoOptions,
+	verbose: bool,
+	progress: bool,
+) -> Result<FixRoundSummary> {
+	let scope_label = fix_scope_label(cargo_options);
+
+	if progress {
+		eprintln!("vstyle tune: [{scope_label}] collecting fixes for {} file(s).", files.len());
+	}
+
+	let round_start_snapshot = collect_file_snapshots(files);
+	let collected = collect_file_fixes(files, &scope_label, progress)?;
+
+	if collected.changed_files.is_empty() {
+		if progress {
+			eprintln!(
+				"vstyle tune: [{scope_label}] applied {} fix(es) this round.",
+				collected.total_applied
+			);
+		}
+
+		return Ok(FixRoundSummary::default());
+	}
+
+	let semantic_cargo_options =
+		scoped_semantic_cargo_options(cargo_options, &collected.changed_files)?;
+	let baseline_error_files = validate_pre_edit_semantic_baseline(
+		&collected.changed_files,
+		&semantic_cargo_options,
+		&scope_label,
+		verbose,
+		progress,
+	)?;
+	let mut file_fixes = apply_collected_file_fixes(collected)?;
+	let semantic_applied = apply_semantic_validation(
+		&scope_label,
+		&mut file_fixes,
+		&semantic_cargo_options,
+		&baseline_error_files,
+		verbose,
+		progress,
+	)?;
 	let net_changed_files = changed_files_since_snapshot(&round_start_snapshot);
 
 	// Count this round as no-op when all edits are eventually rolled back.
@@ -562,11 +673,11 @@ fn run_fix_round(
 	})
 }
 
-fn collect_and_apply_file_fixes(
+fn collect_file_fixes(
 	files: &[PathBuf],
 	scope_label: &str,
 	progress: bool,
-) -> Result<FileFixApplication> {
+) -> Result<CollectedFileFixes> {
 	let collect_started = Instant::now();
 	let type_alias_plan = collect_type_alias_rename_plan(files)?;
 	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan, scope_label, progress)?;
@@ -582,16 +693,20 @@ fn collect_and_apply_file_fixes(
 		);
 	}
 
+	Ok(CollectedFileFixes { outcomes: outcomes_all, changed_files, total_applied })
+}
+
+fn apply_collected_file_fixes(collected: CollectedFileFixes) -> Result<FileFixApplication> {
 	let mut application = FileFixApplication {
-		changed_files,
-		total_applied,
+		changed_files: collected.changed_files,
+		total_applied: collected.total_applied,
 		import_fallbacks: BTreeMap::new(),
 		changed_originals: BTreeMap::new(),
 		let_mut_reorder_files: BTreeMap::new(),
 		type_alias_rename_files: BTreeMap::new(),
 	};
 
-	for outcome in outcomes_all {
+	for outcome in collected.outcomes {
 		apply_file_fix_outcome(outcome, &mut application)?;
 	}
 
@@ -702,6 +817,18 @@ fn collect_file_snapshots(files: &[PathBuf]) -> BTreeMap<PathBuf, String> {
 	}
 
 	snapshots
+}
+
+fn restore_file_snapshots(snapshots: &BTreeMap<PathBuf, String>) -> Result<()> {
+	for (path, original) in snapshots {
+		if fs::read_to_string(path).is_ok_and(|current| current == *original) {
+			continue;
+		}
+
+		fs::write(path, original)?;
+	}
+
+	Ok(())
 }
 
 fn changed_files_since_snapshot(snapshots: &BTreeMap<PathBuf, String>) -> Vec<PathBuf> {
@@ -4376,6 +4503,44 @@ where
 	}
 
 	#[test]
+	fn import008_keeps_lowercase_ffi_type_function_collision_fully_qualified() {
+		let original = r#"
+fn install(signal: i32) {
+	let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+
+	unsafe {
+		libc::sigaction(signal, &raw const action, std::ptr::null_mut());
+	}
+}
+"#;
+		let path = Path::new("import008_lowercase_ffi_type_function_collision.rs");
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(path, original, true).expect("apply fix passes");
+
+		assert!(!rewritten.contains("use libc::sigaction;"), "{rewritten}");
+		assert!(rewritten.contains("action: libc::sigaction"), "{rewritten}");
+		assert!(rewritten.contains("libc::sigaction(signal"), "{rewritten}");
+
+		let ctx = shared::read_file_context_from_text(path, rewritten.clone())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|violation| {
+			matches!(violation.rule, "RUST-STYLE-IMPORT-008" | "RUST-STYLE-IMPORT-009")
+		}));
+		assert!(!edits.iter().any(|edit| {
+			matches!(edit.rule, "RUST-STYLE-IMPORT-008" | "RUST-STYLE-IMPORT-009")
+		}));
+
+		let (repeated, applied_count, _, _) =
+			crate::style::apply_fix_passes(path, &rewritten, true).expect("repeat fix passes");
+
+		assert_eq!(applied_count, 0);
+		assert_eq!(repeated, rewritten);
+	}
+
+	#[test]
 	fn import008_merges_alias_child_import_into_existing_parent_module_use() {
 		let original = r#"
 use futures::channel::mpsc;
@@ -4711,6 +4876,44 @@ pub fn run() -> std::result::Result<(), String> {
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-008"));
+	}
+
+	#[test]
+	fn import008_keeps_io_result_qualified_when_unqualified_result_is_used() {
+		let text = r#"
+fn business_result() -> Result<(), i32> {
+	Ok(())
+}
+
+fn read_state() -> std::io::Result<String> {
+	Ok(String::new())
+}
+
+fn apply_test_override() -> Result<(), i32> {
+	Ok(())
+}
+"#;
+		let path = Path::new("import008_io_result_prelude_conflict.rs");
+		let ctx = shared::read_file_context_from_text(path, text.to_owned())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|violation| violation.rule == "RUST-STYLE-IMPORT-008"));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-008"));
+
+		let (rewritten, _, _, _) =
+			crate::style::apply_fix_passes(path, text, true).expect("apply fix passes");
+
+		assert!(!rewritten.contains("use std::io::Result;"), "Rewritten:\n{rewritten}");
+		assert!(
+			rewritten.contains("fn read_state() -> std::io::Result<String>"),
+			"Rewritten:\n{rewritten}"
+		);
+		assert!(
+			rewritten.contains("fn apply_test_override() -> Result<(), i32>"),
+			"Rewritten:\n{rewritten}"
+		);
 	}
 
 	#[test]
@@ -6892,6 +7095,46 @@ fn sample() {
 
 		assert!(applied >= 1);
 		assert!(rewritten.contains("let a = 1;\n\n\tif a > 0 {"));
+	}
+
+	#[test]
+	fn space003_does_not_split_if_condition_from_body_brace_after_block_expression() {
+		let text = r#"
+fn lane_reference(
+	metadata_file_type_is_symlink: bool,
+	metadata_is_regular_file: bool,
+	metadata_hard_link_count: u64,
+	metadata_owner_uid: u32,
+) -> bool {
+	if metadata_file_type_is_symlink
+		|| !metadata_is_regular_file
+		|| metadata_hard_link_count != 1
+		|| metadata_owner_uid != unsafe { libc::geteuid() }
+	{
+		return false;
+	}
+
+	true
+}
+"#;
+		let path = Path::new("space_if_condition_block_expression.rs");
+		let ctx = shared::read_file_context_from_text(path, text.to_owned())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!violations.iter().any(|violation| {
+			violation.rule == "RUST-STYLE-SPACE-003"
+				&& violation.message
+					== "Insert exactly one blank line between different statement types."
+		}));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-SPACE-003"));
+
+		let (rewritten, applied_count, _, _) =
+			crate::style::apply_fix_passes(path, text, true).expect("apply fix passes");
+
+		assert_eq!(applied_count, 0);
+		assert_eq!(rewritten, text);
 	}
 
 	#[test]

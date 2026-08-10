@@ -402,7 +402,7 @@ fn import012_context_mentions_root(
 			continue;
 		};
 
-		if is_same_ident(name_ref.text().as_str(), normalized_root) {
+		if is_same_ident(name_ref.text(), normalized_root) {
 			return true;
 		}
 	}
@@ -473,6 +473,9 @@ fn build_import_analysis<'a>(
 	use_items: Vec<&'a TopItem>,
 ) -> ImportAnalysis<'a> {
 	let use_item_analyses = collect_use_item_analyses(ctx, &use_items);
+	let all_use_items =
+		ctx.top_items.iter().filter(|item| item.kind == TopKind::Use).collect::<Vec<_>>();
+	let all_use_item_analyses = collect_use_item_analyses(ctx, &all_use_items);
 	let use_item_analysis_by_key = use_item_analyses
 		.iter()
 		.enumerate()
@@ -480,7 +483,10 @@ fn build_import_analysis<'a>(
 		.collect::<HashMap<_, _>>();
 
 	ImportAnalysis {
-		imported_symbol_maps: collect_imported_symbol_maps(&use_item_analyses),
+		// A public re-export also introduces the symbol into the local module namespace. Keep
+		// public uses out of non-public grouping edits, but include them when deciding whether a
+		// qualified path already has an import.
+		imported_symbol_maps: collect_imported_symbol_maps(&all_use_item_analyses),
 		local_defined_symbols: collect_local_defined_symbols(ctx),
 		local_module_roots: collect_local_module_roots(ctx),
 		qualified_type_paths_by_symbol: collect_qualified_type_paths_by_symbol(ctx),
@@ -2327,7 +2333,7 @@ fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
 			continue;
 		};
 
-		if is_same_ident(name_ref.text().as_str(), symbol) {
+		if is_same_ident(name_ref.text(), symbol) {
 			return true;
 		}
 	}
@@ -3282,6 +3288,7 @@ fn apply_import008_rules(
 		&analysis.imported_symbol_maps.full_paths_by_symbol,
 	);
 	let blocked_symbols = build_import008_blocked_symbols(
+		ctx,
 		&import008_candidates,
 		&analysis.imported_symbol_maps.full_paths_by_symbol,
 		&analysis.local_defined_symbols,
@@ -3331,14 +3338,17 @@ fn apply_import008_rules(
 }
 
 fn build_import008_blocked_symbols(
+	ctx: &FileContext,
 	import008_candidates: &[Import008Candidate],
 	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
 	local_defined_symbols: &HashSet<String>,
 	qualified_type_paths_by_symbol: &HashMap<String, HashSet<String>>,
 	qualified_value_paths_by_symbol: &HashMap<String, HashSet<String>>,
 ) -> HashSet<String> {
+	let unqualified_type_symbols = collect_unqualified_type_symbols(ctx);
 	let mut candidate_paths_by_symbol: HashMap<String, HashSet<String>> = HashMap::new();
 	let mut non_value_receiver_candidate_symbols = HashSet::new();
+	let mut type_candidate_paths_by_symbol: HashMap<String, HashSet<String>> = HashMap::new();
 
 	for candidate in import008_candidates {
 		candidate_paths_by_symbol
@@ -3346,6 +3356,12 @@ fn build_import008_blocked_symbols(
 			.or_default()
 			.insert(candidate.import_path.clone());
 
+		if candidate.kind == Import008CandidateKind::TypePath {
+			type_candidate_paths_by_symbol
+				.entry(candidate.symbol.clone())
+				.or_default()
+				.insert(candidate.import_path.clone());
+		}
 		if !matches!(
 			candidate.kind,
 			Import008CandidateKind::ValueReceiver | Import008CandidateKind::ValuePath
@@ -3357,7 +3373,10 @@ fn build_import008_blocked_symbols(
 	let mut blocked_symbols = HashSet::new();
 
 	for (symbol, candidate_paths) in &candidate_paths_by_symbol {
-		let mut all_paths = imported_full_paths_by_symbol.get(symbol).cloned().unwrap_or_default();
+		let imported_paths = imported_full_paths_by_symbol.get(symbol).cloned().unwrap_or_default();
+		let introduces_short_name =
+			candidate_paths.iter().any(|path| !imported_paths.contains(path));
+		let mut all_paths = imported_paths;
 
 		all_paths.extend(candidate_paths.iter().cloned());
 
@@ -3370,14 +3389,22 @@ fn build_import008_blocked_symbols(
 
 		let has_non_value_receiver_candidate =
 			non_value_receiver_candidate_symbols.contains(symbol);
-		let import009_consistency_conflict = has_non_value_receiver_candidate
-			&& is_import009_type_like_symbol(symbol)
-			&& qualified_value_paths_by_symbol.get(symbol).is_some_and(|value_paths| {
-				candidate_paths.iter().any(|path| value_paths.contains(path))
+		let has_explicit_type_value_role_collision =
+			type_candidate_paths_by_symbol.get(symbol).is_some_and(|type_paths| {
+				qualified_value_paths_by_symbol.get(symbol).is_some_and(|value_paths| {
+					type_paths.iter().any(|path| value_paths.contains(path))
+				})
 			});
+		let import009_consistency_conflict = has_explicit_type_value_role_collision
+			|| (has_non_value_receiver_candidate
+				&& is_import009_type_like_symbol(symbol)
+				&& qualified_value_paths_by_symbol.get(symbol).is_some_and(|value_paths| {
+					candidate_paths.iter().any(|path| value_paths.contains(path))
+				}));
 
 		if all_paths.len() > 1
 			|| local_defined_symbols.contains(symbol)
+			|| (introduces_short_name && unqualified_type_symbols.contains(symbol))
 			|| import009_consistency_conflict
 		{
 			blocked_symbols.insert(symbol.clone());
@@ -3385,6 +3412,20 @@ fn build_import008_blocked_symbols(
 	}
 
 	blocked_symbols
+}
+
+fn collect_unqualified_type_symbols(ctx: &FileContext) -> HashSet<String> {
+	ctx.source_file
+		.syntax()
+		.descendants()
+		.filter_map(PathType::cast)
+		.filter_map(|path_type| {
+			path_type.path().and_then(|path| {
+				classify_type_path_candidate(ctx, path, PathQualificationRequirement::Unqualified)
+			})
+		})
+		.map(|candidate| normalize_ident(candidate.name_ref.text()).to_owned())
+		.collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4739,7 +4780,7 @@ fn unqualified_type_path_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -4820,7 +4861,7 @@ fn alias_root_path_name_ref_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(candidate.name_ref.text().as_str(), alias) {
+		if !is_same_ident(candidate.name_ref.text(), alias) {
 			continue;
 		}
 
@@ -4975,7 +5016,7 @@ fn unqualified_nongeneric_type_path_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text(), symbol) {
 			continue;
 		}
 		if !candidate.suffix.is_empty() {
@@ -5000,7 +5041,7 @@ fn has_unqualified_generic_type_path_use(ctx: &FileContext, symbol: &str) -> boo
 			continue;
 		};
 
-		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text(), symbol) {
 			continue;
 		}
 		if !candidate.suffix.is_empty() {
@@ -5030,7 +5071,7 @@ fn unqualified_value_path_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -5156,7 +5197,7 @@ fn unqualified_value_paths_are_record_only(ctx: &FileContext, symbol: &str) -> b
 			continue;
 		};
 
-		if !is_same_ident(candidate.name_ref.text().as_str(), symbol) {
+		if !is_same_ident(candidate.name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -7064,7 +7105,7 @@ fn unqualified_function_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usi
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
+		if !is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -7164,7 +7205,7 @@ fn unqualified_macro_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize,
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text().as_str(), symbol) {
+		if !is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 
