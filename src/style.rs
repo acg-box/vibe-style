@@ -3547,6 +3547,27 @@ fn sample() {
 	}
 
 	#[test]
+	fn import004_does_not_hoist_import_out_of_cfg_feature_expression() {
+		let original = r#"
+async fn entrypoint() {
+	#[cfg(feature = "process-test-support")]
+	if std::env::var("PROCESS_TEST").is_ok() {
+		return crate::process_test_support::serve_disabled_artifact_runtime().await;
+	}
+}
+"#;
+		let (rewritten, _applied_count, _had_import_shortening_edits, _had_let_mut_reorder_edits) =
+			crate::style::apply_fix_passes(
+				Path::new("import004_cfg_feature_expression.rs"),
+				original,
+				true,
+			)
+			.expect("apply fix passes");
+
+		assert_eq!(rewritten, original);
+	}
+
+	#[test]
 	fn import004_keeps_existing_full_path_when_parent_module_name_is_ambiguous() {
 		let original = r#"
 use other::app;
