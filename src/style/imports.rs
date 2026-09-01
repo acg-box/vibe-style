@@ -3916,6 +3916,7 @@ fn collect_import004_qualified_function_call_candidates(
 
 		if path.qualifier().is_none()
 			|| path_is_qualifier_subpath(&path)
+			|| syntax_is_inside_cfg_guarded_scope(path.syntax())
 			|| (skip_cfg_test_module_paths && is_inside_cfg_test_module(&path))
 		{
 			continue;
@@ -3952,7 +3953,9 @@ fn collect_import004_qualified_function_macro_candidates(
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
 	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
-		if skip_cfg_test_module_paths && syntax_is_inside_cfg_test_module(macro_call.syntax()) {
+		if syntax_is_inside_cfg_guarded_scope(macro_call.syntax())
+			|| (skip_cfg_test_module_paths && syntax_is_inside_cfg_test_module(macro_call.syntax()))
+		{
 			continue;
 		}
 
@@ -4062,6 +4065,11 @@ fn collect_import008_from_paths(
 		}) else {
 			continue;
 		};
+
+		if syntax_is_inside_cfg_guarded_scope(candidate.path.syntax()) {
+			continue;
+		}
+
 		let mut segments = Vec::new();
 
 		if !collect_path_segment_texts(&candidate.path, &mut segments) {
@@ -4137,6 +4145,11 @@ fn collect_import008_from_type_like_value_paths(
 		) else {
 			continue;
 		};
+
+		if syntax_is_inside_cfg_guarded_scope(candidate.path.syntax()) {
+			continue;
+		}
+
 		let mut segments = Vec::new();
 
 		if !collect_path_segment_texts(&candidate.path, &mut segments) {
@@ -4230,6 +4243,11 @@ fn collect_import008_from_value_receivers(
 		) else {
 			continue;
 		};
+
+		if syntax_is_inside_cfg_guarded_scope(candidate.path.syntax()) {
+			continue;
+		}
+
 		let mut segments = Vec::new();
 
 		if !collect_path_segment_texts(&candidate.path, &mut segments) {
@@ -4366,7 +4384,9 @@ fn collect_import008_from_macro_calls(
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
 	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
-		if syntax_is_inside_cfg_test_module(macro_call.syntax()) {
+		if syntax_is_inside_cfg_guarded_scope(macro_call.syntax())
+			|| syntax_is_inside_cfg_test_module(macro_call.syntax())
+		{
 			continue;
 		}
 
@@ -4458,6 +4478,9 @@ fn collect_import008_from_derive_attrs(
 		};
 
 		if attr_name.text() != "derive" {
+			continue;
+		}
+		if syntax_is_inside_cfg_guarded_scope(attr.syntax()) {
 			continue;
 		}
 
@@ -5339,6 +5362,22 @@ fn syntax_is_inside_cfg_test_module(syntax: &SyntaxNode) -> bool {
 		module
 			.attrs()
 			.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg(test)"))
+	})
+}
+
+fn syntax_is_inside_cfg_guarded_scope(syntax: &SyntaxNode) -> bool {
+	syntax.ancestors().skip(1).any(|ancestor| {
+		ancestor.children().filter_map(Attr::cast).any(|attr| {
+			let compact = attr
+				.syntax()
+				.text()
+				.to_string()
+				.chars()
+				.filter(|ch| !ch.is_whitespace())
+				.collect::<String>();
+
+			compact.starts_with("#[cfg(") || compact.starts_with("#[cfg_attr(")
+		})
 	})
 }
 
