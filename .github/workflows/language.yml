@@ -44,6 +44,8 @@ jobs:
         with:
           cache: true
           rustflags: ''
+          # Fixture crates can emit warnings; Clippy enforces source warnings.
+          build-warnings: warn
           components: rustfmt, clippy
 
       - name: Install nightly rustfmt
