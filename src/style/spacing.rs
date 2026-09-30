@@ -3,7 +3,10 @@ use std::{
 	sync::LazyLock,
 };
 
-use ra_ap_syntax::{AstNode, ast::IfExpr};
+use ra_ap_syntax::{
+	AstNode,
+	ast::{IfExpr, MatchArm},
+};
 use regex::Regex;
 
 use crate::style::{
@@ -125,11 +128,11 @@ impl StatementPair {
 
 struct VerticalSpacingTraversal {
 	visited_blocks: HashSet<(usize, usize)>,
-	if_condition_body_boundaries: HashSet<(usize, usize)>,
+	continuation_boundaries: HashSet<(usize, usize)>,
 }
 impl VerticalSpacingTraversal {
 	fn new(ctx: &FileContext) -> Self {
-		let if_condition_body_boundaries = ctx
+		let continuation_boundaries = ctx
 			.source_file
 			.syntax()
 			.descendants()
@@ -150,9 +153,22 @@ impl VerticalSpacingTraversal {
 
 				Some((condition_end_line, body_start_line))
 			})
+			.chain(ctx.source_file.syntax().descendants().filter_map(MatchArm::cast).filter_map(
+				|arm| {
+					let pattern = arm.pat()?;
+					let guard = arm.guard()?.if_token()?;
+					let pattern_end =
+						usize::from(pattern.syntax().text_range().end()).checked_sub(1)?;
+					let guard_start = usize::from(guard.text_range().start());
+					Some((
+						shared::line_from_offset(&ctx.line_starts, pattern_end).saturating_sub(1),
+						shared::line_from_offset(&ctx.line_starts, guard_start).saturating_sub(1),
+					))
+				},
+			))
 			.collect();
 
-		Self { visited_blocks: HashSet::new(), if_condition_body_boundaries }
+		Self { visited_blocks: HashSet::new(), continuation_boundaries }
 	}
 }
 
@@ -190,12 +206,8 @@ fn check_vertical_spacing_block(
 		return;
 	}
 
-	let statements = extract_top_level_statements(
-		&ctx.lines,
-		&traversal.if_condition_body_boundaries,
-		start,
-		end,
-	);
+	let statements =
+		extract_top_level_statements(&ctx.lines, &traversal.continuation_boundaries, start, end);
 
 	if statements.is_empty() {
 		return;
@@ -1026,7 +1038,7 @@ fn classify_statement_type(statement_lines: &[String]) -> String {
 
 fn extract_top_level_statements(
 	lines: &[String],
-	if_condition_body_boundaries: &HashSet<(usize, usize)>,
+	continuation_boundaries: &HashSet<(usize, usize)>,
 	fn_start: usize,
 	fn_end: usize,
 ) -> Vec<(usize, usize, String)> {
@@ -1091,9 +1103,9 @@ fn extract_top_level_statements(
 		let next_significant = next_significant_line(lines, mask_state, idx, fn_end);
 		let continues_method_chain =
 			next_significant.as_ref().is_some_and(|(_, stripped)| stripped.starts_with('.'));
-		let continues_if_condition = next_significant
+		let continues_syntax_boundary = next_significant
 			.as_ref()
-			.is_some_and(|(next_idx, _)| if_condition_body_boundaries.contains(&(idx, *next_idx)));
+			.is_some_and(|(next_idx, _)| continuation_boundaries.contains(&(idx, *next_idx)));
 		let statement_closed = brace_depth == 1
 			&& paren_depth == 0
 			&& bracket_depth == 0
@@ -1101,7 +1113,7 @@ fn extract_top_level_statements(
 			&& (stripped_code.ends_with(';')
 				|| (stripped_code.ends_with('}')
 					&& !continues_method_chain
-					&& !continues_if_condition));
+					&& !continues_syntax_boundary));
 
 		if statement_closed {
 			let span_lines = lines[current_start_value..=idx].to_vec();
