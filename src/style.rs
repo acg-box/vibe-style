@@ -7149,6 +7149,7 @@ fn inspect(value: Item) -> bool {
 		let (violations, edits) = crate::style::collect_violations(&ctx, true);
 		let guard_line = text.lines().position(|line| line.contains("if value > 0")).unwrap() + 1;
 		let body_line = text.lines().position(|line| line.contains("if ready")).unwrap() + 1;
+
 		assert!(
 			!violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003" && v.line == guard_line)
 		);
