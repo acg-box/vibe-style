@@ -5,7 +5,7 @@ use std::{
 
 use ra_ap_syntax::{
 	AstNode,
-	ast::{IfExpr, MatchArm},
+	ast::{BinExpr, IfExpr, MatchArm},
 };
 use regex::Regex;
 
@@ -164,6 +164,20 @@ impl VerticalSpacingTraversal {
 					Some((
 						shared::line_from_offset(&ctx.line_starts, pattern_end).saturating_sub(1),
 						shared::line_from_offset(&ctx.line_starts, guard_start).saturating_sub(1),
+					))
+				},
+			))
+			.chain(ctx.source_file.syntax().descendants().filter_map(BinExpr::cast).filter_map(
+				|expression| {
+					let lhs = expression.lhs()?;
+					let operator = expression.op_token()?;
+					let lhs_end = usize::from(lhs.syntax().text_range().end()).checked_sub(1)?;
+					let operator_start = usize::from(operator.text_range().start());
+
+					Some((
+						shared::line_from_offset(&ctx.line_starts, lhs_end).saturating_sub(1),
+						shared::line_from_offset(&ctx.line_starts, operator_start)
+							.saturating_sub(1),
 					))
 				},
 			))
