@@ -8153,6 +8153,34 @@ fn sample() {
 	}
 
 	#[test]
+	fn space004_keeps_binary_expression_continuations() {
+		let text = r#"
+fn safe_tail(flag: bool) -> bool {
+    flag
+        && unsafe { check() }
+        && other()
+}
+fn real_gap(flag: bool) -> bool {
+    record();
+    flag
+        && unsafe { check() }
+        && other()
+}
+"#;
+		let ctx = shared::read_file_context_from_text(Path::new("binary_tail.rs"), text.to_owned())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, _) = crate::style::collect_violations(&ctx, true);
+		let tail_lines = violations
+			.iter()
+			.filter(|v| v.rule == "RUST-STYLE-SPACE-004")
+			.map(|v| v.line)
+			.collect::<Vec<_>>();
+
+		assert_eq!(tail_lines, vec![9]);
+	}
+
+	#[test]
 	fn space004_fix_remains_autofixable_with_char_literal_conditions() {
 		let original = r#"
 fn classify(ch: char) -> usize {
