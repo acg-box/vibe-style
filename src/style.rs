@@ -1442,7 +1442,9 @@ mod tests {
 				let mut rewritten = original;
 
 				assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001"));
+
 				fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
 				assert!(rewritten.contains(attribute), "{rewritten}");
 			}
 		}
@@ -1470,7 +1472,9 @@ define_payload! {
 		let mut rewritten = original.to_owned();
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001"));
+
 		fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
 		assert!(rewritten.contains("#[serde(default)]"));
 		assert!(rewritten.contains(r#"#[serde(default = "defaults::fallback")]"#));
 	}
