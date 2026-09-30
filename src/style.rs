@@ -2477,8 +2477,9 @@ pub use add_note::{AddNoteRequest, AddNoteResponse};
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-002"
-				&& v.fixable && v.message
-				== "Prefer converging local module re-exports into `pub use self::{...};`."
+				&& v.fixable
+				&& v.message
+					== "Prefer converging local module re-exports into `pub use self::{...};`."
 		}));
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"));
 
@@ -2517,8 +2518,9 @@ pub(super) use text::{merge_matched_fields, tokenize_query};
 
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-002"
-				&& v.fixable && v.message
-				== "Prefer converging local module re-exports into `pub use self::{...};`."
+				&& v.fixable
+				&& v.message
+					== "Prefer converging local module re-exports into `pub use self::{...};`."
 		}));
 		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-002"));
 
@@ -5627,7 +5629,8 @@ fn execute(deadline: Instant) -> Result<(), Report> {
 		for symbol in ["Error", "Instant", "Result"] {
 			assert!(violations.iter().any(|v| {
 				v.rule == "RUST-STYLE-IMPORT-009"
-					&& v.fixable && v.message.contains(&format!("`{symbol}`"))
+					&& v.fixable
+					&& v.message.contains(&format!("`{symbol}`"))
 			}));
 		}
 
@@ -5714,7 +5717,8 @@ async fn get_referral_relation(
 		for symbol in ["ReferralCode", "ReferralRelation"] {
 			assert!(violations.iter().any(|v| {
 				v.rule == "RUST-STYLE-IMPORT-009"
-					&& v.fixable && v.message.contains(&format!("`{symbol}`"))
+					&& v.fixable
+					&& v.message.contains(&format!("`{symbol}`"))
 			}));
 		}
 
@@ -6058,14 +6062,15 @@ mod tests {
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-004"
 				&& v.line == 3
-				&& v.fixable && v.message
-				== "Do not import free functions or macros into scope; prefer qualified module paths."
+				&& v.fixable
+				&& v.message
+					== "Do not import free functions or macros into scope; prefer qualified module paths."
 		}));
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-001"
 				&& v.line == 4
-				&& v.fixable && v.message
-				== "Import groups must be ordered: std, third-party, self/workspace."
+				&& v.fixable
+				&& v.message == "Import groups must be ordered: std, third-party, self/workspace."
 		}));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"));
@@ -6857,7 +6862,8 @@ fn upsert_referral_code(
 		}));
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-009"
-				&& v.fixable && v.message.contains("`ReferralRelation`")
+				&& v.fixable
+				&& v.message.contains("`ReferralRelation`")
 		}));
 		assert!(edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-009"));
 
@@ -6912,7 +6918,8 @@ use crate::types::ReferralCode; use crate::types::ReferralRelation;"#;
 		}));
 		assert!(violations.iter().any(|v| {
 			v.rule == "RUST-STYLE-IMPORT-009"
-				&& v.fixable && v.message.contains("`ReferralRelation`")
+				&& v.fixable
+				&& v.message.contains("`ReferralRelation`")
 		}));
 
 		let import009_edits = edits
@@ -7116,6 +7123,38 @@ fn sample() {
 
 		assert!(applied >= 1);
 		assert!(rewritten.contains("let a = 1;\n\n\tif a > 0 {"));
+	}
+
+	#[test]
+	fn space003_match_guard_preserves_real_statement_checks() {
+		let text = r#"
+fn inspect(value: Item) -> bool {
+	match value {
+		Item::Ready { value } | Item::Pending { value }
+			if value > 0 => {
+			let ready = value > 1;
+			if ready {
+				return true;
+			}
+
+			false
+		},
+		_ => false,
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(Path::new("match_guard.rs"), text.into())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+		let guard_line = text.lines().position(|line| line.contains("if value > 0")).unwrap() + 1;
+		let body_line = text.lines().position(|line| line.contains("if ready")).unwrap() + 1;
+
+		assert!(
+			!violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003" && v.line == guard_line)
+		);
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003" && v.line == body_line));
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-SPACE-003"));
 	}
 
 	#[test]
