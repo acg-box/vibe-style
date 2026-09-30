@@ -1276,7 +1276,6 @@ fn collect_violations_with_import_shortening(
 	let mut edits = Vec::new();
 
 	file::check_mod_rs(ctx, &mut violations);
-	file::check_serde_option_default(ctx, &mut violations, &mut edits, with_fixes);
 	file::check_error_rs_no_use(ctx, &mut violations, &mut edits, with_fixes);
 	bindings::check_let_mut_reorder(ctx, &mut violations, &mut edits, with_fixes);
 	test_modules::check_test_module_super_glob(ctx, &mut edits, with_fixes);
@@ -1420,146 +1419,64 @@ mod tests {
 	}
 
 	#[test]
-	fn serde001_fix_removes_standalone_default_attr_on_option_field() {
-		let original = r#"
-#[derive(Deserialize)]
-struct Payload {
-	#[serde(default)]
-	value: Option<String>,
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("serde001_standalone.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+	fn style_fixes_preserve_serde_default_contracts() {
+		// Option fields can still need defaults for sequence input, custom defaults,
+		// and custom deserializers. Their type alone cannot prove redundancy.
+		for attribute in [
+			"#[serde(default)]",
+			r#"#[serde(default, rename = "value")]"#,
+			r#"#[serde(default = "default_value")]"#,
+			r#"#[serde(default, deserialize_with = "read_value")]"#,
+		] {
+			for field_type in ["Option<String>", "std::option::Option<String>", "String"] {
+				let original = format!(
+					"#[derive(Deserialize)]\nstruct Payload {{\n\t{attribute}\n\tvalue: {field_type},\n}}\n"
+				);
+				let ctx = shared::read_file_context_from_text(
+					Path::new("serde_defaults.rs"),
+					original.clone(),
+				)
+				.expect("context")
+				.expect("has ctx");
+				let (violations, edits) = crate::style::collect_violations(&ctx, true);
+				let mut rewritten = original;
 
-		assert_eq!(
-			violations.iter().filter(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable).count(),
-			1
-		);
-		assert_eq!(edits.iter().filter(|e| e.rule == "RUST-STYLE-SERDE-001").count(), 1);
+				assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001"));
 
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+				fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
-		assert!(applied >= 1);
-		assert!(!rewritten.contains("#[serde(default)]"));
-		assert!(rewritten.contains("value: Option<String>,"));
+				assert!(rewritten.contains(attribute), "{rewritten}");
+			}
+		}
 	}
 
 	#[test]
-	fn serde001_fix_removes_default_from_combined_serde_attr() {
-		let original = r#"
-#[derive(Deserialize)]
-struct Payload {
-	#[serde(default, rename = "value")]
-	value: Option<String>,
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("serde001_combined.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = crate::style::collect_violations(&ctx, true);
-
-		assert_eq!(
-			violations.iter().filter(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable).count(),
-			1
-		);
-		assert_eq!(edits.iter().filter(|e| e.rule == "RUST-STYLE-SERDE-001").count(), 1);
-
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(applied >= 1);
-		assert!(!rewritten.contains("default"));
-		assert!(rewritten.contains(r#"#[serde(rename = "value")]"#));
-	}
-
-	#[test]
-	fn serde001_fix_removes_default_attr_inside_field_like_macro_tokens() {
+	fn style_fixes_preserve_serde_defaults_in_macro_input() {
 		let original = r#"
 define_payload! {
 	struct Payload {
-		#[serde(
-			default = "outputs::downstream_quality_readback::default_pubfi_scheduled_catalyst_clock_readback"
-		)]
-		value: Option<String>,
-	}
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("serde001_macro_option_default.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = crate::style::collect_violations(&ctx, true);
-
-		assert_eq!(
-			violations.iter().filter(|v| v.rule == "RUST-STYLE-SERDE-001" && v.fixable).count(),
-			1
-		);
-		assert_eq!(edits.iter().filter(|e| e.rule == "RUST-STYLE-SERDE-001").count(), 1);
-
-		let mut rewritten = original.to_owned();
-		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
-
-		assert!(applied >= 1);
-		assert!(!rewritten.contains("default_pubfi_scheduled_catalyst_clock_readback"));
-		assert!(rewritten.contains("value: Option<String>,"));
-	}
-
-	#[test]
-	fn serde001_macro_scan_ignores_non_option_field() {
-		let original = r#"
-define_payload! {
-	struct Payload {
-		#[serde(default = "default_value")]
-		value: String,
-	}
-}
-"#;
-		let ctx = shared::read_file_context_from_text(
-			Path::new("serde001_macro_non_option_default.rs"),
-			original.to_owned(),
-		)
-		.expect("context")
-		.expect("has ctx");
-		let (violations, edits) = crate::style::collect_violations(&ctx, true);
-
-		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001"));
-		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
-	}
-
-	#[test]
-	fn serde001_macro_scan_ignores_string_and_comment_text() {
-		let original = r##"
-quote_like! {
-	"#[serde(default)] value: Option<String>,"
-	r#"
 		#[serde(default)]
-		raw_value: Option<String>,
-	"#
-	// #[serde(default)] comment_value: Option<String>,
-	/* #[serde(default)] block_value: Option<String>, */
+		value: Option<String>,
+		#[serde(default = "defaults::fallback")]
+		fallback: Option<String>,
+	}
 }
-"##;
+"#;
 		let ctx = shared::read_file_context_from_text(
-			Path::new("serde001_macro_string_comment_default.rs"),
+			Path::new("serde_macro_defaults.rs"),
 			original.to_owned(),
 		)
 		.expect("context")
 		.expect("has ctx");
 		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+		let mut rewritten = original.to_owned();
 
 		assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-SERDE-001"));
-		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-SERDE-001"));
+
+		fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("#[serde(default)]"));
+		assert!(rewritten.contains(r#"#[serde(default = "defaults::fallback")]"#));
 	}
 
 	#[test]

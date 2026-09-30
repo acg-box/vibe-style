@@ -18,7 +18,7 @@ use regex::Regex;
 type StyleFilesCacheKey = (PathBuf, PathBuf);
 type StyleFilesCache = BTreeMap<StyleFilesCacheKey, Vec<PathBuf>>;
 
-pub(crate) const STYLE_RULE_IDS: [&str; 43] = [
+pub(crate) const STYLE_RULE_IDS: [&str; 42] = [
 	"RUST-STYLE-FILE-001",
 	"RUST-STYLE-MOD-001",
 	"RUST-STYLE-MOD-002",
@@ -26,7 +26,6 @@ pub(crate) const STYLE_RULE_IDS: [&str; 43] = [
 	"RUST-STYLE-MOD-004",
 	"RUST-STYLE-MOD-005",
 	"RUST-STYLE-MOD-007",
-	"RUST-STYLE-SERDE-001",
 	"RUST-STYLE-IMPORT-001",
 	"RUST-STYLE-IMPORT-002",
 	"RUST-STYLE-IMPORT-003",

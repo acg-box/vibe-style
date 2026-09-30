@@ -325,7 +325,7 @@ Rules are built into the checker.
 
 ### Serde
 
-- `RUST-STYLE-SERDE-001`: Do not use `#[serde(default)]` on `Option<T>` fields.
+Serde defaults are part of the data contract. The checker does not remove them based on an `Option<T>` field type. A default can permit missing sequence elements, provide a custom value, or support a custom deserializer. The former `RUST-STYLE-SERDE-001` rule was removed because its fixes could change deserialization behavior.
 
 ### Imports and paths
 
