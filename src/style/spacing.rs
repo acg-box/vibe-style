@@ -160,6 +160,7 @@ impl VerticalSpacingTraversal {
 					let pattern_end =
 						usize::from(pattern.syntax().text_range().end()).checked_sub(1)?;
 					let guard_start = usize::from(guard.text_range().start());
+
 					Some((
 						shared::line_from_offset(&ctx.line_starts, pattern_end).saturating_sub(1),
 						shared::line_from_offset(&ctx.line_starts, guard_start).saturating_sub(1),
