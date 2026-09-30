@@ -7119,6 +7119,37 @@ fn sample() {
 	}
 
 	#[test]
+	fn space003_match_guard_preserves_real_statement_checks() {
+		let text = r#"
+fn inspect(value: Item) -> bool {
+	match value {
+		Item::Ready { value } | Item::Pending { value }
+			if value > 0 => {
+			let ready = value > 1;
+			if ready {
+				return true;
+			}
+
+			false
+		},
+		_ => false,
+	}
+}
+"#;
+		let ctx = shared::read_file_context_from_text(Path::new("match_guard.rs"), text.into())
+			.expect("context")
+			.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+		let guard_line = text.lines().position(|line| line.contains("if value > 0")).unwrap() + 1;
+		let body_line = text.lines().position(|line| line.contains("if ready")).unwrap() + 1;
+		assert!(
+			!violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003" && v.line == guard_line)
+		);
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-SPACE-003" && v.line == body_line));
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-SPACE-003"));
+	}
+
+	#[test]
 	fn space003_does_not_split_if_condition_from_body_brace_after_block_expression() {
 		let text = r#"
 fn lane_reference(
