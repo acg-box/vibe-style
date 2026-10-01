@@ -7,7 +7,7 @@ use std::{
 };
 
 use ra_ap_syntax::{
-	self, AstNode, AstToken, Edition, SyntaxKind, SyntaxNode,
+	self, AstNode, AstToken, Edition, SyntaxKind, SyntaxNode, TextSize,
 	ast::{
 		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Module, PathExpr,
 		PathPat, PathType, RecordExpr, RecordPat, TokenTree, Use,
@@ -4130,8 +4130,12 @@ fn collect_import004_qualified_function_macro_candidates(
 
 		for found in qualified_macro_path_regex().find_iter(&tree_text) {
 			if !macro_symbol_has_import004_function_follow(&tree_text, found.end())
-				|| !macro_symbol_is_import009_unqualified(&tree_text, found.start())
-			{
+				|| !macro_symbol_is_import009_unqualified(
+					ctx,
+					&tree_text,
+					tree_start,
+					found.start(),
+				) {
 				continue;
 			}
 
@@ -4493,7 +4497,7 @@ fn collect_import008_from_macro_record_receivers(
 
 	for found in qualified_macro_path_regex().find_iter(tree_text) {
 		if !macro_symbol_has_record_follow(tree_text, found.end())
-			|| !macro_symbol_is_import009_unqualified(tree_text, found.start())
+			|| !macro_symbol_is_import009_unqualified(ctx, tree_text, tree_start, found.start())
 		{
 			continue;
 		}
@@ -5308,7 +5312,7 @@ fn unqualified_macro_token_symbol_rewrites(
 			let symbol_end = found.end();
 
 			if !macro_symbol_has_import009_follow(&tree_text, symbol_end)
-				|| !macro_symbol_is_import009_unqualified(&tree_text, symbol_start)
+				|| !macro_symbol_is_import009_unqualified(ctx, &tree_text, tree_start, symbol_start)
 			{
 				continue;
 			}
@@ -5353,7 +5357,28 @@ fn macro_symbol_has_record_follow(text: &str, symbol_end: usize) -> bool {
 	idx < bytes.len() && bytes[idx] == b'{'
 }
 
-fn macro_symbol_is_import009_unqualified(text: &str, symbol_start: usize) -> bool {
+fn macro_symbol_is_import009_unqualified(
+	ctx: &FileContext,
+	text: &str,
+	tree_start: usize,
+	symbol_start: usize,
+) -> bool {
+	let Some(offset) =
+		tree_start.checked_add(symbol_start).and_then(|offset| TextSize::try_from(offset).ok())
+	else {
+		return false;
+	};
+	let Some(token) = ctx.source_file.syntax().token_at_offset(offset).right_biased() else {
+		return false;
+	};
+
+	if token.text_range().start() != offset
+		|| !matches!(
+			token.kind(),
+			SyntaxKind::IDENT | SyntaxKind::CRATE_KW | SyntaxKind::SELF_KW | SyntaxKind::SUPER_KW
+		) {
+		return false;
+	}
 	if symbol_start == 0 {
 		return true;
 	}
@@ -7216,9 +7241,10 @@ fn import004_has_conflicting_root_qualified_macro_path_usage(
 			continue;
 		};
 		let tree_text = token_tree.syntax().text().to_string();
+		let tree_start = usize::from(token_tree.syntax().text_range().start());
 
 		for found in path_re.find_iter(&tree_text) {
-			if !macro_symbol_is_import009_unqualified(&tree_text, found.start()) {
+			if !macro_symbol_is_import009_unqualified(ctx, &tree_text, tree_start, found.start()) {
 				continue;
 			}
 
@@ -7423,7 +7449,7 @@ fn unqualified_macro_token_function_call_ranges(
 			let symbol_end = found.end();
 
 			if !macro_symbol_has_import004_function_follow(&tree_text, symbol_end)
-				|| !macro_symbol_is_import009_unqualified(&tree_text, symbol_start)
+				|| !macro_symbol_is_import009_unqualified(ctx, &tree_text, tree_start, symbol_start)
 			{
 				continue;
 			}
