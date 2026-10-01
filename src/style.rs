@@ -10146,4 +10146,61 @@ impl Choice { pub fn value() -> Self { Self::One } }
 
 		fs::remove_dir_all(root).expect("Remove fixture.");
 	}
+	#[test]
+	fn import_group_cleanup_preserves_module_bindings_used_by_children() {
+		let root = env::temp_dir().join(format!("vstyle-child-module-binding-{}", process::id()));
+		let src = root.join("src");
+		let parent = src.join("parent.rs");
+
+		fs::create_dir_all(&src).expect("Create source directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"child-binding\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(src.join("lib.rs"), "pub mod theme { pub struct Marker; }\npub mod parent;\n")
+			.expect("Write root.");
+
+		for imports in ["use crate::{theme::{self, Marker}};", "use crate::{theme, theme::Marker};"]
+		{
+			for child in [
+				"use super::theme; pub fn read() -> usize { std::mem::size_of::<theme::Marker>() }",
+				"use super::*; pub fn read() -> usize { std::mem::size_of::<theme::Marker>() }",
+				"use crate::parent::theme; pub fn read() -> usize { std::mem::size_of::<theme::Marker>() }",
+			] {
+				let original = format!(
+					"{imports}\n#[path = \"consumer.rs\"] mod child;\npub fn marker() -> Marker {{ Marker }}\npub fn read() -> usize {{ child::read() }}\n"
+				);
+
+				fs::write(&parent, &original).expect("Write parent.");
+				fs::write(src.join("consumer.rs"), child).expect("Write child.");
+
+				let (rewritten, _, _, _) =
+					style::apply_fix_passes(&parent, &original, true).expect("Apply fixes.");
+
+				fs::write(&parent, &rewritten).expect("Write rewritten parent.");
+
+				let compiled = process::Command::new("rustc")
+					.args(["--edition=2024", "--crate-type=lib", "--emit=metadata"])
+					.arg(src.join("lib.rs"))
+					.arg("-o")
+					.arg(root.join("fixture.rmeta"))
+					.output()
+					.expect("Compile fixture.");
+
+				assert!(
+					compiled.status.success(),
+					"{rewritten}\n{}",
+					String::from_utf8_lossy(&compiled.stderr)
+				);
+
+				let (repeated, _, _, _) =
+					style::apply_fix_passes(&parent, &rewritten, true).expect("Repeat fixes.");
+
+				assert_eq!(rewritten, repeated);
+			}
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
 }

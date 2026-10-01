@@ -8218,12 +8218,15 @@ fn rewrite_mixed_use_segments(
 
 			continue;
 		};
+		let keep_self = force_keep_self
+			|| symbol_is_referenced_outside_use(ctx, &head)
+			|| symbol_referenced_by_child_module(ctx, &head);
 
 		if !can_merge_mixed_group(group, idx) {
 			if allow_drop_unused_self
 				&& group.indices.first().copied() == Some(idx)
 				&& group.has_self
-				&& !symbol_is_referenced_outside_use(ctx, &head)
+				&& !keep_self
 				&& let Some(rewritten_segment) =
 					drop_unused_self_from_nested_use_segment(segment, &head)
 			{
@@ -8240,7 +8243,6 @@ fn rewrite_mixed_use_segments(
 		}
 
 		let children = dedup_mixed_group_children(group);
-		let keep_self = force_keep_self || symbol_is_referenced_outside_use(ctx, &head);
 		let combined = if keep_self {
 			format!("{head}::{{self, {}}}", children.join(", "))
 		} else {
