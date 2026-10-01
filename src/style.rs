@@ -4332,6 +4332,61 @@ mod tests {
 	}
 
 	#[test]
+	fn import_fixes_qualify_nested_macros_without_changing_literal_text() {
+		let original = r#"
+use crate::metrics::emit;
+fn sample() {
+    emit!(emit!("emit!()"), crate::metrics::emit!("qualified"));
+}
+"#;
+		let (rewritten, _, _, _) =
+			crate::style::apply_fix_passes(Path::new("nested_macro.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(rewritten.contains("metrics::emit!(metrics::emit!(\"emit!()\")"), "{rewritten}");
+		assert!(!rewritten.contains("metrics::metrics::"), "{rewritten}");
+	}
+
+	#[test]
+	fn import_fixes_preserve_bindings_imported_by_child_modules() {
+		for (file, child_import) in [
+			("src/lib.rs", "super::emit"),
+			("src/lib.rs", "super::*"),
+			("src/lib.rs", "crate::emit"),
+			("src/parent.rs", "crate::parent::emit"),
+		] {
+			let original = format!(
+				"use crate::metrics::emit;\nfn sample() {{ emit!(); }}\n#[cfg(test)]\nmod tests {{\n    use {child_import};\n    fn child() {{ emit!(); }}\n}}\n"
+			);
+			let (rewritten, _, _, _) =
+				crate::style::apply_fix_passes(Path::new(file), &original, true)
+					.expect("Apply fixes.");
+
+			assert!(rewritten.contains("use crate::metrics::emit;"), "{rewritten}");
+		}
+	}
+
+	#[test]
+	fn import_fixes_keep_glob_symbols_used_only_inside_macros() {
+		let original = r#"
+enum StoreError { Conflict }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sample() {
+        assert!(matches!(None::<StoreError>, Some(StoreError::Conflict)));
+    }
+}
+"#;
+		let (rewritten, _, _, _) =
+			crate::style::apply_fix_passes(Path::new("src/lib.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(rewritten.contains("use crate::{StoreError};"), "{rewritten}");
+	}
+
+	#[test]
 	fn import_fix_qualifies_unqualified_macro_calls() {
 		let original = r#"
 use crate::metrics::emit;

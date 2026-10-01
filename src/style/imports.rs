@@ -7,10 +7,10 @@ use std::{
 };
 
 use ra_ap_syntax::{
-	self, AstNode, AstToken, Edition, SyntaxNode,
+	self, AstNode, AstToken, Edition, SyntaxKind, SyntaxNode,
 	ast::{
 		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Module, PathExpr,
-		PathPat, PathType, RecordExpr, RecordPat, Use,
+		PathPat, PathType, RecordExpr, RecordPat, TokenTree, Use,
 	},
 };
 use regex::Regex;
@@ -1844,6 +1844,13 @@ fn collect_used_symbols_from_syntax(syntax: &SyntaxNode) -> HashSet<String> {
 		}
 
 		used.insert(name_ref.text().to_string());
+	}
+	for tree in syntax.descendants().filter_map(TokenTree::cast) {
+		for token in tree.syntax().descendants_with_tokens().filter_map(|part| part.into_token()) {
+			if token.kind() == SyntaxKind::IDENT {
+				used.insert(normalize_ident(token.text()).to_owned());
+			}
+		}
 	}
 
 	used
@@ -6831,12 +6838,76 @@ fn import004_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<String
 	braced_import_fix_plan(path, symbol)
 }
 
+fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
+	if !ctx.source_file.syntax().descendants().any(|node| Module::can_cast(node.kind())) {
+		return false;
+	}
+
+	let Some(owner) = declared_file_module_path(&ctx.path) else {
+		return true;
+	};
+	let binding = crate_absolute_use_path(&owner, symbol);
+	let glob = crate_absolute_use_path(&owner, "*");
+	let relative_binding = owner.last().map(|name| format!("{name}::{symbol}"));
+
+	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+		let reference = compact_path_for_match(&path.syntax().text().to_string());
+
+		if path.syntax().ancestors().any(|node| Module::can_cast(node.kind()))
+			&& (reference == binding || relative_binding.as_ref() == Some(&reference))
+		{
+			return true;
+		}
+	}
+	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
+		if !use_item.syntax().ancestors().any(|node| Module::can_cast(node.kind())) {
+			continue;
+		}
+
+		let Some(tree) = use_item.use_tree() else {
+			continue;
+		};
+		let tree_path = compact_path_for_match(&tree.syntax().text().to_string());
+		let mut paths = imported_full_paths_from_use_path(&tree_path);
+
+		if tree_path.ends_with("::*") {
+			paths.push(tree_path);
+		}
+
+		for path in paths {
+			let resolved = if let Some((depth, tail)) = leading_super_depth_and_tail(&path) {
+				let Some(current) = current_module_path_segments(ctx, &use_item) else {
+					return true;
+				};
+
+				if depth > current.len() {
+					continue;
+				}
+
+				crate_absolute_use_path(&current[..current.len() - depth], tail)
+			} else {
+				path
+			};
+
+			if resolved == binding || resolved == glob {
+				return true;
+			}
+		}
+	}
+
+	false
+}
+
 fn import004_free_fn_fix_plan(
 	ctx: &FileContext,
 	current_item: &TopItem,
 	path: &str,
 	symbol: &str,
 ) -> Option<(String, Option<String>)> {
+	if symbol_referenced_by_child_module(ctx, symbol) {
+		return None;
+	}
+
 	let (default_qualified_symbol_path, rewritten_use_path_without_symbol) =
 		import004_fix_plan(path, symbol)?;
 	let Some((parent_module_path, module_symbol)) = import004_parent_module_target(path, symbol)
@@ -7394,6 +7465,35 @@ fn unqualified_macro_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize,
 			usize::from(path.syntax().text_range().start()),
 			usize::from(path.syntax().text_range().end()),
 		));
+	}
+	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
+		let Some(tree) = macro_call.token_tree() else {
+			continue;
+		};
+		let tokens = tree
+			.syntax()
+			.descendants_with_tokens()
+			.filter_map(|part| part.into_token())
+			.filter(|token| !token.kind().is_trivia())
+			.collect::<Vec<_>>();
+
+		for (index, token) in tokens.iter().enumerate() {
+			if token.kind() != SyntaxKind::IDENT
+				|| !is_same_ident(token.text(), symbol)
+				|| !tokens.get(index + 1).is_some_and(|next| next.text() == "!")
+				|| index
+					.checked_sub(1)
+					.and_then(|previous| tokens.get(previous))
+					.is_some_and(|previous| matches!(previous.text(), ":" | "::" | "$"))
+			{
+				continue;
+			}
+
+			ranges.push((
+				usize::from(token.text_range().start()),
+				usize::from(token.text_range().end()),
+			));
+		}
 	}
 
 	ranges
