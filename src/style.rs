@@ -4472,6 +4472,32 @@ fn sample() {
 	}
 
 	#[test]
+	fn import003_preserves_aliases_used_by_bare_patterns() {
+		let original = "use libc::ESRCH as S;\nfn sample(code: Option<i32>) -> bool { match code { Some(S) => true, _ => false } }\n";
+		let ctx =
+			shared::read_file_context_from_text(Path::new("constant_alias.rs"), original.into())
+				.expect("Read context.")
+				.expect("Have context.");
+		let (violations, edits) = style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-003" && !v.fixable));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-003"));
+	}
+
+	#[test]
+	fn import009_preserves_imports_used_by_bare_patterns() {
+		let original = "use libc::EPERM;\nuse libc::ESRCH;\nfn plain(code: Option<i32>) -> bool { match code { Some(ESRCH) => true, Some(EPERM) => false, _ => false } }\n#[cfg(unix)]\nfn guarded(code: Option<i32>) -> bool { match code { Some(libc::ESRCH) => true, Some(libc::EPERM) => false, _ => false } }\n";
+		let ctx =
+			shared::read_file_context_from_text(Path::new("constant_patterns.rs"), original.into())
+				.expect("Read context.")
+				.expect("Have context.");
+		let (violations, edits) = style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-009" && !v.fixable));
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-009"));
+	}
+
+	#[test]
 	fn import003_preserves_function_local_alias_shadowing() {
 		let original = r#"use std::io::ErrorKind as Phase;
 pub fn outer() -> Phase { Phase::NotFound }
