@@ -4522,6 +4522,55 @@ fn sample() {
 		assert!(!rewritten.contains("geometry::geometry::"), "{rewritten}");
 	}
 
+	#[cfg(unix)]
+	#[test]
+	fn import004_coordinates_direct_imports_and_shortened_paths() {
+		let original = r#"#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::{MetadataExt, symlink};
+    #[test]
+    fn sample() {
+        let _ = std::fs::read("file");
+        let _ = std::fs::metadata("file").map(|metadata| metadata.mode());
+        let _ = symlink("a", "b");
+    }
+}
+"#;
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-planned-imports-{}-{now}", process::id()));
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		let path = root.join("fixture.rs");
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		assert!(rewritten.contains("fs::symlink(\"a\", \"b\")"), "{rewritten}");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let output = process::Command::new("rustc")
+			.arg("--edition=2024")
+			.arg("--test")
+			.arg("--emit=metadata")
+			.arg(&path)
+			.arg("-o")
+			.arg(root.join("fixture.rmeta"))
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(
+			output.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+
 	#[test]
 	fn import006_does_not_hoist_colliding_pending_bindings() {
 		let original = "fn first() {\n use std::fmt::Result;\n let _: Result = Ok(());\n}\nfn second() {\n use std::io::Result;\n let _: Result<()> = Ok(());\n}\n";

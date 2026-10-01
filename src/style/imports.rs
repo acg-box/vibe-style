@@ -2937,6 +2937,9 @@ fn apply_import004_qualified_function_path_rule(
 	imported_full_paths_by_symbol: &HashMap<String, HashSet<String>>,
 	skip_cfg_test_module_paths: bool,
 ) -> HashSet<usize> {
+	// Direct-import rewrites can introduce module bindings. Reconsider path
+	// shortening on the next pass, after those bindings are part of the context.
+	let emit_edits = emit_edits && !edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-004");
 	let candidates =
 		collect_import004_qualified_function_candidates(ctx, skip_cfg_test_module_paths);
 
