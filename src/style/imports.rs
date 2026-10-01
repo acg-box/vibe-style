@@ -9,9 +9,9 @@ use std::{
 use ra_ap_syntax::{
 	self, AstNode, AstToken, Edition, SyntaxKind, SyntaxNode, TextSize,
 	ast::{
-		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Meta, Module,
-		PathExpr, PathPat, PathType, RecordExpr, RecordPat, StmtList, TokenTree, TupleStructPat,
-		Use,
+		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, IdentPat, Item, MacroCall, Meta,
+		Module, PathExpr, PathPat, PathType, RecordExpr, RecordPat, StmtList, TokenTree,
+		TupleStructPat, Use,
 	},
 };
 use regex::Regex;
@@ -2218,8 +2218,10 @@ fn apply_import003_non_keep_alive_alias_rule(
 	let mut referenced_aliases = Vec::new();
 	let mut rewrites = Vec::<(usize, usize, String)>::new();
 	let mut planned_ranges = Vec::<(usize, usize)>::new();
-	let mut fixable =
-		!aliases.iter().any(|(alias, _)| symbol_referenced_by_child_module(ctx, alias));
+	let mut fixable = !aliases.iter().any(|(alias, _)| {
+		symbol_referenced_by_child_module(ctx, alias)
+			|| symbol_has_bare_identifier_pattern(ctx, alias)
+	});
 
 	for (alias, qualified_path) in &aliases {
 		let referenced = symbol_is_referenced_outside_use(ctx, alias);
@@ -2578,6 +2580,7 @@ fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
 	}
 
 	!alias_macro_path_ranges(ctx, symbol).is_empty()
+		|| symbol_has_bare_identifier_pattern(ctx, symbol)
 }
 
 fn normalize_trait_keep_alive_use_path(
@@ -3387,7 +3390,7 @@ fn build_import009_plan<'a>(
 	{
 		return Some((false, Vec::new(), Vec::new(), Vec::new()));
 	}
-	if import008_cycle_risk {
+	if import008_cycle_risk || symbol_has_bare_identifier_pattern(ctx, symbol) {
 		return Some((false, Vec::new(), Vec::new(), Vec::new()));
 	}
 
@@ -3420,6 +3423,16 @@ fn build_import009_plan<'a>(
 	}
 
 	Some((fixable, type_rewrites, value_rewrites, use_item_plans))
+}
+
+fn symbol_has_bare_identifier_pattern(ctx: &FileContext, symbol: &str) -> bool {
+	// A bare pattern can resolve to an imported constant instead of declaring a binding.
+	// Keep its import until name resolution can distinguish those cases.
+	ctx.source_file
+		.syntax()
+		.descendants()
+		.filter_map(IdentPat::cast)
+		.any(|pattern| pattern.name().is_some_and(|name| is_same_ident(name.text(), symbol)))
 }
 
 fn import009_equivalent_qualified_paths<'a>(
