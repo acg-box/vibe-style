@@ -8285,6 +8285,53 @@ fn sample() {
 	}
 
 	#[test]
+	fn spacing_fixes_preserve_metadata_and_literals() {
+		for (source, anchor) in [
+			(
+				"fn sample() {\n let value = \"雪\";\n // Keep the check.\n #[cfg(test)]\n assert_eq!(value, \"雪\");\n}\n",
+				" // Keep the check.",
+			),
+			(
+				"fn sample() -> i32 {\n let value = 1;\n /* Keep this block\n  * and its layout. */\n return value;\n}\n",
+				" /* Keep this block",
+			),
+			(
+				"fn sample() -> i32 {\n let value = 1;\n // Keep the tail.\n #[cfg(all())]\n value\n}\n",
+				" // Keep the tail.",
+			),
+		] {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("metadata_spacing.rs"),
+				source.to_owned(),
+			)
+			.expect("Read fixture.")
+			.expect("Get fixture context.");
+			let (_, edits) = style::collect_violations(&ctx, true);
+			let edits = edits
+				.into_iter()
+				.filter(|edit| matches!(edit.rule, "RUST-STYLE-SPACE-003" | "RUST-STYLE-SPACE-004"))
+				.collect();
+			let mut rewritten = source.to_owned();
+
+			assert!(fixes::apply_edits(&mut rewritten, edits).expect("Apply spacing edits.") > 0);
+			assert_eq!(rewritten, source.replace(anchor, &format!("\n{anchor}")));
+
+			let ctx =
+				shared::read_file_context_from_text(Path::new("metadata_spacing.rs"), rewritten)
+					.expect("Read fixed fixture.")
+					.expect("Get fixed context.");
+			let (violations, _) = style::collect_violations(&ctx, true);
+
+			assert!(
+				!violations
+					.iter()
+					.any(|v| matches!(v.rule, "RUST-STYLE-SPACE-003" | "RUST-STYLE-SPACE-004")),
+				"{violations:?}"
+			);
+		}
+	}
+
+	#[test]
 	fn space003_match_guard_preserves_real_statement_checks() {
 		let text = r#"
 fn inspect(value: Item) -> bool {
