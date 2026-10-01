@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use color_eyre::{Result, eyre};
 
 use crate::style::shared::Edit;
@@ -10,22 +12,53 @@ pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usi
 	let literal_ranges = literal_ranges(text);
 
 	edits.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)).then(a.rule.cmp(b.rule)));
+	edits.dedup_by(|a, b| {
+		a.start == b.start && a.end == b.end && a.rule == b.rule && a.replacement == b.replacement
+	});
 
-	let mut filtered = Vec::new();
-	let mut last_end = 0_usize;
+	let mut blocked_import_rules = HashSet::new();
 
-	for edit in edits {
-		if !allows_literal_overlap(edit.rule) && intersects_literal_range(&edit, &literal_ranges) {
-			continue;
-		}
-		if edit.start < last_end {
-			continue;
-		}
-
-		last_end = edit.end;
-
-		filtered.push(edit);
+	// Shortening and full qualification are competing plans. Apply unambiguous
+	// shortening first, then reconsider qualification against the updated source.
+	if edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-008") {
+		blocked_import_rules.insert("RUST-STYLE-IMPORT-009");
 	}
+
+	let filtered = loop {
+		let mut selected = Vec::new();
+		let mut last_end = 0;
+		let mut partial_import_rule = None;
+
+		for edit in &edits {
+			if blocked_import_rules.contains(edit.rule)
+				|| (!allows_literal_overlap(edit.rule)
+					&& intersects_literal_range(edit, &literal_ranges))
+			{
+				continue;
+			}
+			if edit.start < last_end {
+				if edit.rule.starts_with("RUST-STYLE-IMPORT-") {
+					partial_import_rule = Some(edit.rule);
+
+					break;
+				}
+
+				continue;
+			}
+
+			last_end = edit.end;
+
+			selected.push(edit);
+		}
+
+		if let Some(rule) = partial_import_rule {
+			// Import and reference edits form one transaction. Re-plan without a
+			// conflicting rule instead of applying only its surviving fragments.
+			blocked_import_rules.insert(rule);
+		} else {
+			break selected;
+		}
+	};
 
 	if filtered.is_empty() {
 		return Ok(0);
