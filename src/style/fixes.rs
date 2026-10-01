@@ -1,6 +1,7 @@
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 use color_eyre::{Result, eyre};
+use ra_ap_syntax::{AstNode, Edition, SourceFile, ast::Use};
 
 use crate::style::shared::Edit;
 
@@ -64,6 +65,8 @@ pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usi
 		return Ok(0);
 	}
 
+	let mut inserted_imports = HashSet::new();
+
 	for edit in filtered.iter().rev() {
 		if edit.end > text.len() || edit.start > edit.end {
 			return Err(eyre::eyre!(
@@ -74,10 +77,49 @@ pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usi
 			));
 		}
 
-		text.replace_range(edit.start..edit.end, &edit.replacement);
+		let replacement = deduplicated_import_insertion(edit, &mut inserted_imports);
+
+		text.replace_range(edit.start..edit.end, &replacement);
 	}
 
 	Ok(filtered.len())
+}
+
+fn deduplicated_import_insertion<'a>(
+	edit: &'a Edit,
+	inserted_imports: &mut HashSet<(usize, String)>,
+) -> Cow<'a, str> {
+	if edit.start != edit.end || !edit.rule.starts_with("RUST-STYLE-IMPORT-") {
+		return Cow::Borrowed(&edit.replacement);
+	}
+
+	// All owning rule transactions have been selected before shared imports are removed.
+	let parsed = SourceFile::parse(&edit.replacement, Edition::CURRENT);
+	let mut duplicate_ranges = Vec::new();
+
+	for item in parsed.tree().syntax().children().filter_map(Use::cast) {
+		let key = (edit.start, item.syntax().text().to_string());
+
+		if !inserted_imports.insert(key) {
+			duplicate_ranges.push(item.syntax().text_range());
+		}
+	}
+
+	if duplicate_ranges.is_empty() {
+		return Cow::Borrowed(&edit.replacement);
+	}
+
+	let mut replacement = edit.replacement.clone();
+
+	for range in duplicate_ranges.into_iter().rev() {
+		replacement.replace_range(usize::from(range.start())..usize::from(range.end()), "");
+	}
+
+	if replacement.trim().is_empty() {
+		replacement.clear();
+	}
+
+	Cow::Owned(replacement)
 }
 
 fn is_lifetime_prefix(bytes: &[u8], start: usize) -> bool {

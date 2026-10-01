@@ -4436,6 +4436,42 @@ fn sample() {
 	}
 
 	#[test]
+	fn shared_import_insertions_preserve_distinct_conditions() {
+		let edits = vec![
+			Edit {
+				start: 0,
+				end: 0,
+				replacement: "use std::io::ErrorKind;\n#[cfg(unix)]\nuse std::fmt::Error;\n".into(),
+				rule: "RUST-STYLE-IMPORT-006",
+			},
+			Edit {
+				start: 0,
+				end: 0,
+				replacement: "use std::io::ErrorKind;\n#[cfg(windows)]\nuse std::fmt::Error;\n"
+					.into(),
+				rule: "RUST-STYLE-IMPORT-008",
+			},
+		];
+		let mut text = "fn sample() {}\n".to_owned();
+
+		fixes::apply_edits(&mut text, edits).expect("Apply insertions.");
+
+		assert_eq!(text.matches("use std::io::ErrorKind;").count(), 1, "{text}");
+		assert!(text.contains("#[cfg(unix)]\nuse std::fmt::Error;"), "{text}");
+		assert!(text.contains("#[cfg(windows)]\nuse std::fmt::Error;"), "{text}");
+	}
+
+	#[test]
+	fn import006_and_import008_share_inserted_type_imports() {
+		let original = "pub fn sample() -> std::io::ErrorKind {\n use std::io::ErrorKind;\n ErrorKind::NotFound\n}\n";
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(Path::new("shared_type_import.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert_eq!(rewritten.matches("use std::io::ErrorKind;").count(), 1, "{rewritten}");
+	}
+
+	#[test]
 	fn import003_qualifies_tuple_constructor_patterns() {
 		let original = r#"use std::result::Result as Receipt;
 fn sample(value: Receipt<u8, u8>) -> u8 {
