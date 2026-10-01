@@ -7206,11 +7206,8 @@ fn import004_preferred_module_access_plan(
 	parent_module_path: &str,
 	module_symbol: &str,
 ) -> Option<Import004ModuleAccessPlan> {
-	if let Some(alias) = module_alias_from_parent_path(parent_module_path) {
-		return Some(Import004ModuleAccessPlan {
-			access_path: alias,
-			keep_parent_module_import: true,
-		});
+	if matches!(module_symbol, "crate" | "self" | "super") {
+		return None;
 	}
 
 	let compact_parent_module_path = compact_path_for_match(parent_module_path);

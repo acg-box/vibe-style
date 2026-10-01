@@ -4522,6 +4522,31 @@ fn sample() {
 		assert!(!rewritten.contains("geometry::geometry::"), "{rewritten}");
 	}
 
+	#[test]
+	fn import004_preserves_relative_parent_depth() {
+		let original =
+			"fn sample() { super::super::render(); wrapper!(super::super::super::render()); }";
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(Path::new("relative_parent.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(rewritten.contains("super::super::render()"), "{rewritten}");
+		assert!(rewritten.contains("super::super::super::render()"), "{rewritten}");
+		assert!(!rewritten.contains("use super"), "{rewritten}");
+	}
+
+	#[test]
+	fn import004_checks_relative_module_binding_collisions() {
+		let original =
+			"use crate::conversations::tests;\nfn sample() { super::super::tests::profiles(); }";
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(Path::new("relative_collision.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(rewritten.contains("super::super::tests::profiles()"), "{rewritten}");
+		assert!(!rewritten.contains("use super"), "{rewritten}");
+	}
+
 	#[cfg(unix)]
 	#[test]
 	fn import004_coordinates_direct_imports_and_shortened_paths() {
