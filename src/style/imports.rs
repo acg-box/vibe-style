@@ -440,6 +440,7 @@ fn exported_symbols_from_super_scope_impl(use_item: &Use) -> Option<BTreeSet<Str
 	let already_imported =
 		imported_symbols_from_current_module_use_items(&current_module, use_item);
 	let used_symbols = collect_used_symbols_from_syntax(current_module_item_list.syntax());
+	let parent_traits = parent_scope_trait_symbols(use_item)?;
 	let mut symbols = BTreeSet::new();
 
 	collect_scope_symbols_from_items(parent_scope_items(use_item)?.into_iter(), &mut symbols)?;
@@ -453,10 +454,48 @@ fn exported_symbols_from_super_scope_impl(use_item: &Use) -> Option<BTreeSet<Str
 		.filter(|symbol| current_module_name.as_deref() != Some(symbol.as_str()))
 		.filter(|symbol| !matches!(symbol.as_str(), "tests" | "_test"))
 		.filter(|symbol| !already_imported.contains(symbol))
-		.filter(|symbol| used_symbols.contains(symbol))
+		.filter(|symbol| used_symbols.contains(symbol) || parent_traits.contains(symbol))
 		.collect::<BTreeSet<_>>();
 
 	Some(used)
+}
+
+fn parent_scope_trait_symbols(use_item: &Use) -> Option<HashSet<String>> {
+	let mut traits = HashSet::new();
+
+	for item in parent_scope_items(use_item)? {
+		match item {
+			Item::Trait(item) =>
+				if let Some(name) = item.name() {
+					traits.insert(name.text().to_string());
+				},
+			Item::Use(item) => {
+				let path = item.use_tree()?.syntax().text().to_string();
+				let aliases = collect_non_keep_alive_alias_bindings(&path);
+
+				for full_path in imported_full_paths_from_use_path(&path) {
+					let Some(symbol) = symbol_from_full_import_path(&full_path) else {
+						continue;
+					};
+
+					if looks_like_trait_import(&symbol, &full_path) {
+						// Normalize named trait aliases before expanding a dependent glob.
+						if aliases
+							.iter()
+							.any(|(_, original)| compact_path_for_match(original) == full_path)
+						{
+							return None;
+						}
+
+						traits.insert(symbol);
+					}
+				}
+			},
+			_ => {},
+		}
+	}
+
+	Some(traits)
 }
 
 fn build_import_analysis<'a>(
@@ -1155,6 +1194,10 @@ fn apply_import010_no_super_use_rule(
 				let parent_depth = path.len().checked_sub(super_depth)?;
 
 				resolve_parent_use_tail(&path[..parent_depth], tail)
+			});
+			let replacement_path = replacement_path.filter(|_| {
+				// Keep the parent glob available until named trait aliases are normalized.
+				super_depth != 1 || tail != "*" || parent_scope_trait_symbols(&use_item).is_some()
 			});
 			let fixable = replacement_path.is_some();
 
