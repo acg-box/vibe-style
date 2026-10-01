@@ -2375,6 +2375,57 @@ use unicode_segmentation::UnicodeSegmentation;
 	}
 
 	#[test]
+	fn pub_use_spacing_preserves_visibility_boundaries() {
+		for (outer, inner) in [
+			("pub", "pub(crate)"),
+			("pub(crate)", "pub(super)"),
+			("pub(super)", "pub(in crate::scope)"),
+		] {
+			let original =
+				format!("{outer} use external::Public;\n\n{inner} use external::Internal;\n");
+			let ctx = shared::read_file_context_from_text(
+				Path::new("pub_use_visibility.rs"),
+				original.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (violations, edits) = crate::style::collect_violations(&ctx, true);
+			let mut rewritten = original.clone();
+
+			assert!(
+				!violations
+					.iter()
+					.any(|v| { matches!(v.rule, "RUST-STYLE-IMPORT-002" | "RUST-STYLE-MOD-002") })
+			);
+
+			fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+			assert_eq!(rewritten, original);
+		}
+	}
+
+	#[test]
+	fn pub_use_spacing_repairs_each_visibility_group_and_converges() {
+		let original = "pub use external::Public;\npub(crate) use external::First;\n\npub(crate) use external::Second;\n";
+		let expected = "pub use external::Public;\n\npub(crate) use external::First;\npub(crate) use external::Second;\n";
+		let mut rewritten = original.to_owned();
+
+		for _ in 0..2 {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("pub_use_convergence.rs"),
+				rewritten.clone(),
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (_, edits) = crate::style::collect_violations(&ctx, true);
+
+			fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+			assert_eq!(rewritten, expected);
+		}
+	}
+
+	#[test]
 	fn pub_use_group_fix_converges_local_module_reexports_to_self_group() {
 		let original = r#"
 mod add_event;
