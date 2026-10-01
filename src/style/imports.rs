@@ -7945,10 +7945,8 @@ fn symbol_referenced_by_descendant(
 		return true;
 	}
 
-	for path in scope.descendants().filter_map(ast::Path::cast) {
-		let reference = compact_path_for_match(&path.syntax().text().to_string());
-
-		if path.syntax().ancestors().any(|node| Module::can_cast(node.kind()))
+	for (node, reference) in qualified_reference_paths(scope) {
+		if node.ancestors().any(|node| Module::can_cast(node.kind()))
 			&& (reference == binding || relative_binding.as_ref() == Some(&reference))
 		{
 			return true;

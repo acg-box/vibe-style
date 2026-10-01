@@ -4630,6 +4630,81 @@ fn sample() {
 	}
 
 	#[test]
+	fn crate_globs_preserve_inline_macro_references() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-current-glob-{}-{now}", process::id()));
+		let source = root.join("src");
+		let consumer = source.join("consumer.rs");
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"current-glob-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(source.join("lib.rs"), "mod provider; mod consumer;\n").expect("Write root.");
+		fs::write(source.join("provider.rs"), "pub struct Token;\npub fn compute() -> u8 { 9 }\n")
+			.expect("Write provider.");
+
+		let original = r#"use crate::provider::{Token, compute};
+
+pub fn run(_: Token) -> u8 {
+    compute()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::consumer::*;
+
+    #[test]
+    fn preserved() {
+        assert_eq!(compute(), 9);
+        assert_eq!(run(Token), 9);
+    }
+}
+"#;
+
+		fs::write(&consumer, original).expect("Write consumer.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&consumer, original, true).expect("Fix imports.");
+
+		assert!(!rewritten.contains("::*"), "{rewritten}");
+
+		fs::write(&consumer, &rewritten).expect("Write fixed consumer.");
+
+		let binary = root.join("fixture");
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--test"])
+			.arg(source.join("lib.rs"))
+			.arg("-o")
+			.arg(&binary)
+			.output()
+			.expect("Compile fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
+
+		let executed = process::Command::new(&binary).output().expect("Run fixture.");
+
+		assert!(
+			executed.status.success(),
+			"{}\n{}",
+			String::from_utf8_lossy(&executed.stdout),
+			String::from_utf8_lossy(&executed.stderr)
+		);
+		assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn mixed_crate_globs_preserve_explicit_sibling_bindings() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
