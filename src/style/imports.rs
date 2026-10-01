@@ -3426,7 +3426,7 @@ fn apply_import004_free_fn_macro_rule(
 		let needs_fn_fix = !fn_ranges.is_empty() && !local_fn_defined;
 		let needs_macro_fix = !macro_ranges.is_empty()
 			&& !local_macro_defined
-			&& !symbol_imported_from_std_like_root(path, &symbol);
+			&& !symbol_imported_from_std_like_root(ctx, path, &symbol);
 
 		if !(needs_fn_fix || needs_macro_fix) {
 			continue;
@@ -3442,7 +3442,7 @@ fn apply_import004_free_fn_macro_rule(
 			qualified_symbol_path = qualified_path;
 			fixable = true;
 
-			if emit_edits {
+			if emit_edits && rewritten_use_path.as_deref() != Some(path) {
 				use_item_edit = build_use_item_rewrite_edit(
 					ctx,
 					item,
@@ -3490,9 +3490,9 @@ fn apply_import004_free_fn_macro_rule(
 
 		if let Some(edit) = use_item_edit {
 			edits.push(edit);
-
-			fixed = true;
 		}
+
+		fixed = true;
 
 		break;
 	}
@@ -3594,14 +3594,79 @@ fn apply_import004_qualified_function_path_rule(
 	touched_lines
 }
 
-fn symbol_imported_from_std_like_root(path: &str, symbol: &str) -> bool {
+fn symbol_imported_from_std_like_root(ctx: &FileContext, path: &str, symbol: &str) -> bool {
 	imported_full_paths_from_use_path(path).into_iter().any(|full_path| {
-		if symbol_from_full_import_path(&full_path).as_deref() != Some(symbol) {
-			return false;
+		symbol_from_full_import_path(&full_path).as_deref() == Some(symbol)
+			&& import_path_has_std_root(ctx, &full_path, &HashSet::new())
+	})
+}
+
+fn import_path_has_std_root(ctx: &FileContext, path: &str, visited: &HashSet<String>) -> bool {
+	let path = path.strip_prefix("::").unwrap_or(path);
+
+	if matches!(path.split("::").next(), Some("std" | "core" | "alloc")) {
+		return true;
+	}
+
+	let Some(tail) = path.strip_prefix("crate::") else {
+		return false;
+	};
+	let mut visited = visited.clone();
+
+	if !visited.insert(path.to_owned()) {
+		return false;
+	}
+
+	let mut segments = tail.split("::").map(str::to_owned).collect::<Vec<_>>();
+	let Some(symbol) = segments.pop() else {
+		return false;
+	};
+	let Some((_, scope)) = resolve_crate_module_scope(ctx, &segments) else {
+		return false;
+	};
+	let items = scope.children().filter_map(Item::cast).collect::<Vec<_>>();
+
+	if items.iter().any(|item| matches!(item, Item::MacroRules(item) if item.name().is_some_and(|name| name.text() == symbol))) {
+		return false;
+	}
+
+	let prefix = crate_absolute_use_path(&segments, "");
+	let mut targets = HashSet::new();
+
+	for item in &items {
+		let Item::Use(import) = item else {
+			continue;
+		};
+		let Some(tree) = import.use_tree() else {
+			continue;
+		};
+		let use_path = tree.syntax().text().to_string();
+
+		if !imported_symbols_from_use_path(&use_path).contains(&symbol) {
+			continue;
 		}
 
-		matches!(full_path.split("::").next(), Some("std") | Some("core") | Some("alloc"))
-	})
+		let aliases = collect_non_keep_alive_alias_bindings(&use_path);
+
+		for original in imported_full_paths_from_use_path(&use_path) {
+			let binding = aliases
+				.iter()
+				.find(|(_, path)| compact_path_for_match(path) == original)
+				.map(|(alias, _)| alias.clone())
+				.or_else(|| symbol_from_full_import_path(&original));
+
+			if binding.as_deref() == Some(&symbol) {
+				let Some(target) = scope_import_target(&original, &prefix, &items) else {
+					return false;
+				};
+
+				targets.insert(target);
+			}
+		}
+	}
+
+	!targets.is_empty()
+		&& targets.iter().all(|target| import_path_has_std_root(ctx, target, &visited))
 }
 
 fn use_path_needs_import004_fix(ctx: &FileContext, path: &str) -> bool {
@@ -3616,7 +3681,7 @@ fn use_path_needs_import004_fix(ctx: &FileContext, path: &str) -> bool {
 			!unqualified_function_call_ranges(ctx, &symbol).is_empty() && !local_fn_defined;
 		let needs_macro_fix = !unqualified_macro_call_ranges(ctx, &symbol).is_empty()
 			&& !local_macro_defined
-			&& !symbol_imported_from_std_like_root(path, &symbol);
+			&& !symbol_imported_from_std_like_root(ctx, path, &symbol);
 
 		if needs_fn_fix || needs_macro_fix {
 			return true;
@@ -7869,6 +7934,15 @@ fn import004_free_fn_fix_plan(
 	else {
 		return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
 	};
+	let full_symbol_path = format!("{parent_module_path}::{symbol}");
+
+	if !unqualified_macro_call_ranges(ctx, symbol).is_empty()
+		&& import004_has_conflicting_root_qualified_path_usage(ctx, symbol, &full_symbol_path)
+	{
+		// A single import can bind a macro and a module in separate namespaces.
+		return Some((full_symbol_path, Some(path.to_owned())));
+	}
+
 	let Some(mut module_access_plan) = import004_preferred_module_access_plan(
 		ctx,
 		Some(current_item),
