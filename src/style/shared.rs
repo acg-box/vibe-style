@@ -206,6 +206,7 @@ struct WorkspacePackageInfo {
 	name: String,
 	snake_name: String,
 	root: PathBuf,
+	target_roots: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -375,6 +376,17 @@ pub(crate) fn package_names_for_files(files: &[PathBuf]) -> Result<Option<Vec<St
 	};
 
 	Ok(Some(packages.into_keys().collect()))
+}
+
+pub(crate) fn package_target_roots(crate_dir: &Path) -> Result<Option<Vec<PathBuf>>> {
+	let root = normalize_path(crate_dir);
+	let layout = workspace_layout_for_dir(&root)?;
+
+	Ok(layout
+		.workspace_packages
+		.iter()
+		.find(|package| package.root == root)
+		.map(|package| package.target_roots.clone()))
 }
 
 pub(crate) fn package_rust_files_for_path(path: &Path) -> Result<Option<(PathBuf, Vec<PathBuf>)>> {
@@ -758,8 +770,13 @@ fn workspace_package_info(package: &Package) -> Option<WorkspacePackageInfo> {
 	let name = package.name.to_string();
 	let snake_name = name.replace('-', "_");
 	let root = workspace_package_root(package)?;
+	let target_roots = package
+		.targets
+		.iter()
+		.map(|target| normalize_path(Path::new(target.src_path.as_str())))
+		.collect();
 
-	Some(WorkspacePackageInfo { name, snake_name, root })
+	Some(WorkspacePackageInfo { name, snake_name, root, target_roots })
 }
 
 fn workspace_package_root(package: &Package) -> Option<PathBuf> {

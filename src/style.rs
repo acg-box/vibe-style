@@ -2085,6 +2085,39 @@ pub mod api_code {
 	}
 
 	#[test]
+	fn import010_resolves_binary_entrypoint_as_crate_root() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-bin-owner-{}-{now}", process::id()));
+		let bin = root.join("src/bin");
+
+		fs::create_dir_all(&bin).expect("Create binary directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"bin-owner-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+
+		let path = bin.join("tool.rs");
+		let original = "const VALUE: u32 = 1;\nfn main() {}\n#[cfg(test)] mod tests { use super::VALUE; fn value() -> u32 { VALUE } }";
+
+		fs::write(&path, original).expect("Write binary.");
+
+		let ctx = shared::read_file_context(&path).expect("Read context.").expect("Have context.");
+		let (_, edits) = style::collect_violations(&ctx, true);
+		let edits = edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-010").collect();
+		let mut rewritten = original.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("Rewrite parent path.");
+
+		assert!(rewritten.contains("use crate::VALUE;"), "{rewritten}");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn import010_respects_path_attribute_module_ownership() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
@@ -4476,6 +4509,17 @@ fn sample() {
 				&& !v.fixable
 		}));
 		assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"));
+	}
+
+	#[test]
+	fn import004_qualifies_function_calls_after_macro_labels() {
+		let original = "use crate::geometry::point;\nfn sample() { let _ = point(1); wrapper!(origin: point(2)); }";
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(Path::new("macro_labels.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(rewritten.contains("origin: geometry::point(2)"), "{rewritten}");
+		assert!(!rewritten.contains("geometry::geometry::"), "{rewritten}");
 	}
 
 	#[test]
