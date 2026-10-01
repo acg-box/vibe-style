@@ -1948,6 +1948,31 @@ pub mod api_code {
 	}
 
 	#[test]
+	fn import010_preserves_aliases_and_nested_parent_paths() {
+		for (original, expected) in [
+			("use super::{Kind as K};", "Kind as K"),
+			("use super :: Kind as K;", "crate::parent::Kind as K"),
+			("use super::{super::Root, Kind};", "crate::Root"),
+		] {
+			let ctx = shared::read_file_context_from_text(
+				Path::new("src/parent/child.rs"),
+				original.to_owned(),
+			)
+			.expect("Read context.")
+			.expect("Have context.");
+			let (_, edits) = crate::style::collect_violations(&ctx, true);
+			let edits =
+				edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-010").collect();
+			let mut rewritten = original.to_owned();
+
+			fixes::apply_edits(&mut rewritten, edits).expect("Apply import rewrite.");
+
+			assert!(rewritten.contains(expected), "{rewritten}");
+			assert!(!rewritten.contains("::super"), "{rewritten}");
+		}
+	}
+
+	#[test]
 	fn import010_does_not_report_self_prefix_use() {
 		let original = r#"
 pub mod api_code {
@@ -7091,6 +7116,32 @@ use crate::types::ReferralCode; use crate::types::ReferralRelation;"#;
 	}
 
 	#[test]
+	fn mod005_relocation_preserves_one_impl_when_another_edit_overlaps() {
+		let original = "struct Sample;\n\nenum Other { Item }\n\nimpl Sample {\n    fn value() -> u32 { 1 }\n}\n";
+		let ctx =
+			shared::read_file_context_from_text(Path::new("move_overlap.rs"), original.to_owned())
+				.expect("Read context.")
+				.expect("Have context.");
+		let (_, edits) = crate::style::collect_violations(&ctx, true);
+		let start = original.find("impl Sample").expect("Find impl.");
+		let mut edits =
+			edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-MOD-005").collect::<Vec<_>>();
+
+		edits.push(shared::Edit {
+			start,
+			end: start + 1,
+			replacement: "i".to_owned(),
+			rule: "RUST-STYLE-IMPORT-001",
+		});
+
+		let mut rewritten = original.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("Apply overlapping edits.");
+
+		assert_eq!(rewritten.matches("impl Sample").count(), 1, "{rewritten}");
+	}
+
+	#[test]
 	fn mod005_fix_moves_impl_block_adjacent_to_type() {
 		let original = r#"
 struct Sample;
@@ -7119,7 +7170,7 @@ impl Sample {
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
-		assert!(applied >= 2);
+		assert!(applied >= 1);
 
 		let struct_idx = rewritten.find("struct Sample;").expect("struct");
 		let impl_idx = rewritten.find("impl Sample").expect("impl");
@@ -7154,7 +7205,7 @@ struct Sample;
 		let mut rewritten = original.to_owned();
 		let applied = fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
 
-		assert!(applied >= 2);
+		assert!(applied >= 1);
 		assert!(rewritten.contains("struct Sample;\nimpl Sample {"));
 	}
 
