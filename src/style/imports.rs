@@ -441,7 +441,7 @@ fn exported_symbols_from_super_scope_impl(use_item: &Use) -> Option<BTreeSet<Str
 			collect_scope_symbols_from_items(
 				item_list.syntax().children().filter_map(Item::cast),
 				&mut symbols,
-			);
+			)?;
 		}
 	} else if let Some(source_file) =
 		current_module.syntax().ancestors().find_map(ast::SourceFile::cast)
@@ -449,7 +449,7 @@ fn exported_symbols_from_super_scope_impl(use_item: &Use) -> Option<BTreeSet<Str
 		collect_scope_symbols_from_items(
 			source_file.syntax().children().filter_map(Item::cast),
 			&mut symbols,
-		);
+		)?;
 	}
 
 	if symbols.is_empty() {
@@ -1828,7 +1828,10 @@ fn imported_symbols_from_current_module_use_items(
 	out
 }
 
-fn collect_scope_symbols_from_items(items: impl Iterator<Item = Item>, out: &mut BTreeSet<String>) {
+fn collect_scope_symbols_from_items(
+	items: impl Iterator<Item = Item>,
+	out: &mut BTreeSet<String>,
+) -> Option<()> {
 	for item in items {
 		match item {
 			Item::Use(use_item) => {
@@ -1836,6 +1839,12 @@ fn collect_scope_symbols_from_items(items: impl Iterator<Item = Item>, out: &mut
 					continue;
 				};
 				let use_path = use_tree.syntax().text().to_string();
+				// A parent glob can supply names absent from this local inventory.
+				// Replacing the child's glob with a partial list loses those bindings.
+
+				if use_path.contains('*') {
+					return None;
+				}
 
 				for symbol in imported_symbols_from_use_path(&use_path) {
 					out.insert(symbol);
@@ -1847,6 +1856,8 @@ fn collect_scope_symbols_from_items(items: impl Iterator<Item = Item>, out: &mut
 				},
 		}
 	}
+
+	Some(())
 }
 
 fn item_name_text(item: &Item) -> Option<String> {
