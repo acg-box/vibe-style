@@ -4630,6 +4630,80 @@ fn sample() {
 	}
 
 	#[test]
+	fn crate_globs_preserve_child_trait_bindings() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-child-trait-{}-{now}", process::id()));
+		let source = root.join("src");
+		let consumer = source.join("consumer.rs");
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"child-trait-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(source.join("lib.rs"), "mod consumer;\n").expect("Write root.");
+
+		let original = r#"use std::future::Future;
+
+pub async fn ready() -> u8 {
+    9
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::consumer::*;
+
+    #[test]
+    fn preserved() {
+        let mut value = std::pin::pin!(ready());
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert_eq!(value.as_mut().poll(&mut context), std::task::Poll::Ready(9));
+    }
+}
+"#;
+
+		fs::write(&consumer, original).expect("Write consumer.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&consumer, original, true).expect("Fix imports.");
+
+		assert!(!rewritten.contains("::*"), "{rewritten}");
+
+		fs::write(&consumer, &rewritten).expect("Write fixed consumer.");
+
+		let binary = root.join("fixture");
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--test"])
+			.arg(source.join("lib.rs"))
+			.arg("-o")
+			.arg(&binary)
+			.output()
+			.expect("Compile fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
+
+		let executed = process::Command::new(&binary).output().expect("Run fixture.");
+
+		assert!(
+			executed.status.success(),
+			"{}\n{}",
+			String::from_utf8_lossy(&executed.stdout),
+			String::from_utf8_lossy(&executed.stderr)
+		);
+		assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn crate_globs_preserve_inline_macro_references() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
