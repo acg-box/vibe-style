@@ -592,6 +592,10 @@ fn apply_semantic_validation(
 			)?;
 
 		if semantic::semantic_check_succeeded(&final_stdout) != Some(true) {
+			if recover_without_binding_rewrites(file_fixes, cargo_options, verbose, progress)? {
+				return Ok(0);
+			}
+
 			return Err(eyre::eyre!(
 				"vstyle tune: [{scope_label}] final semantic validation failed after fixer recovery."
 			));
@@ -599,6 +603,43 @@ fn apply_semantic_validation(
 	}
 
 	Ok(semantic_applied)
+}
+
+fn recover_without_binding_rewrites(
+	file_fixes: &mut FileFixApplication,
+	cargo_options: &CargoOptions,
+	verbose: bool,
+	progress: bool,
+) -> Result<bool> {
+	let mut applied = 0;
+
+	// A changed binding can break a different file. Restore the complete scope from
+	// its pre-edit sources before retaining independent style edits.
+	for (path, original) in file_fixes.changed_originals.values() {
+		let (text, count, _, _) = apply_filtered_fix_passes(path, original, false, false)?;
+
+		fs::write(path, text)?;
+
+		applied += count;
+	}
+
+	let (stdout, _) = semantic::collect_compiler_error_files_with_output(
+		&file_fixes.changed_files,
+		cargo_options,
+		verbose,
+		progress,
+	)?;
+	let recovered = semantic::semantic_check_succeeded(&stdout) == Some(true);
+
+	if recovered {
+		file_fixes.total_applied = applied;
+
+		eprintln!(
+			"Retained {applied} non-binding fixes after restoring failed binding rewrites; remaining violations are still reported."
+		);
+	}
+
+	Ok(recovered)
 }
 
 fn run_fix_round(
@@ -1134,6 +1175,15 @@ fn apply_fix_passes(
 	initial_text: &str,
 	with_import_shortening: bool,
 ) -> Result<(String, usize, bool, bool)> {
+	apply_filtered_fix_passes(path, initial_text, with_import_shortening, true)
+}
+
+fn apply_filtered_fix_passes(
+	path: &Path,
+	initial_text: &str,
+	with_import_shortening: bool,
+	with_binding_rewrites: bool,
+) -> Result<(String, usize, bool, bool)> {
 	let mut text = initial_text.to_owned();
 	let mut pass = 0_usize;
 	let mut applied_count = 0_usize;
@@ -1150,6 +1200,12 @@ fn apply_fix_passes(
 			collect_violations_with_import_shortening(&ctx, true, with_import_shortening);
 		let mut current_text = ctx.text;
 
+		if !with_binding_rewrites {
+			edits.retain(|edit| {
+				!edit.rule.starts_with("RUST-STYLE-IMPORT-")
+					&& !matches!(edit.rule, "RUST-STYLE-LET-001" | "RUST-STYLE-MOD-007")
+			});
+		}
 		if with_import_shortening {
 			if edits.iter().any(|edit| is_import_shortening_rule(edit.rule)) {
 				had_import_shortening_edits = true;

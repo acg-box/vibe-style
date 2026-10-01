@@ -385,3 +385,54 @@ fn main() {
 
 	let _ = fs::remove_dir_all(temp_dir);
 }
+
+#[test]
+fn tune_preserves_independent_fixes_after_binding_recovery_fails() {
+	let temp_dir = create_atomicity_crate_root();
+	let manifest = temp_dir.join("Cargo.toml");
+	let source = fs::read_to_string(&manifest).expect("Read manifest.");
+
+	fs::write(
+		&manifest,
+		source.replace("vstyle-tune-atomicity-fixture", "vstyle-binding-recovery-fixture"),
+	)
+	.expect("Name independent fixture.");
+
+	let main_source = r#"fn main() {
+    let value = 10000;
+    let _error = std::io::Error::other(value.to_string());
+}
+"#;
+	let build_source = r#"fn main() {
+    println!("cargo:rerun-if-changed=src/main.rs");
+    let source = std::fs::read_to_string("src/main.rs").expect("Read fixture.");
+    assert!(!source.contains("use "), "reject binding rewrite");
+}
+"#;
+
+	fs::write(temp_dir.join("src/main.rs"), main_source).expect("Write main source.");
+	fs::write(temp_dir.join("build.rs"), build_source).expect("Write build source.");
+
+	let output = Command::new("git")
+		.current_dir(&temp_dir)
+		.args(["init"])
+		.output()
+		.expect("Initialize fixture.");
+
+	assert!(output.status.success());
+
+	let output = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--language", "rust"])
+		.output()
+		.expect("Run tune.");
+	let after = fs::read_to_string(temp_dir.join("src/main.rs")).expect("Read result.");
+	let stderr = String::from_utf8_lossy(&output.stderr);
+
+	assert!(output.status.success(), "{stderr}");
+	assert!(after.contains("std::io::Error::other"), "{after}");
+	assert!(after.contains("10_000"), "{after}");
+	assert!(stderr.contains("restoring failed binding rewrites"), "{stderr}");
+
+	fs::remove_dir_all(temp_dir).expect("Remove fixture.");
+}
