@@ -4630,6 +4630,72 @@ fn sample() {
 	}
 
 	#[test]
+	fn inline_glob_expansion_uses_its_own_descendant_scope() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-inline-glob-{}-{now}", process::id()));
+		let source = root.join("src");
+		let outer = source.join("outer.rs");
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"inline-glob-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(source.join("lib.rs"), "mod outer;").expect("Write root.");
+
+		let self_provider = r#"use crate::outer;
+
+fn tone() -> u8 { 1 }
+
+#[cfg(test)]
+mod tests {
+    use crate::outer::*;
+
+    #[test]
+    fn preserved() {
+        assert_eq!(tone(), 1);
+    }
+}
+"#;
+
+		fs::write(&outer, self_provider).expect("Write self re-export provider.");
+
+		let (rewritten, _, _, _) = style::apply_fix_passes(&outer, self_provider, true)
+			.expect("Fix self re-export consumer.");
+
+		assert!(!rewritten.contains("::*"), "{rewritten}");
+
+		fs::write(&outer, &rewritten).expect("Write fixed self re-export consumer.");
+
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--test"])
+			.arg(source.join("lib.rs"))
+			.arg("-o")
+			.arg(root.join("fixture"))
+			.output()
+			.expect("Compile self re-export fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
+
+		let executed = process::Command::new(root.join("fixture"))
+			.output()
+			.expect("Run self re-export fixture.");
+
+		assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+		assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn crate_glob_expansion_preserves_external_traits_and_conditions() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
