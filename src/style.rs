@@ -4630,6 +4630,87 @@ fn sample() {
 	}
 
 	#[test]
+	fn macro_qualification_preserves_reexported_standard_modules() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-std-reexport-{}-{now}", process::id()));
+		let source = root.join("src");
+		let consumer = source.join("consumer.rs");
+		let original = r#"use crate::facade::panic;
+
+#[test]
+fn keeps_builtin_macro() {
+    let result = panic::catch_unwind(|| panic!("fixture"));
+    let message = result.unwrap_err();
+    let text = message.downcast_ref::<&str>().copied()
+        .or_else(|| message.downcast_ref::<String>().map(String::as_str));
+    assert_eq!(text, Some("fixture"));
+}
+"#;
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"std-reexport-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(source.join("lib.rs"), r#"mod provider; mod facade; mod consumer;
+#[macro_export] macro_rules! custom_panic { ($message:expr) => { std::panic!("custom {}", $message) }; }"#)
+			.expect("Write root.");
+		fs::write(source.join("provider.rs"), "pub use std::panic::{self};")
+			.expect("Write provider.");
+
+		for (facade, custom) in [
+			("pub use std::panic::{self};", false),
+			("pub use crate::provider::panic;", false),
+			("pub use std::panic::{self}; pub use crate::custom_panic as panic;", true),
+		] {
+			fs::write(source.join("facade.rs"), facade).expect("Write facade.");
+
+			let original = if custom {
+				original.replace("Some(\"fixture\")", "Some(\"custom fixture\")")
+			} else {
+				original.to_owned()
+			};
+
+			fs::write(&consumer, &original).expect("Write consumer.");
+
+			let (rewritten, _, _, _) =
+				style::apply_fix_passes(&consumer, &original, true).expect("Fix consumer.");
+
+			if custom {
+				assert!(rewritten.contains("facade::panic!"), "{rewritten}");
+			}
+
+			fs::write(&consumer, &rewritten).expect("Write fixed consumer.");
+
+			let binary = root.join("fixture");
+			let compiled = process::Command::new("rustc")
+				.args(["--edition=2024", "--test"])
+				.arg(source.join("lib.rs"))
+				.arg("-o")
+				.arg(&binary)
+				.output()
+				.expect("Compile fixture.");
+
+			assert!(
+				compiled.status.success(),
+				"{rewritten}\n{}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+
+			let executed = process::Command::new(&binary).output().expect("Run fixture.");
+
+			assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+			assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn inline_glob_expansion_uses_its_own_descendant_scope() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
