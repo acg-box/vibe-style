@@ -4474,6 +4474,96 @@ fn sample() {
 	}
 
 	#[test]
+	fn parent_glob_expansion_preserves_conditional_bindings() {
+		let original = r#"#[cfg(feature = "enabled")]
+struct Conditional;
+#[cfg(feature = "enabled")]
+use std::io::ErrorKind;
+struct Always;
+#[cfg_attr(not(feature = "enabled"), cfg(any()))]
+struct ViaAttr;
+#[cfg_attr(feature = "enabled", cfg_attr(not(feature = "extra"), cfg(any())))]
+struct Nested;
+#[cfg(feature = "enabled")]
+#[cfg(feature = "extra")]
+struct Both;
+#[cfg(feature = "enabled")]
+struct Either;
+#[cfg(not(feature = "enabled"))]
+struct Either;
+#[cfg(test)]
+mod tests {
+    #[cfg(test)]
+    use super::*;
+    #[test]
+    fn unconditional() { let _ = Always; let _ = Either; }
+    #[cfg(any(not(feature = "enabled"), feature = "extra"))]
+    #[test]
+    fn nested() { let _ = Nested; }
+    #[cfg(all(feature = "enabled", feature = "extra"))]
+    #[test]
+    fn both() { let _ = Both; }
+    #[cfg(feature = "enabled")]
+    #[test]
+    fn conditional() {
+        let _ = Conditional;
+        let _ = ViaAttr;
+        let _ = ErrorKind::NotFound;
+    }
+}
+"#;
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-glob-cfg-{}-{now}", process::id()));
+		let path = root.join("lib.rs");
+		let binary = root.join("fixture");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		assert!(!rewritten.contains("::*"), "{rewritten}");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		for (enabled, extra) in [(false, false), (false, true), (true, false), (true, true)] {
+			let mut compiler = process::Command::new("rustc");
+
+			compiler.args(["--edition=2024", "--test"]).arg(&path).arg("-o").arg(&binary);
+
+			if enabled {
+				compiler.args(["--cfg", "feature=\"enabled\""]);
+			}
+			if extra {
+				compiler.args(["--cfg", "feature=\"extra\""]);
+			}
+
+			let compiled = compiler.output().expect("Compile rewritten fixture.");
+
+			assert!(
+				compiled.status.success(),
+				"enabled={enabled}, extra={extra}\n{rewritten}\n{}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+
+			let executed = process::Command::new(&binary).output().expect("Run rewritten fixture.");
+
+			assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+
+			let expected = if enabled && extra { 4 } else { 2 };
+
+			assert!(
+				String::from_utf8_lossy(&executed.stdout).contains(&format!("{expected} passed;"))
+			);
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn import009_preserves_test_module_macro_bindings() {
 		let original = "use std::io::Error;\nfn outer(_: Error) {}\nfn other(_: std::fmt::Error) {}\n#[cfg(test)]\nmod tests {\n\tuse std::fmt::Error;\n\t#[test]\n\tfn inner() {\n\t\tassert_eq!(format!(\"{:?}\", Error::default()), \"Error\");\n\t}\n}\n";
 		let now = std::time::SystemTime::now()
