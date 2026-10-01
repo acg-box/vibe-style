@@ -593,7 +593,7 @@ fn build_import006_fix_plan(
 		|| path.contains('*')
 		|| path.contains(" as ")
 		|| import006_use_item_has_comments(ctx, use_item)
-		|| import006_use_item_has_cfg_attrs(use_item)
+		|| syntax_has_cfg_attributes(use_item.syntax())
 		|| import006_has_cfg_ancestor(use_item)
 	{
 		return None;
@@ -637,21 +637,13 @@ fn build_import006_fix_plan(
 	Some((delete_edit, Some(insert_edit)))
 }
 
-fn import006_use_item_has_cfg_attrs(use_item: &Use) -> bool {
-	use_item.attrs().any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg("))
-}
-
 fn import006_has_cfg_ancestor(use_item: &Use) -> bool {
 	use_item
 		.syntax()
 		.ancestors()
 		.skip(1)
-		.filter_map(Item::cast)
-		.filter(|item| !matches!(item, Item::Module(_)))
-		.any(|item| {
-			item.attrs()
-				.any(|attr| attr.syntax().text().to_string().replace(' ', "").contains("cfg("))
-		})
+		.take_while(|ancestor| !Module::can_cast(ancestor.kind()))
+		.any(|ancestor| syntax_has_cfg_attributes(&ancestor))
 }
 
 fn import006_use_item_has_comments(ctx: &FileContext, use_item: &Use) -> bool {
@@ -5614,18 +5606,20 @@ fn syntax_is_inside_cfg_test_module(syntax: &SyntaxNode) -> bool {
 }
 
 fn syntax_is_inside_cfg_guarded_scope(syntax: &SyntaxNode) -> bool {
-	syntax.ancestors().skip(1).any(|ancestor| {
-		ancestor.children().filter_map(Attr::cast).any(|attr| {
-			let compact = attr
-				.syntax()
-				.text()
-				.to_string()
-				.chars()
-				.filter(|ch| !ch.is_whitespace())
-				.collect::<String>();
+	syntax.ancestors().skip(1).any(|ancestor| syntax_has_cfg_attributes(&ancestor))
+}
 
-			compact.starts_with("#[cfg(") || compact.starts_with("#[cfg_attr(")
-		})
+fn syntax_has_cfg_attributes(syntax: &SyntaxNode) -> bool {
+	syntax.children().filter_map(Attr::cast).any(|attr| {
+		let compact = attr
+			.syntax()
+			.text()
+			.to_string()
+			.chars()
+			.filter(|ch| !ch.is_whitespace())
+			.collect::<String>();
+
+		compact.starts_with("#[cfg(") || compact.starts_with("#[cfg_attr(")
 	})
 }
 
