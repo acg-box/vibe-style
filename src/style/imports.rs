@@ -442,22 +442,7 @@ fn exported_symbols_from_super_scope_impl(use_item: &Use) -> Option<BTreeSet<Str
 	let used_symbols = collect_used_symbols_from_syntax(current_module_item_list.syntax());
 	let mut symbols = BTreeSet::new();
 
-	if let Some(parent_module) = current_module.syntax().ancestors().skip(1).find_map(Module::cast)
-	{
-		if let Some(item_list) = parent_module.item_list() {
-			collect_scope_symbols_from_items(
-				item_list.syntax().children().filter_map(Item::cast),
-				&mut symbols,
-			)?;
-		}
-	} else if let Some(source_file) =
-		current_module.syntax().ancestors().find_map(ast::SourceFile::cast)
-	{
-		collect_scope_symbols_from_items(
-			source_file.syntax().children().filter_map(Item::cast),
-			&mut symbols,
-		)?;
-	}
+	collect_scope_symbols_from_items(parent_scope_items(use_item)?.into_iter(), &mut symbols)?;
 
 	if symbols.is_empty() {
 		return None;
@@ -1233,10 +1218,13 @@ fn apply_import007_no_glob_use_rule(
 		let start = usize::from(use_item.syntax().text_range().start());
 		let end = usize::from(use_item.syntax().text_range().end());
 		let line = shared::line_from_offset(&ctx.line_starts, start);
-		let replacement =
+		let replacement = if compact_path_for_match(&use_path) == "super::*" {
+			build_parent_glob_item_replacement(&use_item)
+		} else {
 			build_glob_use_replacement(ctx, &use_item, &use_path).and_then(|replacement_path| {
 				rewrite_use_item_with_path(&use_item.syntax().text().to_string(), &replacement_path)
-			});
+			})
+		};
 		let fixable = replacement.is_some();
 
 		shared::push_violation(
@@ -1262,6 +1250,126 @@ fn apply_import007_no_glob_use_rule(
 	}
 
 	fixed_top_level_lines
+}
+
+fn parent_scope_items(use_item: &Use) -> Option<Vec<Item>> {
+	let module = use_item.syntax().ancestors().find_map(Module::cast)?;
+	let scope = module
+		.syntax()
+		.ancestors()
+		.skip(1)
+		.find(|node| Module::can_cast(node.kind()) || ast::SourceFile::can_cast(node.kind()))?;
+	let scope = if let Some(parent) = Module::cast(scope.clone()) {
+		parent.item_list()?.syntax().clone()
+	} else {
+		scope
+	};
+
+	Some(scope.children().filter_map(Item::cast).collect())
+}
+
+fn cfg_meta_predicate(meta: Meta) -> Option<String> {
+	match meta {
+		Meta::CfgMeta(meta) => Some(meta.cfg_predicate()?.syntax().text().to_string()),
+		Meta::CfgAttrMeta(meta) => {
+			let condition = meta.cfg_predicate()?.syntax().text().to_string();
+			let predicates = meta
+				.metas()
+				.map(cfg_meta_predicate)
+				.collect::<Option<Vec<_>>>()?
+				.into_iter()
+				.filter(|predicate| !predicate.is_empty())
+				.collect::<Vec<_>>();
+
+			Some(if predicates.is_empty() {
+				String::new()
+			} else {
+				format!("any(not({condition}), all({}))", predicates.join(", "))
+			})
+		},
+		_ => Some(String::new()),
+	}
+}
+
+fn item_cfg_predicate(item: &Item) -> Option<String> {
+	let mut predicates = Vec::new();
+
+	for attr in item.syntax().children().filter_map(Attr::cast) {
+		let predicate = cfg_meta_predicate(attr.meta()?)?;
+
+		if !predicate.is_empty() {
+			predicates.push(predicate);
+		}
+	}
+
+	Some(match predicates.as_slice() {
+		[] => String::new(),
+		[predicate] => predicate.clone(),
+		_ => format!("all({})", predicates.join(", ")),
+	})
+}
+
+fn parent_glob_symbol_conditions(
+	use_item: &Use,
+	names: &BTreeSet<String>,
+) -> Option<BTreeMap<String, BTreeSet<String>>> {
+	let mut conditions = BTreeMap::<String, BTreeSet<String>>::new();
+
+	for item in parent_scope_items(use_item)? {
+		let symbols = if let Item::Use(import) = &item {
+			imported_symbols_from_use_path(&import.use_tree()?.syntax().text().to_string())
+		} else {
+			item_name_text(&item).into_iter().collect()
+		};
+		let selected = symbols.into_iter().filter(|name| names.contains(name)).collect::<Vec<_>>();
+
+		if selected.is_empty() {
+			continue;
+		}
+
+		let predicate = item_cfg_predicate(&item)?;
+
+		for name in selected {
+			conditions.entry(name).or_default().insert(predicate.clone());
+		}
+	}
+
+	Some(conditions)
+}
+
+fn build_parent_glob_item_replacement(use_item: &Use) -> Option<String> {
+	let names = exported_symbols_from_super_scope(use_item)?;
+	let conditions = parent_glob_symbol_conditions(use_item, &names)?;
+	let mut groups = BTreeMap::<String, Vec<String>>::new();
+
+	for name in names {
+		let predicates = conditions.get(&name)?;
+		let condition = if predicates.contains("") {
+			String::new()
+		} else if predicates.len() == 1 {
+			format!("#[cfg({})]\n", predicates.first()?)
+		} else {
+			format!("#[cfg(any({}))]\n", predicates.iter().cloned().collect::<Vec<_>>().join(", "))
+		};
+
+		groups.entry(condition).or_default().push(name);
+	}
+
+	if groups.is_empty() {
+		return None;
+	}
+
+	let raw = use_item.syntax().text().to_string();
+	let mut imports = Vec::new();
+
+	for (condition, names) in groups {
+		let rewritten =
+			rewrite_use_item_with_path(&raw, &format_expanded_braced_use_path("super", &names))?;
+
+		imports.push(format!("{condition}{rewritten}"));
+	}
+
+	Some(imports.join("\n"))
 }
 
 fn build_glob_use_replacement(ctx: &FileContext, use_item: &Use, use_path: &str) -> Option<String> {
