@@ -2550,7 +2550,7 @@ fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
 		}
 	}
 
-	false
+	!alias_macro_path_ranges(ctx, symbol).is_empty()
 }
 
 fn normalize_trait_keep_alive_use_path(
@@ -5123,9 +5123,15 @@ fn alias_macro_token_tree_rewrites(
 	alias: &str,
 	qualified_path: &str,
 ) -> Vec<(usize, usize, String)> {
+	alias_macro_path_ranges(ctx, alias)
+		.into_iter()
+		.map(|(start, end)| (start, end, qualified_path.to_owned()))
+		.collect()
+}
+
+fn alias_macro_path_ranges(ctx: &FileContext, alias: &str) -> Vec<(usize, usize)> {
 	let pattern = format!(r"\b{}\b::", regex::escape(alias));
 	let re = Regex::new(&pattern).expect("Compile alias macro path regex.");
-	let replacement = format!("{qualified_path}::");
 	let mut rewrites = Vec::new();
 
 	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
@@ -5133,15 +5139,17 @@ fn alias_macro_token_tree_rewrites(
 			continue;
 		};
 		let original = token_tree.syntax().text().to_string();
-		let rewritten = re.replace_all(&original, replacement.as_str()).into_owned();
+		let tree_start = usize::from(token_tree.syntax().text_range().start());
 
-		if rewritten == original {
-			continue;
+		for found in re.find_iter(&original) {
+			if !macro_symbol_is_import009_unqualified(ctx, &original, tree_start, found.start()) {
+				continue;
+			}
+
+			let start = tree_start + found.start();
+
+			rewrites.push((start, start + alias.len()));
 		}
-
-		let range = token_tree.syntax().text_range();
-
-		rewrites.push((usize::from(range.start()), usize::from(range.end()), rewritten));
 	}
 
 	rewrites
