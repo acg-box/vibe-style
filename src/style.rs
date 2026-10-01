@@ -1972,6 +1972,57 @@ pub mod api_code {
 	}
 
 	#[test]
+	fn import004_preserves_bindings_used_by_external_children() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-child-import-{}-{now}", process::id()));
+		let src = root.join("src");
+		let parent = src.join("lib.rs");
+		let original = "use std::fs::read;\n#[path = \"consumer.rs\"] mod child;\npub fn run() { let _ = read(\"fixture\"); }\n";
+
+		fs::create_dir_all(&src).expect("Create source directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"child-import-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(&parent, original).expect("Write parent.");
+
+		for child in [
+			"use super::*; pub fn run() { let _ = read(\"fixture\"); }",
+			"use super::read as load; pub fn run() { let _ = load(\"fixture\"); }",
+			"pub fn run() { let _ = super::read(\"fixture\"); }",
+			"use crate::read as load; pub fn run() { let _ = load(\"fixture\"); }",
+			"mod nested { pub fn run() { let _ = super::super::read(\"fixture\"); } }",
+		] {
+			fs::write(src.join("consumer.rs"), child).expect("Write child.");
+
+			let ctx =
+				shared::read_file_context(&parent).expect("Read context.").expect("Have context.");
+			let (violations, edits) = style::collect_violations(&ctx, true);
+
+			assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-004"), "{child}");
+			assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004" && !v.fixable));
+		}
+
+		fs::write(src.join("consumer.rs"), "pub fn run() { let _ = std::fs::read(\"fixture\"); }")
+			.expect("Write independent child.");
+
+		let ctx =
+			shared::read_file_context(&parent).expect("Read context.").expect("Have context.");
+		let (_, edits) = style::collect_violations(&ctx, true);
+
+		assert!(
+			edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-004"),
+			"Independent child must not block qualification."
+		);
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn import010_respects_path_attribute_module_ownership() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
