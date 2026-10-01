@@ -4523,6 +4523,76 @@ fn sample() {
 	}
 
 	#[test]
+	fn import004_reuses_module_bindings_planned_for_other_imports() {
+		let original = r#"pub fn observe() {}
+pub mod conversations {
+    pub mod tests {
+        pub fn connected() {}
+        pub fn dispatched() {}
+        pub fn archived() {}
+        pub fn replied() {}
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::observe;
+    use crate::conversations::tests::{connected, dispatched};
+    #[test]
+    fn connects_session() {
+        observe();
+        connected();
+        dispatched();
+    }
+    #[test]
+    fn archives_session() {
+        use crate::conversations::tests::{archived, replied};
+        archived();
+        replied();
+    }
+}
+"#;
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-shared-plan-{}-{now}", process::id()));
+		let path = root.join("src/lib.rs");
+
+		fs::create_dir_all(root.join("src")).expect("Create fixture directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname='glob-plan'\nversion='0.0.0'\nedition='2024'\n",
+		)
+		.expect("Write manifest.");
+		fs::write(&path, original).expect("Write fixture.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		assert!(rewritten.contains("tests::connected()"), "{rewritten}");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let output = process::Command::new("rustc")
+			.arg("--edition=2024")
+			.arg("--test")
+			.arg("--emit=metadata")
+			.arg(&path)
+			.arg("-o")
+			.arg(root.join("fixture.rmeta"))
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(
+			output.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+
+	#[test]
 	fn import007_coordinates_expansion_with_test_module_paths() {
 		let original = "pub mod helper { pub fn run() {} }\n#[cfg(test)]\nmod tests {\n use super::*;\n #[test] fn calls_helper() { super::helper::run(); }\n}\n";
 		let now = std::time::SystemTime::now()

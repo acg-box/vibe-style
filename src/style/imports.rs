@@ -1921,6 +1921,7 @@ fn apply_use_item_rules(
 	with_import_shortening: bool,
 ) -> HashSet<usize> {
 	let mut import004_fixed_lines = HashSet::new();
+	let mut planned_import_paths = Vec::new();
 
 	for use_item_analysis in use_item_analyses {
 		let item = use_item_analysis.item;
@@ -1964,7 +1965,15 @@ fn apply_use_item_rules(
 		if !alias_rule_applied {
 			push_alias_violation_if_needed(ctx, violations, item, path);
 		}
-		if apply_import004_free_fn_macro_rule(ctx, violations, edits, emit_edits, item, path) {
+		if apply_import004_free_fn_macro_rule(
+			ctx,
+			violations,
+			edits,
+			emit_edits,
+			item,
+			path,
+			&mut planned_import_paths,
+		) {
 			import004_fixed_lines.insert(item.line);
 		}
 	}
@@ -2842,6 +2851,7 @@ fn apply_import004_free_fn_macro_rule(
 	emit_edits: bool,
 	item: &TopItem,
 	path: &str,
+	planned_import_paths: &mut Vec<String>,
 ) -> bool {
 	if !path.contains("::") {
 		return false;
@@ -2872,7 +2882,7 @@ fn apply_import004_free_fn_macro_rule(
 		let mut use_item_edit = None;
 
 		if let Some((qualified_path, rewritten_use_path)) =
-			import004_free_fn_fix_plan(ctx, item, path, &symbol)
+			import004_free_fn_fix_plan(ctx, item, path, &symbol, planned_import_paths)
 		{
 			qualified_symbol_path = qualified_path;
 			fixable = true;
@@ -2887,6 +2897,8 @@ fn apply_import004_free_fn_macro_rule(
 
 				if use_item_edit.is_none() {
 					fixable = false;
+				} else {
+					planned_import_paths.extend(rewritten_use_path);
 				}
 			}
 		}
@@ -3330,7 +3342,6 @@ fn build_import009_plan<'a>(
 		qualified_paths.iter().any(|path| !equivalent_qualified_paths.contains(path.as_str()));
 	let allow_value_only_record_rewrites =
 		has_unqualified_value_uses && !has_unqualified_type_uses && value_uses_record_only;
-	let allow_value_only_conflicting_qualified_paths = allow_value_only_record_rewrites;
 	let imported_root = imported_path.split("::").next().unwrap_or_default();
 	let import008_cycle_guard_enabled = !matches!(imported_root, "crate" | "self" | "super");
 	let import008_cycle_risk = import008_cycle_guard_enabled
@@ -3349,7 +3360,7 @@ fn build_import009_plan<'a>(
 	}
 	if (!has_unqualified_uses
 		&& has_conflicting_qualified_path
-		&& !allow_value_only_conflicting_qualified_paths)
+		&& !allow_value_only_record_rewrites)
 		|| (has_unqualified_uses
 			&& !has_qualified_same_path
 			&& !has_conflicting_qualified_path
@@ -3374,6 +3385,7 @@ fn build_import009_plan<'a>(
 			use_item_analysis.item,
 			&use_item_analysis.path,
 			symbol,
+			&[],
 		);
 		let Some((qualified_symbol_path, rewritten_use_path)) = removal_fix_plan else {
 			fixable = false;
@@ -7140,6 +7152,7 @@ fn import004_free_fn_fix_plan(
 	current_item: &TopItem,
 	path: &str,
 	symbol: &str,
+	planned_import_paths: &[String],
 ) -> Option<(String, Option<String>)> {
 	if symbol_referenced_by_child_module(ctx, symbol) {
 		return None;
@@ -7151,7 +7164,7 @@ fn import004_free_fn_fix_plan(
 	else {
 		return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
 	};
-	let Some(module_access_plan) = import004_preferred_module_access_plan(
+	let Some(mut module_access_plan) = import004_preferred_module_access_plan(
 		ctx,
 		Some(current_item),
 		Some(path),
@@ -7160,6 +7173,20 @@ fn import004_free_fn_fix_plan(
 	) else {
 		return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
 	};
+
+	for planned_path in planned_import_paths {
+		if import004_use_path_conflicts_with_parent_module(
+			planned_path,
+			&parent_module_path,
+			&module_symbol,
+		) {
+			return None;
+		}
+		if import004_use_path_imports_parent_module(planned_path, &parent_module_path) {
+			module_access_plan.keep_parent_module_import = false;
+		}
+	}
+
 	let (_, rewritten_use_path_with_parent_module) = import004_fix_plan_with_parent_module(
 		ctx,
 		path,
