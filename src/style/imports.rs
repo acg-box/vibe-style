@@ -1271,7 +1271,7 @@ fn apply_import007_no_glob_use_rule(
 		let end = usize::from(use_item.syntax().text_range().end());
 		let line = shared::line_from_offset(&ctx.line_starts, start);
 		let replacement = if compact_path_for_match(&use_path) == "super::*" {
-			build_parent_glob_item_replacement(&use_item)
+			build_parent_glob_item_replacement(ctx, &use_item)
 		} else if let Some(replacement) =
 			build_crate_glob_item_replacement(ctx, &use_item, &use_path)
 		{
@@ -1393,15 +1393,25 @@ fn scope_glob_symbol_conditions(
 	Some(conditions)
 }
 
-fn build_parent_glob_item_replacement(use_item: &Use) -> Option<String> {
+fn build_parent_glob_item_replacement(ctx: &FileContext, use_item: &Use) -> Option<String> {
 	let names = exported_symbols_from_super_scope(use_item)?;
+	let mut owner = current_module_path_segments(ctx, use_item)?;
 
-	build_scoped_glob_item_replacement(use_item, "super", names, &parent_scope_items(use_item)?)
+	owner.pop()?;
+
+	build_scoped_glob_item_replacement(
+		use_item,
+		"super",
+		&crate_absolute_use_path(&owner, ""),
+		names,
+		&parent_scope_items(use_item)?,
+	)
 }
 
 fn build_scoped_glob_item_replacement(
 	use_item: &Use,
 	prefix: &str,
+	source_prefix: &str,
 	names: BTreeSet<String>,
 	items: &[Item],
 ) -> Option<String> {
@@ -1421,12 +1431,13 @@ fn build_scoped_glob_item_replacement(
 		groups.entry(condition).or_default().push(name);
 	}
 
-	if groups.is_empty() {
+	let mut imports = anonymous_glob_imports(use_item, source_prefix, items)?;
+
+	if groups.is_empty() && imports.is_empty() {
 		return None;
 	}
 
 	let raw = use_item.syntax().text().to_string();
-	let mut imports = Vec::new();
 
 	for (condition, names) in groups {
 		let rewritten =
@@ -1436,6 +1447,81 @@ fn build_scoped_glob_item_replacement(
 	}
 
 	Some(imports.join("\n"))
+}
+
+fn anonymous_glob_imports(
+	use_item: &Use,
+	source_prefix: &str,
+	items: &[Item],
+) -> Option<Vec<String>> {
+	let raw = use_item.syntax().text().to_string();
+	let mut imports = Vec::new();
+
+	for item in items {
+		let Item::Use(source) = item else {
+			continue;
+		};
+		let path = source.use_tree()?.syntax().text().to_string();
+		let mut aliases = Vec::new();
+
+		if !collect_alias_bindings_from_use_segment(&path, &mut aliases) {
+			return None;
+		}
+
+		for (_, path) in aliases.into_iter().filter(|(alias, _)| alias == "_") {
+			let target = scope_import_target(&path, source_prefix, items)?;
+			let condition = item_cfg_predicate(item)?;
+			let rewritten = rewrite_use_item_with_path(&raw, &format!("{target} as _"))?;
+
+			imports.push(if condition.is_empty() {
+				rewritten
+			} else {
+				format!("#[cfg({condition})]\n{rewritten}")
+			});
+		}
+	}
+
+	Some(imports)
+}
+
+fn scope_import_target(path: &str, source_prefix: &str, items: &[Item]) -> Option<String> {
+	let path = compact_path_for_match(path);
+	let source = source_prefix.strip_prefix("crate")?.trim_start_matches("::");
+	let owner =
+		source.split("::").filter(|part| !part.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+
+	if path.starts_with("super::") {
+		return resolve_parent_use_tail(&owner, &path);
+	}
+
+	if let Some(tail) = path.strip_prefix("self::") {
+		return Some(crate_absolute_use_path(&owner, tail));
+	}
+
+	if path.starts_with("crate::") || path.starts_with("::") {
+		return Some(path);
+	}
+
+	let head = path.split("::").next()?;
+
+	for item in items {
+		if let Item::Module(module) = item
+			&& module.name().is_some_and(|name| name.text() == head)
+		{
+			return Some(crate_absolute_use_path(&owner, &path));
+		}
+		if let Item::Use(import) = item {
+			let imported = import.use_tree()?.syntax().text().to_string();
+
+			if imported_symbols_from_use_path(&imported).iter().any(|name| name == head)
+				&& !imported_full_paths_from_use_path(&imported).iter().any(|target| target == head)
+			{
+				return None;
+			}
+		}
+	}
+
+	Some(path)
 }
 
 fn build_crate_glob_item_replacement(
@@ -1448,6 +1534,15 @@ fn build_crate_glob_item_replacement(
 	let module = prefix.strip_prefix("crate::")?;
 	let segments = module.split("::").map(str::to_owned).collect::<Vec<_>>();
 	let (_, scope) = resolve_crate_module_scope(ctx, &segments)?;
+	let local_scope = use_item.syntax().parent()?;
+
+	// Item macros can create exports or local names that shadow a glob binding.
+	if scope.children().any(|node| MacroCall::can_cast(node.kind()))
+		|| local_scope.children().any(|node| MacroCall::can_cast(node.kind()))
+	{
+		return None;
+	}
+
 	let caller = current_module_path_segments(ctx, use_item)?;
 	let items = scope
 		.children()
@@ -1459,7 +1554,6 @@ fn build_crate_glob_item_replacement(
 	collect_scope_symbols_from_items(items.iter().cloned(), &mut symbols)?;
 
 	let traits = scope_trait_symbols(&items)?;
-	let local_scope = use_item.syntax().parent()?;
 	let used = collect_used_symbols_from_syntax(&local_scope);
 	let local = local_scope
 		.children()
@@ -1474,9 +1568,14 @@ fn build_crate_glob_item_replacement(
 		})
 		.collect::<HashSet<_>>();
 
-	symbols.retain(|name| !local.contains(name) && (used.contains(name) || traits.contains(name)));
+	symbols.retain(|name| {
+		!local.contains(name)
+			&& (used.contains(name)
+				|| traits.contains(name)
+				|| symbol_referenced_by_child_module(ctx, name))
+	});
 
-	build_scoped_glob_item_replacement(use_item, prefix, symbols, &items)
+	build_scoped_glob_item_replacement(use_item, prefix, prefix, symbols, &items)
 }
 
 fn resolve_crate_module_scope(
@@ -7482,10 +7581,16 @@ fn collect_file_module_references(
 	owner: &[String],
 	references: &mut HashSet<String>,
 ) {
-	for path in syntax.descendants().filter_map(ast::Path::cast) {
-		let reference = compact_path_for_match(&path.syntax().text().to_string());
+	let bindings = module_reference_bindings(syntax, owner);
 
-		record_module_reference(path.syntax(), owner, &reference, references);
+	for (node, reference) in qualified_reference_paths(syntax) {
+		record_module_reference(&node, owner, &reference, references);
+
+		if let Some((head, tail)) = reference.split_once("::")
+			&& let Some(targets) = bindings.get(head)
+		{
+			references.extend(targets.iter().map(|target| format!("{target}::{tail}")));
+		}
 	}
 	for item in syntax.descendants().filter_map(Use::cast) {
 		let Some(tree) = item.use_tree() else {
@@ -7498,6 +7603,89 @@ fn collect_file_module_references(
 			record_module_reference(item.syntax(), owner, &path, references);
 		}
 	}
+}
+
+fn qualified_reference_paths(syntax: &SyntaxNode) -> Vec<(SyntaxNode, String)> {
+	let tokens = syntax
+		.descendants_with_tokens()
+		.filter_map(|part| part.into_token())
+		.filter(|token| !matches!(token.kind(), SyntaxKind::WHITESPACE | SyntaxKind::COMMENT))
+		.collect::<Vec<_>>();
+	let mut paths = Vec::new();
+
+	for (index, token) in tokens.iter().enumerate() {
+		if token.kind() != SyntaxKind::IDENT && !matches!(token.text(), "crate" | "self" | "super")
+		{
+			continue;
+		}
+
+		let mut cursor = index + 1;
+		let mut path = token.text().to_owned();
+
+		while cursor < tokens.len() {
+			let separator = if tokens[cursor].text() == "::" {
+				1
+			} else if tokens[cursor].text() == ":"
+				&& tokens.get(cursor + 1).is_some_and(|t| t.text() == ":")
+			{
+				2
+			} else {
+				break;
+			};
+			let Some(next) = tokens.get(cursor + separator) else {
+				break;
+			};
+
+			if next.kind() != SyntaxKind::IDENT && !matches!(next.text(), "self" | "super") {
+				break;
+			}
+
+			path.push_str("::");
+			path.push_str(next.text());
+
+			cursor += separator + 1;
+		}
+
+		if path.contains("::")
+			&& let Some(parent) = token.parent()
+		{
+			paths.push((parent, path));
+		}
+	}
+
+	paths
+}
+
+fn module_reference_bindings(
+	syntax: &SyntaxNode,
+	owner: &[String],
+) -> HashMap<String, HashSet<String>> {
+	let mut bindings = HashMap::<String, HashSet<String>>::new();
+
+	for item in syntax.descendants().filter_map(Use::cast) {
+		let Some(tree) = item.use_tree() else {
+			continue;
+		};
+		let path = tree.syntax().text().to_string();
+		let aliases = collect_non_keep_alive_alias_bindings(&path);
+
+		for original in imported_full_paths_from_use_path(&path) {
+			let Some(symbol) = symbol_from_full_import_path(&original) else {
+				continue;
+			};
+			let binding = aliases
+				.iter()
+				.find(|(_, path)| compact_path_for_match(path) == original)
+				.map_or(symbol, |(alias, _)| alias.clone());
+			let mut targets = HashSet::new();
+
+			record_module_reference(item.syntax(), owner, &original, &mut targets);
+
+			bindings.entry(binding).or_default().extend(targets);
+		}
+	}
+
+	bindings
 }
 
 fn record_module_reference(
