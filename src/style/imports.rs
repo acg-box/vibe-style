@@ -466,9 +466,13 @@ fn exported_symbols_from_super_scope_impl(use_item: &Use) -> Option<BTreeSet<Str
 }
 
 fn parent_scope_trait_symbols(use_item: &Use) -> Option<HashSet<String>> {
+	scope_trait_symbols(&parent_scope_items(use_item)?)
+}
+
+fn scope_trait_symbols(items: &[Item]) -> Option<HashSet<String>> {
 	let mut traits = HashSet::new();
 
-	for item in parent_scope_items(use_item)? {
+	for item in items {
 		match item {
 			Item::Trait(item) =>
 				if let Some(name) = item.name() {
@@ -1268,6 +1272,10 @@ fn apply_import007_no_glob_use_rule(
 		let line = shared::line_from_offset(&ctx.line_starts, start);
 		let replacement = if compact_path_for_match(&use_path) == "super::*" {
 			build_parent_glob_item_replacement(&use_item)
+		} else if let Some(replacement) =
+			build_crate_glob_item_replacement(ctx, &use_item, &use_path)
+		{
+			Some(replacement)
 		} else {
 			build_glob_use_replacement(ctx, &use_item, &use_path).and_then(|replacement_path| {
 				rewrite_use_item_with_path(&use_item.syntax().text().to_string(), &replacement_path)
@@ -1357,17 +1365,17 @@ fn item_cfg_predicate(item: &Item) -> Option<String> {
 	})
 }
 
-fn parent_glob_symbol_conditions(
-	use_item: &Use,
+fn scope_glob_symbol_conditions(
+	items: &[Item],
 	names: &BTreeSet<String>,
 ) -> Option<BTreeMap<String, BTreeSet<String>>> {
 	let mut conditions = BTreeMap::<String, BTreeSet<String>>::new();
 
-	for item in parent_scope_items(use_item)? {
+	for item in items {
 		let symbols = if let Item::Use(import) = &item {
 			imported_symbols_from_use_path(&import.use_tree()?.syntax().text().to_string())
 		} else {
-			item_name_text(&item).into_iter().collect()
+			item_name_text(item).into_iter().collect()
 		};
 		let selected = symbols.into_iter().filter(|name| names.contains(name)).collect::<Vec<_>>();
 
@@ -1375,7 +1383,7 @@ fn parent_glob_symbol_conditions(
 			continue;
 		}
 
-		let predicate = item_cfg_predicate(&item)?;
+		let predicate = item_cfg_predicate(item)?;
 
 		for name in selected {
 			conditions.entry(name).or_default().insert(predicate.clone());
@@ -1387,7 +1395,17 @@ fn parent_glob_symbol_conditions(
 
 fn build_parent_glob_item_replacement(use_item: &Use) -> Option<String> {
 	let names = exported_symbols_from_super_scope(use_item)?;
-	let conditions = parent_glob_symbol_conditions(use_item, &names)?;
+
+	build_scoped_glob_item_replacement(use_item, "super", names, &parent_scope_items(use_item)?)
+}
+
+fn build_scoped_glob_item_replacement(
+	use_item: &Use,
+	prefix: &str,
+	names: BTreeSet<String>,
+	items: &[Item],
+) -> Option<String> {
+	let conditions = scope_glob_symbol_conditions(items, &names)?;
 	let mut groups = BTreeMap::<String, Vec<String>>::new();
 
 	for name in names {
@@ -1412,12 +1430,134 @@ fn build_parent_glob_item_replacement(use_item: &Use) -> Option<String> {
 
 	for (condition, names) in groups {
 		let rewritten =
-			rewrite_use_item_with_path(&raw, &format_expanded_braced_use_path("super", &names))?;
+			rewrite_use_item_with_path(&raw, &format_expanded_braced_use_path(prefix, &names))?;
 
 		imports.push(format!("{condition}{rewritten}"));
 	}
 
 	Some(imports.join("\n"))
+}
+
+fn build_crate_glob_item_replacement(
+	ctx: &FileContext,
+	use_item: &Use,
+	path: &str,
+) -> Option<String> {
+	let compact = compact_path_for_match(path);
+	let prefix = compact.strip_suffix("::*")?;
+	let module = prefix.strip_prefix("crate::")?;
+	let segments = module.split("::").map(str::to_owned).collect::<Vec<_>>();
+	let (_, scope) = resolve_crate_module_scope(ctx, &segments)?;
+	let caller = current_module_path_segments(ctx, use_item)?;
+	let items = scope
+		.children()
+		.filter_map(Item::cast)
+		.filter(|item| caller.starts_with(&segments) || module_item_is_pub(item))
+		.collect::<Vec<_>>();
+	let mut symbols = BTreeSet::new();
+
+	collect_scope_symbols_from_items(items.iter().cloned(), &mut symbols)?;
+
+	let traits = scope_trait_symbols(&items)?;
+	let local_scope = use_item.syntax().parent()?;
+	let used = collect_used_symbols_from_syntax(&local_scope);
+	let local = local_scope
+		.children()
+		.filter_map(Item::cast)
+		.filter(|item| item.syntax().text_range() != use_item.syntax().text_range())
+		.flat_map(|item| match item {
+			Item::Use(item) => item
+				.use_tree()
+				.map(|tree| imported_symbols_from_use_path(&tree.syntax().text().to_string()))
+				.unwrap_or_default(),
+			_ => item_name_text(&item).into_iter().collect(),
+		})
+		.collect::<HashSet<_>>();
+
+	symbols.retain(|name| !local.contains(name) && (used.contains(name) || traits.contains(name)));
+
+	build_scoped_glob_item_replacement(use_item, prefix, symbols, &items)
+}
+
+fn resolve_crate_module_scope(
+	ctx: &FileContext,
+	segments: &[String],
+) -> Option<(PathBuf, SyntaxNode)> {
+	let crate_dir = find_crate_dir(&ctx.path)?;
+	let roots = shared::package_target_roots(&crate_dir)
+		.ok()
+		.flatten()
+		.unwrap_or_else(|| vec![crate_dir.join("src/lib.rs"), crate_dir.join("src/main.rs")]);
+	let mut result: Option<(PathBuf, SyntaxNode)> = None;
+
+	for root in roots {
+		let Some(candidate) = resolve_file_module_scope(&root, segments) else {
+			continue;
+		};
+
+		if let Some(previous) = &result
+			&& (previous.0 != candidate.0 || previous.1.text_range() != candidate.1.text_range())
+		{
+			return None;
+		}
+
+		result = Some(candidate);
+	}
+
+	result
+}
+
+fn resolve_file_module_scope(
+	file: &std::path::Path,
+	segments: &[String],
+) -> Option<(PathBuf, SyntaxNode)> {
+	let file = file.canonicalize().ok()?;
+	let text = fs::read_to_string(&file).ok()?;
+	let parsed = ra_ap_syntax::SourceFile::parse(&text, Edition::CURRENT);
+
+	if !parsed.errors().is_empty() {
+		return None;
+	}
+
+	let parent = file.parent()?;
+	let directory = if matches!(file.file_name()?.to_str(), Some("lib.rs" | "main.rs" | "mod.rs")) {
+		parent.to_path_buf()
+	} else {
+		parent.join(file.file_stem()?)
+	};
+
+	resolve_inline_module_scope(&file, parsed.tree().syntax(), parent, &directory, segments)
+}
+
+fn resolve_inline_module_scope(
+	file: &std::path::Path,
+	scope: &SyntaxNode,
+	path_directory: &std::path::Path,
+	directory: &std::path::Path,
+	segments: &[String],
+) -> Option<(PathBuf, SyntaxNode)> {
+	let Some((name, rest)) = segments.split_first() else {
+		return Some((file.to_path_buf(), scope.clone()));
+	};
+	let mut candidates = scope
+		.children()
+		.filter_map(Module::cast)
+		.filter(|module| module.name().is_some_and(|candidate| candidate.text() == name));
+	let module = candidates.next()?;
+
+	if candidates.next().is_some() {
+		return None;
+	}
+
+	if let Some(items) = module.item_list() {
+		let nested = directory.join(name);
+
+		resolve_inline_module_scope(file, items.syntax(), &nested, &nested, rest)
+	} else {
+		let child = declared_child_file(&module, path_directory, directory, name);
+
+		resolve_file_module_scope(&child, rest)
+	}
 }
 
 fn build_glob_use_replacement(ctx: &FileContext, use_item: &Use, use_path: &str) -> Option<String> {
