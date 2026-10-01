@@ -2072,6 +2072,19 @@ pub mod api_code {
 	}
 
 	#[test]
+	fn import007_preserves_parent_glob_with_inherited_symbols() {
+		let text = "use std::io::*;\nstruct Marker;\n#[cfg(test)] mod tests { use super::*; fn run() { let _: Option<Error> = None; let _ = Marker; } }";
+		let ctx =
+			shared::read_file_context_from_text(Path::new("inherited_glob.rs"), text.to_owned())
+				.expect("Read context.")
+				.expect("Have context.");
+		let (violations, edits) = style::collect_violations(&ctx, true);
+
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-007"));
+		assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-007" && !v.fixable));
+	}
+
+	#[test]
 	fn import010_respects_path_attribute_module_ownership() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
