@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
-	ast::{self, BlockExpr, HasName, LetStmt, Path, PathExpr, RefExpr},
+	ast::{self, BlockExpr, Expr, HasName, LetStmt, Pat, Path, PathExpr, RefExpr, Stmt},
 };
 
 use crate::style::shared::{self, Edit, FileContext, Violation};
@@ -33,7 +33,7 @@ pub(crate) fn check_let_mut_reorder(
 
 		for statement in stmt_list.statements() {
 			match statement {
-				ast::Stmt::LetStmt(let_stmt) => {
+				Stmt::LetStmt(let_stmt) => {
 					let info = collect_let_stmt_info(ctx, &let_stmt);
 
 					if let Some(previous) = current_run.last()
@@ -77,7 +77,7 @@ fn let_stmt_is_mut_ident(let_stmt: &LetStmt) -> bool {
 	};
 
 	match pat {
-		ast::Pat::IdentPat(ident_pat) => ident_pat.mut_token().is_some(),
+		Pat::IdentPat(ident_pat) => ident_pat.mut_token().is_some(),
 		_ => false,
 	}
 }
@@ -94,7 +94,7 @@ fn let_stmt_ident_name(let_stmt: &LetStmt) -> Option<String> {
 	let pat = let_stmt.pat()?;
 
 	match pat {
-		ast::Pat::IdentPat(ident_pat) => Some(ident_pat.name()?.text().to_string()),
+		Pat::IdentPat(ident_pat) => Some(ident_pat.name()?.text().to_string()),
 		_ => None,
 	}
 }
@@ -137,7 +137,7 @@ fn let_stmt_borrowed_unqualified_idents(let_stmt: &LetStmt) -> BTreeSet<String> 
 	let mut out = BTreeSet::<String>::new();
 
 	for ref_expr in let_stmt.syntax().descendants().filter_map(RefExpr::cast) {
-		let Some(ast::Expr::PathExpr(path_expr)) = ref_expr.expr() else {
+		let Some(Expr::PathExpr(path_expr)) = ref_expr.expr() else {
 			continue;
 		};
 		let Some(path) = path_expr.path() else {
