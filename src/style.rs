@@ -10203,4 +10203,50 @@ impl Choice { pub fn value() -> Self { Self::One } }
 
 		fs::remove_dir_all(root).expect("Remove fixture.");
 	}
+	#[test]
+	fn import_normalization_and_group_order_converge() {
+		let original = "use crate::{theme::{self, Color}};\n\nuse std::path::PathBuf;\n\npub fn take(_: Color, _: PathBuf) {}\n";
+		let path = Path::new("src/consumer.rs");
+		let (rewritten, count, _, _) =
+			style::apply_fix_passes(path, original, true).expect("Apply fixes.");
+		let ctx = shared::read_file_context_from_text(path, rewritten.clone())
+			.expect("Parse.")
+			.expect("Context.");
+		let (violations, _) = style::collect_violations(&ctx, false);
+
+		assert!(count > 0, "{rewritten}");
+		assert!(!rewritten.contains("self, Color"), "{rewritten}");
+		assert!(
+			rewritten.find("use std::").expect("Standard import")
+				< rewritten.find("use crate::").expect("Local import")
+		);
+		assert!(
+			!violations
+				.iter()
+				.any(|v| matches!(v.rule, "RUST-STYLE-IMPORT-001" | "RUST-STYLE-IMPORT-002")),
+			"{violations:?}"
+		);
+
+		let (repeated, _, _, _) =
+			style::apply_fix_passes(path, &rewritten, true).expect("Repeat fixes.");
+
+		assert_eq!(rewritten, repeated);
+	}
+
+	#[test]
+	fn spacing_fix_preserves_cfg_literals_and_unicode() {
+		let original = "fn main() {\n    println!(\"界\");\n\n    #[cfg(target_os = \"macos\")]\n    println!(r#\"literal\n\n界\"#);\n}\n";
+		let path = Path::new("spacing_cfg.rs");
+		let (rewritten, count, _, _) =
+			style::apply_fix_passes(path, original, true).expect("Apply fixes.");
+		let expected = original.replace(";\n\n    #[cfg", ";\n    #[cfg");
+
+		assert!(count > 0);
+		assert_eq!(rewritten, expected);
+
+		let (repeated, _, _, _) =
+			style::apply_fix_passes(path, &rewritten, true).expect("Repeat fixes.");
+
+		assert_eq!(rewritten, repeated);
+	}
 }

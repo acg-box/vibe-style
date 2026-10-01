@@ -10,6 +10,12 @@ pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usi
 		return Ok(0);
 	}
 
+	edits = edits
+		.into_iter()
+		.map(|edit| trim_spacing_edit_edges(text, edit))
+		.filter(|edit| edit.start != edit.end || !edit.replacement.is_empty())
+		.collect();
+
 	let literal_ranges = literal_ranges(text);
 
 	edits.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)).then(a.rule.cmp(b.rule)));
@@ -83,6 +89,35 @@ pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usi
 	}
 
 	Ok(filtered.len())
+}
+
+fn trim_spacing_edit_edges(text: &str, mut edit: Edit) -> Edit {
+	if !matches!(edit.rule, "RUST-STYLE-SPACE-003" | "RUST-STYLE-SPACE-004") {
+		return edit;
+	}
+
+	let Some(original) = text.get(edit.start..edit.end) else {
+		return edit;
+	};
+	let prefix = original
+		.chars()
+		.zip(edit.replacement.chars())
+		.take_while(|(left, right)| left == right)
+		.map(|(character, _)| character.len_utf8())
+		.sum::<usize>();
+	let suffix = original[prefix..]
+		.chars()
+		.rev()
+		.zip(edit.replacement[prefix..].chars().rev())
+		.take_while(|(left, right)| left == right)
+		.map(|(character, _)| character.len_utf8())
+		.sum::<usize>();
+
+	edit.start += prefix;
+	edit.end -= suffix;
+	edit.replacement = edit.replacement[prefix..edit.replacement.len() - suffix].to_owned();
+
+	edit
 }
 
 fn deduplicated_import_insertion<'a>(
