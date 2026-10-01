@@ -9890,4 +9890,47 @@ fn sample() {
 
 		let _ = fs::remove_file(&path);
 	}
+
+	#[test]
+	fn shortening_preserves_receiver_generics_and_nested_type_edits() {
+		let source = r"pub fn value() {
+    let value = std::mem::MaybeUninit::<std::ffi::c_int>::uninit();
+    let values = std::iter::Iterator::collect::<std::vec::Vec<std::ffi::c_int>>(0..3);
+    let _ = (value, values);
+}";
+		let root = env::temp_dir().join(format!("vstyle-receiver-generics-{}", process::id()));
+		let path = root.join("lib.rs");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		let (rewritten, applied, _, _) =
+			style::apply_fix_passes(&path, source, true).expect("Apply fixes.");
+
+		assert!(applied > 0);
+		assert!(rewritten.contains("MaybeUninit::<c_int>::uninit()"), "{rewritten}");
+		assert!(rewritten.contains("Iterator::collect::<Vec<c_int>>"), "{rewritten}");
+
+		let (repeated, _, _, _) =
+			style::apply_fix_passes(&path, &rewritten, true).expect("Repeat fixes.");
+
+		assert_eq!(rewritten, repeated);
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let output = process::Command::new("rustc")
+			.args(["--edition=2024", "--crate-type=lib", "--emit=metadata"])
+			.arg(&path)
+			.arg("-o")
+			.arg(root.join("fixture.rmeta"))
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(
+			output.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
 }
