@@ -1578,17 +1578,15 @@ fn declared_file_module_path(path: &std::path::Path) -> Option<Vec<String>> {
 	let Ok(target) = path.canonicalize() else {
 		return Some(file_module_path_segments(path));
 	};
+	let roots = shared::package_target_roots(&crate_dir)
+		.ok()
+		.flatten()
+		.unwrap_or_else(|| vec![crate_dir.join("src/lib.rs"), crate_dir.join("src/main.rs")]);
 	let mut matches = BTreeSet::new();
 	let mut stack = HashSet::new();
 
-	for root in ["lib.rs", "main.rs"] {
-		collect_declared_module_paths(
-			&crate_dir.join("src").join(root),
-			&[],
-			&target,
-			&mut stack,
-			&mut matches,
-		);
+	for root in roots {
+		collect_declared_module_paths(&root, &[], &target, &mut stack, &mut matches);
 	}
 
 	match matches.len() {
@@ -5422,7 +5420,7 @@ fn macro_symbol_is_import009_unqualified(
 			continue;
 		}
 
-		return bytes[idx] != b':'
+		return !(bytes[idx] == b':' && idx > 0 && bytes[idx - 1] == b':')
 			&& bytes[idx] != b'.'
 			&& !bytes[idx].is_ascii_alphanumeric()
 			&& bytes[idx] != b'_';
