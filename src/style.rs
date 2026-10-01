@@ -4474,6 +4474,45 @@ fn sample() {
 	}
 
 	#[test]
+	fn import009_preserves_test_module_macro_bindings() {
+		let original = "use std::io::Error;\nfn outer(_: Error) {}\nfn other(_: std::fmt::Error) {}\n#[cfg(test)]\nmod tests {\n\tuse std::fmt::Error;\n\t#[test]\n\tfn inner() {\n\t\tassert_eq!(format!(\"{:?}\", Error::default()), \"Error\");\n\t}\n}\n";
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-macro-scope-{}-{now}", process::id()));
+		let path = root.join("lib.rs");
+		let binary = root.join("fixture");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--test"])
+			.arg(&path)
+			.arg("-o")
+			.arg(&binary)
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
+
+		let executed = process::Command::new(&binary).output().expect("Run rewritten fixture.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+	}
+
+	#[test]
 	fn parent_glob_inventory_ignores_qualified_import_leaves() {
 		let original = "struct Error;\n#[cfg(test)]\nmod tests {\n\tuse super::*;\n\t#[test]\n\tfn sample() {\n\t\tuse std::fmt::{Error as Source};\n\t\tlet _ = Source;\n\t}\n}\n";
 		let parsed = ra_ap_syntax::SourceFile::parse(original, ra_ap_syntax::Edition::CURRENT);
