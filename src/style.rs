@@ -4528,6 +4528,91 @@ fn sample() {
 	}
 
 	#[test]
+	fn crate_glob_expansion_preserves_external_traits_and_conditions() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-crate-glob-{}-{now}", process::id()));
+		let source = root.join("src");
+		let consumer = source.join("consumer.rs");
+		let original = "use crate::tree::*;\n#[cfg(feature = \"extra\")] fn conditional() { let _ = Conditional; }\n#[test] fn methods() { assert_eq!(helper().shifted(), 4); assert_eq!(shadowed(), 7); }\nfn shadowed() -> u8 { 7 }\n";
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"crate-glob-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(source.join("lib.rs"), "#[path = \"owner.rs\"] mod tree;").expect("Write root.");
+		fs::write(
+			source.join("owner.rs"),
+			r#"mod prelude {
+    pub trait Extension { fn shifted(self) -> Self; }
+    impl Extension for u8 { fn shifted(self) -> Self { self + 1 } }
+}
+use crate::tree::prelude::Extension;
+#[cfg(feature = "extra")] struct Conditional;
+fn helper() -> u8 { 3 }
+fn shadowed() -> u8 { 0 }
+#[path = "consumer.rs"] mod child;
+"#,
+		)
+		.expect("Write owner.");
+		fs::write(&consumer, original).expect("Write consumer.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&consumer, original, true).expect("Fix consumer.");
+
+		assert!(!rewritten.contains("::*"), "{rewritten}");
+
+		fs::write(&consumer, &rewritten).expect("Write fixed consumer.");
+
+		for extra in [false, true] {
+			let binary = root.join("fixture");
+			let mut command = process::Command::new("rustc");
+
+			command
+				.args(["--edition=2024", "--test"])
+				.arg(source.join("lib.rs"))
+				.arg("-o")
+				.arg(&binary);
+
+			if extra {
+				command.args(["--cfg", "feature=\"extra\""]);
+			}
+
+			let compiled = command.output().expect("Compile fixture.");
+
+			assert!(
+				compiled.status.success(),
+				"{rewritten}\n{}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+
+			let executed = process::Command::new(&binary).output().expect("Run fixture.");
+
+			assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+			assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+		}
+		for owner in [
+			"#[path = \"owner.rs\"] mod tree; #[cfg(test)] #[path = \"owner.rs\"] mod tree;",
+			"mod tree { pub use std::prelude::v1::*; }",
+		] {
+			fs::write(source.join("lib.rs"), owner).expect("Write unresolved owner.");
+
+			let ctx = shared::read_file_context_from_text(&consumer, original.to_owned())
+				.expect("Read consumer.")
+				.expect("Get consumer context.");
+			let (_, edits) = style::collect_violations(&ctx, true);
+
+			assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-007"));
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn parent_glob_expansion_preserves_conditional_bindings() {
 		let original = r#"#[cfg(feature = "enabled")]
 struct Conditional;
