@@ -10,7 +10,8 @@ use ra_ap_syntax::{
 	self, AstNode, AstToken, Edition, SyntaxKind, SyntaxNode, TextSize,
 	ast::{
 		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Meta, Module,
-		PathExpr, PathPat, PathType, RecordExpr, RecordPat, TokenTree, TupleStructPat, Use,
+		PathExpr, PathPat, PathType, RecordExpr, RecordPat, StmtList, TokenTree, TupleStructPat,
+		Use,
 	},
 };
 use regex::Regex;
@@ -2248,6 +2249,9 @@ fn apply_import003_non_keep_alive_alias_rule(
 					.chain(root_rewrites)
 					.chain(macro_rewrites)
 				{
+					if alias_is_shadowed_by_local_import(ctx, alias, start) {
+						continue;
+					}
 					if planned_ranges
 						.iter()
 						.any(|(used_start, used_end)| start < *used_end && end > *used_start)
@@ -2303,6 +2307,29 @@ fn apply_import003_non_keep_alive_alias_rule(
 	edits.push(use_edit);
 
 	!referenced_aliases.is_empty() || rewritten_use_path != Some(path.to_owned())
+}
+
+fn alias_is_shadowed_by_local_import(ctx: &FileContext, alias: &str, offset: usize) -> bool {
+	let Some(token) = TextSize::try_from(offset)
+		.ok()
+		.and_then(|offset| ctx.source_file.syntax().token_at_offset(offset).right_biased())
+	else {
+		return false;
+	};
+
+	token
+		.parent_ancestors()
+		.take_while(|ancestor| !Module::can_cast(ancestor.kind()))
+		.filter_map(StmtList::cast)
+		.any(|scope| {
+			scope.syntax().children().filter_map(Use::cast).any(|item| {
+				item.use_tree().is_some_and(|tree| {
+					imported_symbols_from_use_path(&tree.syntax().text().to_string())
+						.iter()
+						.any(|symbol| is_same_ident(symbol, alias))
+				})
+			})
+		})
 }
 
 fn collect_non_keep_alive_alias_bindings(path: &str) -> Vec<(String, String)> {

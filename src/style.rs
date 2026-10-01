@@ -4472,6 +4472,27 @@ fn sample() {
 	}
 
 	#[test]
+	fn import003_preserves_function_local_alias_shadowing() {
+		let original = r#"use std::io::ErrorKind as Phase;
+pub fn outer() -> Phase { Phase::NotFound }
+pub fn inner() -> Option<u8> {
+    let value = Phase::Some(1);
+    use std::option::Option as Phase;
+    assert!(matches!(value, Phase::Some(_)));
+    value
+}
+"#;
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(Path::new("shadowed_alias.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(!rewritten.contains("ErrorKind::Some"), "{rewritten}");
+		assert!(rewritten.contains("Phase::Some(1)"), "{rewritten}");
+		assert!(rewritten.contains("value, Phase::Some(_)"), "{rewritten}");
+		assert!(!rewritten.contains("Phase::NotFound"), "{rewritten}");
+	}
+
+	#[test]
 	fn import003_qualifies_tuple_constructor_patterns() {
 		let original = r#"use std::result::Result as Receipt;
 fn sample(value: Receipt<u8, u8>) -> u8 {
