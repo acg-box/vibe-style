@@ -430,22 +430,19 @@ fn push_impl_relocation_edits(
 		return;
 	}
 
-	edits.push(Edit {
-		start: block_start,
-		end: delete_end.max(cluster_end),
-		replacement: String::new(),
-		rule: "RUST-STYLE-MOD-005",
-	});
-	edits.push(Edit {
-		start: insert_start,
-		end: insert_end,
-		replacement: if insert_end < ctx.text.len() {
-			format!("{block}\n\n")
-		} else {
-			format!("{block}\n")
-		},
-		rule: "RUST-STYLE-MOD-005",
-	});
+	let delete_end = delete_end.max(cluster_end);
+	let (start, end, replacement) = if insert_start < block_start {
+		let middle = &ctx.text[insert_end..block_start];
+
+		(insert_start, delete_end, format!("{block}\n\n{middle}"))
+	} else {
+		let middle = &ctx.text[delete_end..insert_start];
+		let suffix = if insert_end < ctx.text.len() { "\n\n" } else { "\n" };
+
+		(block_start, insert_end, format!("{middle}{block}{suffix}"))
+	};
+
+	edits.push(Edit { start, end, replacement, rule: "RUST-STYLE-MOD-005" });
 }
 
 fn next_non_blank_line(ctx: &FileContext, mut line_one_based: usize) -> usize {

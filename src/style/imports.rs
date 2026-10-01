@@ -1146,15 +1146,19 @@ fn apply_import010_no_super_use_rule(
 		let Some(use_tree) = use_item.use_tree() else {
 			continue;
 		};
-		let use_path = compact_path_for_match(&use_tree.syntax().text().to_string());
+		let use_path = use_tree.syntax().text().to_string();
 		let start = usize::from(use_item.syntax().text_range().start());
 		let end = usize::from(use_item.syntax().text_range().end());
 		let line = shared::line_from_offset(&ctx.line_starts, start);
 
 		if let Some((super_depth, tail)) = leading_super_depth_and_tail(&use_path) {
 			let current_module_path = current_module_path_segments(ctx, &use_item);
-			let fixable =
-				current_module_path.as_ref().is_some_and(|path| super_depth <= path.len());
+			let replacement_path = current_module_path.as_ref().and_then(|path| {
+				let parent_depth = path.len().checked_sub(super_depth)?;
+
+				resolve_parent_use_tail(&path[..parent_depth], tail)
+			});
+			let fixable = replacement_path.is_some();
 
 			shared::push_violation(
 				violations,
@@ -1169,12 +1173,9 @@ fn apply_import010_no_super_use_rule(
 				continue;
 			}
 
-			let Some(current_module_path) = current_module_path else {
+			let Some(replacement_path) = replacement_path else {
 				continue;
 			};
-			let parent_depth = current_module_path.len() - super_depth;
-			let replacement_path =
-				crate_absolute_use_path(&current_module_path[..parent_depth], tail);
 			let replacement = rewrite_use_item_with_path(
 				&use_item.syntax().text().to_string(),
 				&replacement_path,
@@ -1720,7 +1721,7 @@ fn file_module_path_segments(path: &std::path::Path) -> Vec<String> {
 
 fn leading_super_depth_and_tail(path: &str) -> Option<(usize, &str)> {
 	let mut depth = 0_usize;
-	let mut rest = path;
+	let mut rest = path.trim();
 
 	loop {
 		if rest == "super" {
@@ -1730,19 +1731,39 @@ fn leading_super_depth_and_tail(path: &str) -> Option<(usize, &str)> {
 			break;
 		}
 
-		let Some(after) = rest.strip_prefix("super::") else {
+		let Some(after) =
+			rest.strip_prefix("super").and_then(|rest| rest.trim_start().strip_prefix("::"))
+		else {
 			break;
 		};
 
 		depth += 1;
-		rest = after;
-
-		if !rest.starts_with("super") {
-			break;
-		}
+		rest = after.trim_start();
 	}
 
 	if depth == 0 { None } else { Some((depth, rest)) }
+}
+
+fn resolve_parent_use_tail(parent: &[String], tail: &str) -> Option<String> {
+	let tail = tail.trim();
+
+	if let Some((depth, rest)) = leading_super_depth_and_tail(tail) {
+		return resolve_parent_use_tail(&parent[..parent.len().checked_sub(depth)?], rest);
+	}
+
+	if compact_path_for_match(tail).contains("super::")
+		&& let Some(inner) = tail.strip_prefix('{').and_then(|tail| tail.strip_suffix('}'))
+	{
+		let paths = split_top_level_csv(inner)
+			.into_iter()
+			.filter(|path| !path.trim().is_empty())
+			.map(|path| resolve_parent_use_tail(parent, &path))
+			.collect::<Option<Vec<_>>>()?;
+
+		return Some(format!("{{{}}}", paths.join(", ")));
+	}
+
+	Some(crate_absolute_use_path(parent, tail))
 }
 
 fn crate_absolute_use_path(parent_segments: &[String], tail: &str) -> String {
