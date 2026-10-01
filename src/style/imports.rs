@@ -2082,8 +2082,9 @@ fn apply_use_item_rules(
 				continue;
 			}
 		}
-
-		apply_import002_normalization_rule(ctx, violations, edits, emit_edits, item, path);
+		if apply_import002_normalization_rule(ctx, violations, edits, emit_edits, item, path) {
+			import004_fixed_lines.insert(item.line);
+		}
 
 		let mut alias_rule_applied = false;
 
@@ -2233,9 +2234,9 @@ fn apply_import002_normalization_rule(
 	emit_edits: bool,
 	item: &TopItem,
 	path: &str,
-) {
+) -> bool {
 	let Some(normalized) = normalize_mixed_self_child_use_path(ctx, path) else {
-		return;
+		return false;
 	};
 
 	shared::push_violation(
@@ -2248,7 +2249,7 @@ fn apply_import002_normalization_rule(
 	);
 
 	if !emit_edits {
-		return;
+		return true;
 	}
 
 	if let Some(edit) =
@@ -2256,6 +2257,8 @@ fn apply_import002_normalization_rule(
 	{
 		edits.push(edit);
 	}
+
+	true
 }
 
 fn push_alias_violation_if_needed(
