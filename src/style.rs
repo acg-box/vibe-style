@@ -10042,4 +10042,52 @@ impl Choice { pub fn value() -> Self { Self::One } }
 			String::from_utf8_lossy(&compiled.stderr)
 		);
 	}
+
+	#[test]
+	fn import_shortening_merges_last_use_without_overlapping_new_imports() {
+		let root = env::temp_dir().join(format!("vstyle-last-use-{}", process::id()));
+		let path = root.join("last_use.rs");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		for separator in ["\n", " "] {
+			let original = format!(
+				"use std::collections;{separator}pub struct Fixture {{ pub map: std::collections::BTreeMap<String, String>, pub path: std::path::PathBuf }}\n"
+			);
+			let (rewritten, applied, _, _) =
+				style::apply_fix_passes(&path, &original, true).expect("Apply fixes.");
+
+			assert!(applied > 0, "{rewritten}");
+			assert!(rewritten.contains("pub map: BTreeMap<String, String>"), "{rewritten}");
+			assert!(rewritten.contains("pub path: PathBuf"), "{rewritten}");
+
+			let ctx = shared::read_file_context_from_text(&path, rewritten.clone())
+				.expect("Parse output.")
+				.expect("Output context.");
+			let (violations, _) = style::collect_violations(&ctx, false);
+
+			assert!(
+				!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-008"),
+				"{violations:?}"
+			);
+
+			fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+			let compiled = process::Command::new("rustc")
+				.args(["--edition=2024", "--crate-type=lib", "--emit=metadata"])
+				.arg(&path)
+				.arg("-o")
+				.arg(root.join("fixture.rmeta"))
+				.output()
+				.expect("Compile rewritten fixture.");
+
+			assert!(
+				compiled.status.success(),
+				"{rewritten}\n{}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
 }
