@@ -4436,6 +4436,24 @@ fn sample() {
 	}
 
 	#[test]
+	fn import006_preserves_conditional_expression_imports() {
+		for attr in ["#[cfg(any())]", "#[cfg_attr(all(), cfg(any()))]", "#[cfg (any())]"] {
+			let text =
+				format!("fn sample() {{ {attr} {{ use missing::Feature; let _ = Feature; }} }}");
+			let ctx = shared::read_file_context_from_text(Path::new("conditional_block.rs"), text)
+				.expect("Read context.")
+				.expect("Have context.");
+			let (violations, edits) = style::collect_violations(&ctx, true);
+
+			assert!(
+				violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-006" && !v.fixable),
+				"{attr}"
+			);
+			assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-006"), "{attr}");
+		}
+	}
+
+	#[test]
 	fn import006_alias_local_use_is_reported_non_fixable() {
 		let text = r#"
 fn sample() {
