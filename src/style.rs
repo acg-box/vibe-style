@@ -1419,6 +1419,39 @@ mod tests {
 	}
 
 	#[test]
+	fn runtime_rules_classify_standalone_test_files_without_matching_production_names() {
+		let text = "fn fixture(value: Option<usize>) { let _ = value.unwrap(); let _ = value.expect(\"\"); }";
+
+		for (path, test_file) in [
+			("tests.rs", true),
+			("src/agent_prompt_edit/tests.rs", true),
+			(r"src\agent_prompt_edit\tests.rs", true),
+			("src/tests/helper.rs", true),
+			("src/journal_test.rs", true),
+			("src/journal_tests.rs", true),
+			("src/journal_tests_support.rs", false),
+			("src/contests.rs", false),
+			("src/tests_support.rs", false),
+			("src/tests.rs/helper.rs", false),
+			("src/production.rs", false),
+		] {
+			let ctx = shared::read_file_context_from_text(Path::new(path), text.to_owned())
+				.expect("context")
+				.expect("has ctx");
+			let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+			for rule in ["RUST-STYLE-RUNTIME-001", "RUST-STYLE-RUNTIME-002"] {
+				assert_eq!(
+					violations.iter().any(|violation| violation.rule == rule),
+					!test_file,
+					"{path}: {rule}"
+				);
+				assert!(!edits.iter().any(|edit| edit.rule == rule));
+			}
+		}
+	}
+
+	#[test]
 	fn style_fixes_preserve_serde_default_contracts() {
 		// Option fields can still need defaults for sequence input, custom defaults,
 		// and custom deserializers. Their type alone cannot prove redundancy.
