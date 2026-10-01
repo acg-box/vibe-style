@@ -37,6 +37,18 @@ enum Import008CandidateKind {
 	Derive,
 }
 
+#[derive(Clone)]
+enum BracedImportSegment {
+	Simple(String),
+	Nested { head: String, children: Vec<String> },
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PathQualificationRequirement {
+	Qualified,
+	Unqualified,
+}
+
 #[derive(Clone, Debug)]
 struct Import008Candidate {
 	line: usize,
@@ -160,18 +172,6 @@ struct TypePathCandidate {
 	suffix: String,
 }
 
-#[derive(Clone)]
-enum BracedImportSegment {
-	Simple(String),
-	Nested { head: String, children: Vec<String> },
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum PathQualificationRequirement {
-	Qualified,
-	Unqualified,
-}
-
 pub(crate) fn check_import_rules(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -276,6 +276,11 @@ pub(crate) fn check_import_rules(
 
 pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
 	exported_symbols_from_super_scope_impl(use_item)
+}
+
+pub(crate) fn declared_file_is_test_only(path: &std::path::Path) -> bool {
+	declared_file_module_contexts(path)
+		.is_some_and(|contexts| !contexts.is_empty() && contexts.iter().all(|(_, test)| *test))
 }
 
 fn apply_import012_crate_keep_alive_rule(
@@ -1729,22 +1734,10 @@ fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Option<Vec
 }
 
 fn declared_file_module_path(path: &std::path::Path) -> Option<Vec<String>> {
-	let Some(crate_dir) = find_crate_dir(path) else {
+	let Some(contexts) = declared_file_module_contexts(path) else {
 		return Some(file_module_path_segments(path));
 	};
-	let Ok(target) = path.canonicalize() else {
-		return Some(file_module_path_segments(path));
-	};
-	let roots = shared::package_target_roots(&crate_dir)
-		.ok()
-		.flatten()
-		.unwrap_or_else(|| vec![crate_dir.join("src/lib.rs"), crate_dir.join("src/main.rs")]);
-	let mut matches = BTreeSet::new();
-	let mut stack = HashSet::new();
-
-	for root in roots {
-		collect_declared_module_paths(&root, &[], &target, &mut stack, &mut matches);
-	}
+	let matches = contexts.into_iter().map(|(owner, _)| owner).collect::<BTreeSet<_>>();
 
 	match matches.len() {
 		0 => Some(file_module_path_segments(path)),
@@ -1753,12 +1746,35 @@ fn declared_file_module_path(path: &std::path::Path) -> Option<Vec<String>> {
 	}
 }
 
+fn declared_file_module_contexts(path: &std::path::Path) -> Option<BTreeSet<(Vec<String>, bool)>> {
+	let crate_dir = find_crate_dir(path)?;
+	let target = path.canonicalize().ok()?;
+	let roots = shared::package_target_roots(&crate_dir)
+		.ok()
+		.flatten()
+		.unwrap_or_else(|| vec![crate_dir.join("src/lib.rs"), crate_dir.join("src/main.rs")]);
+	let mut matches = BTreeSet::new();
+	let mut stack = HashSet::new();
+
+	for root in roots {
+		collect_declared_module_paths(
+			&root,
+			&(Vec::new(), false),
+			&target,
+			&mut stack,
+			&mut matches,
+		);
+	}
+
+	Some(matches)
+}
+
 fn collect_declared_module_paths(
 	file: &std::path::Path,
-	module_path: &[String],
+	context: &(Vec<String>, bool),
 	target: &std::path::Path,
 	stack: &mut HashSet<PathBuf>,
-	matches: &mut BTreeSet<Vec<String>>,
+	matches: &mut BTreeSet<(Vec<String>, bool)>,
 ) {
 	let Ok(file) = file.canonicalize() else {
 		return;
@@ -1768,7 +1784,7 @@ fn collect_declared_module_paths(
 		return;
 	}
 	if file == target {
-		matches.insert(module_path.to_vec());
+		matches.insert(context.clone());
 	}
 
 	if let Ok(text) = fs::read_to_string(&file) {
@@ -1787,7 +1803,7 @@ fn collect_declared_module_paths(
 			parsed.tree().syntax(),
 			parent,
 			&directory,
-			module_path,
+			context,
 			target,
 			stack,
 			matches,
@@ -1801,18 +1817,25 @@ fn collect_module_declarations(
 	syntax: &SyntaxNode,
 	path_directory: &std::path::Path,
 	directory: &std::path::Path,
-	owner: &[String],
+	owner: &(Vec<String>, bool),
 	target: &std::path::Path,
 	stack: &mut HashSet<PathBuf>,
-	matches: &mut BTreeSet<Vec<String>>,
+	matches: &mut BTreeSet<(Vec<String>, bool)>,
 ) {
 	for module in syntax.children().filter_map(Module::cast) {
 		let Some(name) = module.name().map(|name| name.text().to_string()) else {
 			continue;
 		};
-		let mut module_path = owner.to_vec();
+		let test_only = owner.1
+			|| module.attrs().any(|attr| {
+				attr.syntax().text().to_string().split_whitespace().collect::<String>()
+					== "#[cfg(test)]"
+			});
+		let mut module_path = owner.0.clone();
 
 		module_path.push(name.clone());
+
+		let context = (module_path, test_only);
 
 		if let Some(items) = module.item_list() {
 			let nested = directory.join(&name);
@@ -1821,7 +1844,7 @@ fn collect_module_declarations(
 				items.syntax(),
 				&nested,
 				&nested,
-				&module_path,
+				&context,
 				target,
 				stack,
 				matches,
@@ -1832,7 +1855,7 @@ fn collect_module_declarations(
 
 		let file = declared_child_file(&module, path_directory, directory, &name);
 
-		collect_declared_module_paths(&file, &module_path, target, stack, matches);
+		collect_declared_module_paths(&file, &context, target, stack, matches);
 	}
 }
 
