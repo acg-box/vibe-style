@@ -198,6 +198,7 @@ pub(crate) struct FileContext {
 	pub(crate) source_file: SourceFile,
 	pub(crate) top_items: Vec<TopItem>,
 	pub(crate) declared_module_path: OnceLock<Option<Vec<String>>>,
+	pub(crate) external_module_references: OnceLock<Option<HashSet<String>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -435,6 +436,7 @@ pub(crate) fn read_file_context_from_text(
 		source_file,
 		top_items,
 		declared_module_path: OnceLock::new(),
+		external_module_references: OnceLock::new(),
 	}))
 }
 
