@@ -4436,6 +4436,21 @@ fn sample() {
 	}
 
 	#[test]
+	fn import003_rewrites_macro_alias_paths_without_touching_literals() {
+		let original = r#"use crate::state::Status as S;
+fn sample(value: crate::state::Status) {
+    assert!(matches!(value, S::Ready), "S::Ready must remain literal");
+}
+"#;
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(Path::new("macro_alias.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(!rewritten.contains("value, S::Ready"), "{rewritten}");
+		assert!(rewritten.contains("\"S::Ready must remain literal\""), "{rewritten}");
+	}
+
+	#[test]
 	fn import006_preserves_conditional_expression_imports() {
 		for attr in ["#[cfg(any())]", "#[cfg_attr(all(), cfg(any()))]", "#[cfg (any())]"] {
 			let text =
