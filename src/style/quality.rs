@@ -673,7 +673,10 @@ fn macro_path_text(macro_call: &MacroCall) -> Option<String> {
 fn is_test_file(path: &Path) -> bool {
 	let text = path.to_string_lossy().replace('\\', "/");
 
-	text.contains("/tests/") || text.ends_with("_test.rs")
+	text.contains("/tests/")
+		|| text.ends_with("_test.rs")
+		|| text.ends_with("_tests.rs")
+		|| text.rsplit('/').next() == Some("tests.rs")
 }
 
 fn has_attr_text(mut attrs: impl Iterator<Item = Attr>, needle: &str) -> bool {
