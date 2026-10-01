@@ -4638,7 +4638,7 @@ fn sample() {
 		let root = env::temp_dir().join(format!("vstyle-crate-glob-{}-{now}", process::id()));
 		let source = root.join("src");
 		let consumer = source.join("consumer.rs");
-		let original = "use crate::tree::*;\n#[cfg(feature = \"extra\")] fn conditional() { let _ = Conditional; }\n#[test] fn methods() { assert_eq!(helper().shifted(), 4); assert_eq!(shadowed(), 7); }\nfn shadowed() -> u8 { 7 }\n";
+		let original = "use crate::tree::*;\n#[cfg(feature = \"extra\")] fn conditional() { let _ = Conditional; }\n#[test] fn methods() { assert_eq!(helper().shifted(), 4); assert_eq!(shadowed(), 7); assert_eq!(theme::VALUE, 8); }\nfn shadowed() -> u8 { 7 }\n";
 
 		fs::create_dir_all(&source).expect("Create fixture.");
 		fs::write(
@@ -4646,14 +4646,19 @@ fn sample() {
 			"[package]\nname = \"crate-glob-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
 		)
 		.expect("Write manifest.");
-		fs::write(source.join("lib.rs"), "#[path = \"owner.rs\"] mod tree;").expect("Write root.");
+		fs::write(
+			source.join("lib.rs"),
+			"mod theme { pub const VALUE: u8 = 8; } #[path = \"owner.rs\"] mod tree;",
+		)
+		.expect("Write root.");
 		fs::write(
 			source.join("owner.rs"),
-			r#"mod prelude {
-    pub trait Extension { fn shifted(self) -> Self; }
-    impl Extension for u8 { fn shifted(self) -> Self { self + 1 } }
+			r#"mod motion {
+    pub trait SmoothControl { fn shifted(self) -> Self; }
+    impl SmoothControl for u8 { fn shifted(self) -> Self { self + 1 } }
 }
-use crate::tree::prelude::Extension;
+use crate::tree::motion::SmoothControl;
+use crate::theme::{self, VALUE};
 #[cfg(feature = "extra")] struct Conditional;
 fn helper() -> u8 { 3 }
 fn shadowed() -> u8 { 0 }

@@ -1553,7 +1553,10 @@ fn build_crate_glob_item_replacement(
 
 	collect_scope_symbols_from_items(items.iter().cloned(), &mut symbols)?;
 
-	let traits = scope_trait_symbols(&items)?;
+	let mut traits = scope_trait_symbols(&items)?;
+
+	traits.extend(crate_scope_trait_symbols(ctx, prefix, &items)?);
+
 	let used = collect_used_symbols_from_syntax(&local_scope);
 	let local = local_scope
 		.children()
@@ -1576,6 +1579,48 @@ fn build_crate_glob_item_replacement(
 	});
 
 	build_scoped_glob_item_replacement(use_item, prefix, prefix, symbols, &items)
+}
+
+fn crate_scope_trait_symbols(
+	ctx: &FileContext,
+	prefix: &str,
+	items: &[Item],
+) -> Option<HashSet<String>> {
+	let mut traits = HashSet::new();
+
+	for item in items {
+		let Item::Use(import) = item else {
+			continue;
+		};
+		let path = import.use_tree()?.syntax().text().to_string();
+		let aliases = collect_non_keep_alive_alias_bindings(&path);
+
+		for full_path in imported_full_paths_from_use_path(&path) {
+			let Some(target) = scope_import_target(&full_path, prefix, items) else {
+				continue;
+			};
+			let Some(tail) = target.strip_prefix("crate::") else {
+				continue;
+			};
+			let mut segments = tail.split("::").map(str::to_owned).collect::<Vec<_>>();
+			let symbol = segments.pop()?;
+			let Some((_, scope)) = resolve_crate_module_scope(ctx, &segments) else {
+				continue;
+			};
+
+			if scope.children().filter_map(Item::cast).any(|item| {
+				matches!(item, Item::Trait(item) if item.name().is_some_and(|name| name.text() == symbol))
+			}) {
+				if aliases.iter().any(|(_, original)| compact_path_for_match(original) == full_path) {
+					return None;
+				}
+
+				traits.insert(symbol);
+			}
+		}
+	}
+
+	Some(traits)
 }
 
 fn resolve_crate_module_scope(
@@ -7075,6 +7120,9 @@ fn imported_symbols_from_use_path(path: &str) -> Vec<String> {
 			return None;
 		}
 
+		if let Some(parent) = symbol.strip_suffix("::self") {
+			symbol = parent.to_owned();
+		}
 		if let Some((_, right)) = symbol.rsplit_once("::") {
 			symbol = right.to_owned();
 		}
