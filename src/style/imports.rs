@@ -6171,7 +6171,7 @@ fn merge_import008_into_existing_module_use_items(
 		let Some(item) = use_items.get(&line).copied() else {
 			continue;
 		};
-		let Some((start, end)) = item_text_range(ctx, item) else {
+		let Some((start, end)) = item_syntax_text_range(ctx, item) else {
 			continue;
 		};
 		let Some(raw) = ctx.text.get(start..end) else {
