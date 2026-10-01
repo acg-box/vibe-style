@@ -4472,6 +4472,47 @@ fn sample() {
 	}
 
 	#[test]
+	fn import_removal_qualifies_dependent_nested_use_roots() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-nested-use-{}-{now}", process::id()));
+		let path = root.join("lib.rs");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		for original in [
+			"use std::io::ErrorKind as Kind;\nfn sample() { use Kind as Source; let _ = Source::NotFound; }\n",
+			"use std::io::ErrorKind;\nfn sample(value: ErrorKind) -> bool { use ErrorKind as Source; matches!(value, Source::NotFound) }\n#[cfg(unix)] fn qualified(_: std::io::ErrorKind) {}\n",
+			"use std::io::ErrorKind as Kind;\nfn sample() { use {Kind as Source}; let _ = Source::NotFound; }\n",
+			"use std::io::ErrorKind as Kind;\nfn sample() { use Kind::{NotFound}; let _ = NotFound; }\n",
+			"use std::io::ErrorKind as Kind;\nfn outer(_: Kind) {}\nfn sample() { use std::option::Option as Kind; use Kind as Source; let _ = Source::Some(1); }\n",
+		] {
+			let (rewritten, _, _, _) =
+				style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+			fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+			let output = process::Command::new("rustc")
+				.args(["--edition=2024", "--crate-type=lib", "--emit=metadata"])
+				.arg(&path)
+				.arg("-o")
+				.arg(root.join("fixture.rmeta"))
+				.output()
+				.expect("Compile rewritten fixture.");
+
+			assert!(
+				output.status.success(),
+				"{rewritten}\n{}",
+				String::from_utf8_lossy(&output.stderr)
+			);
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn import003_preserves_aliases_used_by_bare_patterns() {
 		let original = "use libc::ESRCH as S;\nfn sample(code: Option<i32>) -> bool { match code { Some(S) => true, _ => false } }\n";
 		let ctx =
