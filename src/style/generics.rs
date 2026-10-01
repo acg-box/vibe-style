@@ -1,8 +1,7 @@
 use ra_ap_syntax::{
 	AstNode,
 	ast::{
-		self, Expr, GenericArgList, HasGenericArgs, LetStmt, MethodCallExpr, Path, PathExpr,
-		PathSegment, Type, TypeAnchor,
+		self, GenericArg, GenericArgList, HasGenericArgs, LetStmt, Path, PathSegment, TypeAnchor,
 	},
 };
 
@@ -76,7 +75,9 @@ pub(crate) fn check_turbofish_canonicalization(
 	edits: &mut Vec<Edit>,
 	emit_edits: bool,
 ) {
-	for path_expr in ctx.source_file.syntax().descendants().filter_map(PathExpr::cast) {
+	for path_expr in
+		ctx.source_file.syntax().descendants().filter_map(ra_ap_syntax::ast::PathExpr::cast)
+	{
 		let Some(path) = path_expr.path() else {
 			continue;
 		};
@@ -161,7 +162,7 @@ fn push_unnecessary_turbofish_violation(
 }
 
 fn method_call_turbofish_range(
-	method_call: &MethodCallExpr,
+	method_call: &ra_ap_syntax::ast::MethodCallExpr,
 	explicit_type_text: &str,
 ) -> Option<(usize, usize)> {
 	let generic_arg_list = method_call.generic_arg_list()?;
@@ -171,7 +172,7 @@ fn method_call_turbofish_range(
 		return None;
 	}
 
-	let ast::GenericArg::TypeArg(type_arg) = &args[0] else {
+	let GenericArg::TypeArg(type_arg) = &args[0] else {
 		return None;
 	};
 	let type_arg_type = type_arg.ty()?;
@@ -187,7 +188,7 @@ fn method_call_turbofish_range(
 }
 
 fn associated_turbofish_range(
-	path_expr: &PathExpr,
+	path_expr: &ra_ap_syntax::ast::PathExpr,
 	type_info: &ExplicitTypeInfo,
 ) -> Option<(usize, usize)> {
 	let path = path_expr.path()?;
@@ -226,8 +227,8 @@ fn associated_turbofish_range(
 	Some((usize::from(range.start()), usize::from(range.end())))
 }
 
-fn explicit_type_segment_info(let_type: &Type) -> Option<ExplicitTypeInfo> {
-	let Type::PathType(path_type) = let_type else {
+fn explicit_type_segment_info(let_type: &ra_ap_syntax::ast::Type) -> Option<ExplicitTypeInfo> {
+	let ra_ap_syntax::ast::Type::PathType(path_type) = let_type else {
 		return None;
 	};
 	let path = path_type.path()?;
@@ -252,7 +253,7 @@ fn generic_args_as_text(generic_arg_list: &GenericArgList) -> Vec<String> {
 		.collect::<Vec<_>>()
 }
 
-fn unwrap_turbofish_wrappers(mut expr: Expr) -> Expr {
+fn unwrap_turbofish_wrappers(mut expr: ra_ap_syntax::ast::Expr) -> ra_ap_syntax::ast::Expr {
 	loop {
 		let next = match &expr {
 			ast::Expr::ParenExpr(paren_expr) => paren_expr.expr(),

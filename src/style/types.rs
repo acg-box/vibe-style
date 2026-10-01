@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
 	ast::{
-		self, GenericArg, GenericParam, HasGenericArgs, HasGenericParams, HasName, HasVisibility,
-		Path, PathSegment, Type, TypeAlias, Use,
+		self, GenericParam, HasGenericArgs, HasGenericParams, HasName, HasVisibility, Path,
+		PathSegment, Type, TypeAlias, Use,
 	},
 };
 
@@ -152,7 +152,7 @@ fn is_meaningless_alias(path: &Path, aliases: &[AliasGenericParam]) -> bool {
 	let Some(last_generic_args) = last_segment.generic_arg_list() else {
 		return aliases.is_empty();
 	};
-	let rhs_args = last_generic_args.generic_args().collect::<Vec<GenericArg>>();
+	let rhs_args = last_generic_args.generic_args().collect::<Vec<ra_ap_syntax::ast::GenericArg>>();
 
 	if rhs_args.len() != aliases.len() {
 		return false;
@@ -327,7 +327,10 @@ fn find_simple_sibling_use_importing_ident(
 	None
 }
 
-fn generic_arg_matches_param(arg: &GenericArg, alias: &AliasGenericParam) -> bool {
+fn generic_arg_matches_param(
+	arg: &ra_ap_syntax::ast::GenericArg,
+	alias: &AliasGenericParam,
+) -> bool {
 	match (arg, alias) {
 		(ast::GenericArg::LifetimeArg(lifetime_arg), AliasGenericParam::Lifetime(expected)) => {
 			let Some(lifetime) = lifetime_arg.lifetime() else {

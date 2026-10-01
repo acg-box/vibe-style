@@ -4436,6 +4436,24 @@ fn sample() {
 	}
 
 	#[test]
+	fn import003_qualifies_tuple_constructor_patterns() {
+		let original = r#"use std::result::Result as Receipt;
+fn sample(value: Receipt<u8, u8>) -> u8 {
+    if let Receipt::Ok(inner) = value { return inner; }
+    let Receipt::Err(inner) = value else { return 0; };
+    match value { Receipt::Ok(other) | Receipt::Err(other) => inner + other }
+}
+"#;
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(Path::new("tuple_patterns.rs"), original, true)
+				.expect("Apply fixes.");
+
+		assert!(!rewritten.contains("Receipt"), "{rewritten}");
+		assert!(rewritten.contains("::Ok(inner)"), "{rewritten}");
+		assert!(rewritten.contains("::Err(inner)"), "{rewritten}");
+	}
+
+	#[test]
 	fn import003_rewrites_macro_alias_paths_without_touching_literals() {
 		let original = r#"use crate::state::Status as S;
 fn sample(value: crate::state::Status) {
