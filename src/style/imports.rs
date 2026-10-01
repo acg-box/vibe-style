@@ -1887,6 +1887,30 @@ fn item_name_text(item: &Item) -> Option<String> {
 	}
 }
 
+fn use_tree_root_name_ref(tree: &UseTree) -> Option<ast::NameRef> {
+	if tree
+		.syntax()
+		.ancestors()
+		.skip(1)
+		.filter_map(UseTree::cast)
+		.any(|parent| parent.path().is_some())
+	{
+		return None;
+	}
+
+	let mut path = tree.path()?;
+
+	while let Some(qualifier) = path.qualifier() {
+		path = qualifier;
+	}
+
+	if path.syntax().text().to_string().starts_with("::") {
+		return None;
+	}
+
+	path.segment()?.name_ref()
+}
+
 fn collect_used_symbols_from_syntax(syntax: &SyntaxNode) -> HashSet<String> {
 	let mut used = HashSet::new();
 
@@ -1898,6 +1922,11 @@ fn collect_used_symbols_from_syntax(syntax: &SyntaxNode) -> HashSet<String> {
 		}
 
 		used.insert(name_ref.text().to_string());
+	}
+	for tree in syntax.descendants().filter_map(UseTree::cast) {
+		if let Some(name) = use_tree_root_name_ref(&tree) {
+			used.insert(name.text().to_string());
+		}
 	}
 	for tree in syntax.descendants().filter_map(TokenTree::cast) {
 		for token in tree.syntax().descendants_with_tokens().filter_map(|part| part.into_token()) {
@@ -2356,30 +2385,11 @@ fn dependent_use_root_rewrites(
 	let mut rewrites = Vec::new();
 
 	for tree in ctx.source_file.syntax().descendants().filter_map(UseTree::cast) {
-		if tree.syntax().ancestors().any(|node| Module::can_cast(node.kind()))
-			|| tree
-				.syntax()
-				.ancestors()
-				.skip(1)
-				.filter_map(UseTree::cast)
-				.any(|parent| parent.path().is_some())
-		{
+		if tree.syntax().ancestors().any(|node| Module::can_cast(node.kind())) {
 			continue;
 		}
 
-		let Some(mut path) = tree.path() else {
-			continue;
-		};
-
-		while let Some(qualifier) = path.qualifier() {
-			path = qualifier;
-		}
-
-		if path.syntax().text().to_string().starts_with("::") {
-			continue;
-		}
-
-		let Some(name) = path.segment().and_then(|segment| segment.name_ref()) else {
+		let Some(name) = use_tree_root_name_ref(&tree) else {
 			continue;
 		};
 		let range = name.syntax().text_range();

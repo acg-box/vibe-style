@@ -1386,8 +1386,10 @@ mod tests {
 		process, slice,
 	};
 
+	use ra_ap_syntax::{AstNode as _, ast::Use};
+
 	use crate::style::{
-		self, Edit, MAX_FIX_PASSES, fixes, semantic, shared, types, violation_signature,
+		self, Edit, MAX_FIX_PASSES, fixes, imports, semantic, shared, types, violation_signature,
 	};
 
 	#[test]
@@ -4469,6 +4471,67 @@ fn sample() {
 				.expect("Apply fixes.");
 
 		assert_eq!(rewritten.matches("use std::io::ErrorKind;").count(), 1, "{rewritten}");
+	}
+
+	#[test]
+	fn parent_glob_inventory_ignores_qualified_import_leaves() {
+		let original = "struct Error;\n#[cfg(test)]\nmod tests {\n\tuse super::*;\n\t#[test]\n\tfn sample() {\n\t\tuse std::fmt::{Error as Source};\n\t\tlet _ = Source;\n\t}\n}\n";
+		let parsed = ra_ap_syntax::SourceFile::parse(original, ra_ap_syntax::Edition::CURRENT);
+		let glob = parsed
+			.tree()
+			.syntax()
+			.descendants()
+			.filter_map(Use::cast)
+			.find(|item| item.syntax().text().to_string().contains("super::*"))
+			.expect("Find parent glob.");
+		let symbols =
+			imports::exported_symbols_from_super_scope(&glob).expect("Read parent inventory.");
+
+		assert!(symbols.is_empty(), "{symbols:?}");
+	}
+
+	#[test]
+	fn parent_glob_expansion_retains_nested_use_dependencies() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-glob-dependency-{}-{now}", process::id()));
+		let path = root.join("lib.rs");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		for local_import in [
+			"use ErrorKind as Source;",
+			"use {ErrorKind as Source};",
+			"use ErrorKind::{NotFound as Selected};",
+		] {
+			let value =
+				if local_import.contains("Selected") { "Selected" } else { "Source::NotFound" };
+			let original = format!(
+				"use std::io::ErrorKind;\n#[cfg(test)]\nmod tests {{\n\tuse super::*;\n\t#[test]\n\tfn sample() {{\n\t\t{local_import}\n\t\tlet _ = {value};\n\t}}\n}}\n"
+			);
+			let (rewritten, _, _, _) =
+				style::apply_fix_passes(&path, &original, true).expect("Apply fixes.");
+
+			fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+			let output = process::Command::new("rustc")
+				.args(["--edition=2024", "--test", "--emit=metadata"])
+				.arg(&path)
+				.arg("-o")
+				.arg(root.join("fixture.rmeta"))
+				.output()
+				.expect("Compile rewritten fixture.");
+
+			assert!(
+				output.status.success(),
+				"{rewritten}\n{}",
+				String::from_utf8_lossy(&output.stderr)
+			);
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
 	}
 
 	#[test]
