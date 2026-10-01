@@ -7471,7 +7471,8 @@ fn import004_preferred_module_access_plan(
 	}
 
 	let compact_parent_module_path = compact_path_for_match(parent_module_path);
-	let mut keep_parent_module_import = true;
+	let mut keep_parent_module_import =
+		compact_parent_module_path.trim_start_matches("::").contains("::");
 
 	if current_use_path.is_some_and(|path| {
 		import004_use_path_imports_parent_module(path, &compact_parent_module_path)
