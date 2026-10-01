@@ -4630,6 +4630,119 @@ fn sample() {
 	}
 
 	#[test]
+	fn mixed_crate_globs_preserve_explicit_sibling_bindings() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-mixed-glob-{}-{now}", process::id()));
+		let source = root.join("src");
+		let consumer = source.join("consumer.rs");
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"mixed-glob-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(source.join("lib.rs"), "mod provider; mod other; mod consumer;")
+			.expect("Write root.");
+		fs::write(
+			source.join("provider.rs"),
+			"pub struct Token; pub struct Choice; impl Choice { pub const VALUE: u8 = 1; }",
+		)
+		.expect("Write provider.");
+		fs::write(
+			source.join("other.rs"),
+			"pub struct Choice; impl Choice { pub const VALUE: u8 = 9; } #[cfg(test)] pub struct Extra;",
+		)
+		.expect("Write explicit sibling.");
+
+		for (import, choice, conditional) in [
+			("use crate::{provider::*, other::{Choice, Extra}};", "Choice", false),
+			("use {crate::provider::*, crate::other::{self, Choice, Extra}};", "Choice", false),
+			(
+				"#[cfg(test)] use {crate::provider::*, crate::other::{Choice as Pick, Extra}, std::io::Read as _};",
+				"Pick",
+				true,
+			),
+		] {
+			let read = if conditional {
+				"assert_eq!(std::io::empty().read(&mut []).unwrap(), 0);"
+			} else {
+				""
+			};
+			let original = format!(
+				"{import}\n\n#[test]\nfn preserved() {{ let _ = Token; let _ = Extra; assert_eq!({choice}::VALUE, 9); {read} }}\n"
+			);
+
+			fs::write(&consumer, &original).expect("Write consumer.");
+
+			let (rewritten, _, _, _) =
+				style::apply_fix_passes(&consumer, &original, true).expect("Fix mixed glob.");
+
+			assert!(!rewritten.contains("::*"), "{rewritten}");
+
+			fs::write(&consumer, &rewritten).expect("Write fixed consumer.");
+
+			let binary = root.join("fixture");
+			let compiled = process::Command::new("rustc")
+				.args(["--edition=2024", "--test"])
+				.arg(source.join("lib.rs"))
+				.arg("-o")
+				.arg(&binary)
+				.output()
+				.expect("Compile fixture.");
+
+			assert!(
+				compiled.status.success(),
+				"{rewritten}\n{}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+
+			if conditional {
+				let library = process::Command::new("rustc")
+					.args(["--edition=2024", "--crate-type=lib"])
+					.arg(source.join("lib.rs"))
+					.arg("-o")
+					.arg(root.join("fixture.rlib"))
+					.output()
+					.expect("Compile without test configuration.");
+
+				assert!(
+					library.status.success(),
+					"{rewritten}\n{}",
+					String::from_utf8_lossy(&library.stderr)
+				);
+			}
+
+			let executed = process::Command::new(&binary).output().expect("Run fixture.");
+
+			assert!(
+				executed.status.success(),
+				"{rewritten}\n{}\n{}",
+				String::from_utf8_lossy(&executed.stdout),
+				String::from_utf8_lossy(&executed.stderr)
+			);
+			assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+		}
+		for original in [
+			"pub use crate::{provider::*, other::Choice};",
+			"use crate::{provider::*, /* Keep the import rationale. */ other::Choice};",
+			"use crate::{provider::*, other::*};",
+		] {
+			let ctx = shared::read_file_context_from_text(&consumer, original.to_owned())
+				.expect("Read guarded fixture.")
+				.expect("Get guarded context.");
+			let (_, edits) = style::collect_violations(&ctx, true);
+
+			assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-007"));
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn macro_qualification_preserves_reexported_standard_modules() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
@@ -4659,13 +4772,14 @@ fn keeps_builtin_macro() {
 		fs::write(source.join("lib.rs"), r#"mod provider; mod facade; mod consumer;
 #[macro_export] macro_rules! custom_panic { ($message:expr) => { std::panic!("custom {}", $message) }; }"#)
 			.expect("Write root.");
-		fs::write(source.join("provider.rs"), "pub use std::panic::{self};")
+		fs::write(source.join("provider.rs"), "pub use std::panic::{self}; pub struct Token;")
 			.expect("Write provider.");
 
-		for (facade, custom) in [
-			("pub use std::panic::{self};", false),
-			("pub use crate::provider::panic;", false),
-			("pub use std::panic::{self}; pub use crate::custom_panic as panic;", true),
+		for (facade, custom, self_only) in [
+			("pub use std::panic::{self};", false, false),
+			("pub use crate::provider::panic;", false, false),
+			("pub use std::panic::{self}; pub use crate::custom_panic as panic;", true, false),
+			("pub use std::panic::{self}; pub use crate::custom_panic as panic;", false, true),
 		] {
 			fs::write(source.join("facade.rs"), facade).expect("Write facade.");
 
@@ -4674,12 +4788,25 @@ fn keeps_builtin_macro() {
 			} else {
 				original.to_owned()
 			};
+			let original = if self_only {
+				original
+					.replace(
+						"use crate::facade::panic;",
+						"use crate::{provider::*, facade::panic::{self}};",
+					)
+					.replace("let result =", "let _ = Token;\n    let result =")
+			} else {
+				original
+			};
 
 			fs::write(&consumer, &original).expect("Write consumer.");
 
 			let (rewritten, _, _, _) =
 				style::apply_fix_passes(&consumer, &original, true).expect("Fix consumer.");
 
+			if self_only {
+				assert!(!rewritten.contains("::*"), "{rewritten}");
+			}
 			if custom {
 				assert!(rewritten.contains("facade::panic!"), "{rewritten}");
 			}
@@ -4703,7 +4830,12 @@ fn keeps_builtin_macro() {
 
 			let executed = process::Command::new(&binary).output().expect("Run fixture.");
 
-			assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+			assert!(
+				executed.status.success(),
+				"{rewritten}\n{}\n{}",
+				String::from_utf8_lossy(&executed.stdout),
+				String::from_utf8_lossy(&executed.stderr)
+			);
 			assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
 		}
 

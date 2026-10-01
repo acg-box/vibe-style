@@ -1277,9 +1277,14 @@ fn apply_import007_no_glob_use_rule(
 		{
 			Some(replacement)
 		} else {
-			build_glob_use_replacement(ctx, &use_item, &use_path).and_then(|replacement_path| {
-				rewrite_use_item_with_path(&use_item.syntax().text().to_string(), &replacement_path)
-			})
+			build_glob_use_replacement(ctx, &use_item, &use_path)
+				.and_then(|replacement_path| {
+					rewrite_use_item_with_path(
+						&use_item.syntax().text().to_string(),
+						&replacement_path,
+					)
+				})
+				.or_else(|| build_mixed_crate_glob_item_replacement(ctx, &use_item))
 		};
 		let fixable = replacement.is_some();
 
@@ -1524,6 +1529,72 @@ fn scope_import_target(path: &str, source_prefix: &str, items: &[Item]) -> Optio
 	Some(path)
 }
 
+fn build_mixed_crate_glob_item_replacement(ctx: &FileContext, use_item: &Use) -> Option<String> {
+	let tree = use_item.use_tree()?;
+
+	if tree.use_tree_list().is_none()
+		|| use_item.visibility().is_some()
+		|| use_item
+			.syntax()
+			.descendants_with_tokens()
+			.any(|part| part.kind() == SyntaxKind::COMMENT)
+	{
+		return None;
+	}
+
+	let mut paths = Vec::new();
+
+	flatten_use_tree_paths(&tree, "", &mut paths);
+
+	if paths.iter().filter(|path| path.ends_with("::*")).count() != 1 {
+		return None;
+	}
+
+	let raw = use_item.syntax().text().to_string();
+	let mut replacements = Vec::new();
+
+	for path in paths {
+		let replacement = if path.ends_with("::*") {
+			build_crate_glob_item_replacement(ctx, use_item, &path)?
+		} else {
+			rewrite_use_item_with_path(&raw, &path)?
+		};
+
+		replacements.push(replacement);
+	}
+
+	Some(replacements.join("\n"))
+}
+
+fn flatten_use_tree_paths(tree: &UseTree, prefix: &str, paths: &mut Vec<String>) {
+	let path = tree.path().map(|path| path.syntax().text().to_string()).unwrap_or_default();
+	let module_self = path == "self" && !prefix.is_empty();
+	let full = if path.is_empty() || module_self {
+		prefix.to_owned()
+	} else if prefix.is_empty() {
+		path
+	} else {
+		format!("{prefix}::{path}")
+	};
+
+	if let Some(list) = tree.use_tree_list() {
+		for child in list.syntax().children().filter_map(UseTree::cast) {
+			flatten_use_tree_paths(&child, &full, paths);
+		}
+	} else if tree.star_token().is_some() {
+		paths.push(format!("{full}::*"));
+	} else {
+		let rename =
+			tree.rename().map(|rename| format!(" {}", rename.syntax().text())).unwrap_or_default();
+
+		paths.push(if module_self {
+			format!("{full}::{{self{rename}}}")
+		} else {
+			format!("{full}{rename}")
+		});
+	}
+}
+
 fn build_crate_glob_item_replacement(
 	ctx: &FileContext,
 	use_item: &Use,
@@ -1569,6 +1640,7 @@ fn build_crate_glob_item_replacement(
 				.unwrap_or_default(),
 			_ => item_name_text(&item).into_iter().collect(),
 		})
+		.chain(imported_symbols_from_use_path(&use_item.use_tree()?.syntax().text().to_string()))
 		.collect::<HashSet<_>>();
 
 	symbols.retain(|name| {
