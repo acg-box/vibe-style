@@ -4472,6 +4472,45 @@ fn sample() {
 	}
 
 	#[test]
+	fn import004_preserves_explicit_call_type_and_const_arguments() {
+		let original = "use std::mem::{size_of, align_of};\nuse std::array::from_fn;\nfn main() { let size = size_of::<[u16; 3]>(); let alignment = align_of::<u16>(); let array = from_fn::<u8, 3, _>(|i| i as u8); assert_eq!(size, 6); assert_eq!(alignment, 2); assert_eq!(array, [0, 1, 2]); assert_eq!(size_of::<u32>(), 4); }\n";
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-call-generics-{}-{now}", process::id()));
+		let path = root.join("main.rs");
+		let binary = root.join("fixture");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let compiled = process::Command::new("rustc")
+			.arg("--edition=2024")
+			.arg(&path)
+			.arg("-o")
+			.arg(&binary)
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
+
+		let executed = process::Command::new(&binary).output().expect("Run rewritten fixture.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+	}
+
+	#[test]
 	fn import_hoisting_precedes_qualified_path_shortening() {
 		let original = "fn sample(_: std::io::ErrorKind) { use std::io::{ErrorKind, SeekFrom}; let _ = ErrorKind::NotFound; let _ = SeekFrom::Start(0); }\n";
 		let now = std::time::SystemTime::now()

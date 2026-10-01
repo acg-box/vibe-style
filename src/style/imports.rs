@@ -7727,8 +7727,8 @@ fn unqualified_function_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usi
 		}
 
 		let range = (
-			usize::from(path.syntax().text_range().start()),
-			usize::from(path.syntax().text_range().end()),
+			usize::from(name_ref.syntax().text_range().start()),
+			usize::from(name_ref.syntax().text_range().end()),
 		);
 
 		if seen_ranges.insert(range) {
