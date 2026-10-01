@@ -606,8 +606,15 @@ fn build_import006_fix_plan(
 	let equivalent_exists = path_already_pending
 		|| import006_target_scope_has_equivalent_path(&target_scope.ctx, &normalized_path);
 
-	if !equivalent_exists && import006_path_conflicts_in_target_scope(&target_scope.ctx, &path) {
-		return None;
+	if !equivalent_exists {
+		let symbols = imported_symbols_from_use_path(&path);
+		let pending_conflict = known_paths.iter().any(|pending| {
+			imported_symbols_from_use_path(pending).iter().any(|symbol| symbols.contains(symbol))
+		});
+
+		if pending_conflict || import006_path_conflicts_in_target_scope(&target_scope.ctx, &path) {
+			return None;
+		}
 	}
 
 	let delete_edit = import006_delete_local_use_edit(ctx, use_item)?;
@@ -7704,11 +7711,13 @@ fn unqualified_macro_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize,
 			if token.kind() != SyntaxKind::IDENT
 				|| !is_same_ident(token.text(), symbol)
 				|| !tokens.get(index + 1).is_some_and(|next| next.text() == "!")
-				|| index
-					.checked_sub(1)
-					.and_then(|previous| tokens.get(previous))
-					.is_some_and(|previous| matches!(previous.text(), ":" | "::" | "$"))
-			{
+				|| index.checked_sub(1).and_then(|previous| tokens.get(previous)).is_some_and(
+					|previous| match previous.text() {
+						"::" | "$" => true,
+						":" => index >= 2 && tokens[index - 2].text() == ":",
+						_ => false,
+					},
+				) {
 				continue;
 			}
 

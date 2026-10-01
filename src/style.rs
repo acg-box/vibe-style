@@ -4479,6 +4479,25 @@ fn sample() {
 	}
 
 	#[test]
+	fn import006_does_not_hoist_colliding_pending_bindings() {
+		let original = "fn first() {\n use std::fmt::Result;\n let _: Result = Ok(());\n}\nfn second() {\n use std::io::Result;\n let _: Result<()> = Ok(());\n}\n";
+		let ctx = shared::read_file_context_from_text(
+			Path::new("pending_imports.rs"),
+			original.to_owned(),
+		)
+		.expect("Read context.")
+		.expect("Have context.");
+		let (_, edits) = style::collect_violations(&ctx, true);
+		let edits = edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-006").collect();
+		let mut rewritten = original.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("Apply hoists.");
+
+		assert!(rewritten.contains(" use std::io::Result;"), "{rewritten}");
+		assert!(rewritten.starts_with("use std::fmt::Result;"), "{rewritten}");
+	}
+
+	#[test]
 	fn import006_pub_use_conflict_is_reported_non_fixable() {
 		let text = r#"
 pub use crate::first::Thing;
@@ -4536,6 +4555,7 @@ mod tests {
 use crate::metrics::emit;
 fn sample() {
     emit!(emit!("emit!()"), crate::metrics::emit!("qualified"));
+    wrapper!(selector: emit!(), qualified: crate::metrics::emit!());
 }
 "#;
 		let (rewritten, _, _, _) =
@@ -4544,6 +4564,7 @@ fn sample() {
 
 		assert!(rewritten.contains("metrics::emit!(metrics::emit!(\"emit!()\")"), "{rewritten}");
 		assert!(!rewritten.contains("metrics::metrics::"), "{rewritten}");
+		assert!(rewritten.contains("selector: metrics::emit!()"), "{rewritten}");
 	}
 
 	#[test]
