@@ -1668,27 +1668,37 @@ fn collect_module_declarations(
 			continue;
 		}
 
-		let explicit = module.attrs().find_map(|attr| {
-			if attr.path()?.syntax().text() != "path" {
-				return None;
-			}
-
-			let token = attr
-				.syntax()
-				.descendants_with_tokens()
-				.filter_map(|part| part.into_token())
-				.find_map(ast::String::cast)?;
-
-			token.value().ok().map(|value| path_directory.join(value.as_ref()))
-		});
-		let file = explicit.unwrap_or_else(|| {
-			let flat = directory.join(format!("{name}.rs"));
-
-			if flat.is_file() { flat } else { directory.join(name).join("mod.rs") }
-		});
+		let file = declared_child_file(&module, path_directory, directory, &name);
 
 		collect_declared_module_paths(&file, &module_path, target, stack, matches);
 	}
+}
+
+fn declared_child_file(
+	module: &Module,
+	path_directory: &std::path::Path,
+	directory: &std::path::Path,
+	name: &str,
+) -> PathBuf {
+	let explicit = module.attrs().find_map(|attr| {
+		if attr.path()?.syntax().text() != "path" {
+			return None;
+		}
+
+		let token = attr
+			.syntax()
+			.descendants_with_tokens()
+			.filter_map(|part| part.into_token())
+			.find_map(ast::String::cast)?;
+
+		token.value().ok().map(|value| path_directory.join(value.as_ref()))
+	});
+
+	explicit.unwrap_or_else(|| {
+		let flat = directory.join(format!("{name}.rs"));
+
+		if flat.is_file() { flat } else { directory.join(name).join("mod.rs") }
+	})
 }
 
 fn file_module_path_segments(path: &std::path::Path) -> Vec<String> {
@@ -6885,6 +6895,149 @@ fn import004_fix_plan(path: &str, symbol: &str) -> Option<(String, Option<String
 	braced_import_fix_plan(path, symbol)
 }
 
+fn external_module_references(ctx: &FileContext, owner: &[String]) -> Option<HashSet<String>> {
+	let parent = ctx.path.parent()?;
+	let directory = if matches!(ctx.path.file_name()?.to_str()?, "lib.rs" | "main.rs" | "mod.rs") {
+		parent.to_path_buf()
+	} else {
+		parent.join(ctx.path.file_stem()?)
+	};
+	let mut references = HashSet::new();
+	let mut stack = HashSet::new();
+
+	collect_external_module_references(
+		ctx.source_file.syntax(),
+		parent,
+		&directory,
+		owner,
+		&mut stack,
+		&mut references,
+	)?;
+
+	Some(references)
+}
+
+fn collect_external_module_references(
+	syntax: &SyntaxNode,
+	path_directory: &std::path::Path,
+	directory: &std::path::Path,
+	owner: &[String],
+	stack: &mut HashSet<PathBuf>,
+	references: &mut HashSet<String>,
+) -> Option<()> {
+	for module in syntax.children().filter_map(Module::cast) {
+		let name = module.name()?.text().to_string();
+		let mut child_owner = owner.to_vec();
+
+		child_owner.push(name.clone());
+
+		if let Some(items) = module.item_list() {
+			let nested = directory.join(&name);
+
+			collect_external_module_references(
+				items.syntax(),
+				&nested,
+				&nested,
+				&child_owner,
+				stack,
+				references,
+			)?;
+
+			continue;
+		}
+
+		let file =
+			declared_child_file(&module, path_directory, directory, &name).canonicalize().ok()?;
+
+		if !stack.insert(file.clone()) {
+			return None;
+		}
+
+		let text = fs::read_to_string(&file).ok()?;
+		let parsed = ra_ap_syntax::SourceFile::parse(&text, Edition::CURRENT);
+
+		if !parsed.errors().is_empty() {
+			return None;
+		}
+
+		collect_file_module_references(parsed.tree().syntax(), &child_owner, references);
+
+		let parent = file.parent()?;
+		let child_directory = if file.file_name()?.to_str()? == "mod.rs" {
+			parent.to_path_buf()
+		} else {
+			parent.join(file.file_stem()?)
+		};
+
+		collect_external_module_references(
+			parsed.tree().syntax(),
+			parent,
+			&child_directory,
+			&child_owner,
+			stack,
+			references,
+		)?;
+
+		stack.remove(&file);
+	}
+
+	Some(())
+}
+
+fn collect_file_module_references(
+	syntax: &SyntaxNode,
+	owner: &[String],
+	references: &mut HashSet<String>,
+) {
+	for path in syntax.descendants().filter_map(ast::Path::cast) {
+		let reference = compact_path_for_match(&path.syntax().text().to_string());
+
+		record_module_reference(path.syntax(), owner, &reference, references);
+	}
+	for item in syntax.descendants().filter_map(Use::cast) {
+		let Some(tree) = item.use_tree() else {
+			continue;
+		};
+		let tree_path = compact_path_for_match(&tree.syntax().text().to_string());
+		let mut paths = imported_full_paths_from_use_path(&tree_path);
+
+		if tree_path.ends_with("::*") {
+			paths.push(tree_path);
+		}
+
+		for path in paths {
+			record_module_reference(item.syntax(), owner, &path, references);
+		}
+	}
+}
+
+fn record_module_reference(
+	syntax: &SyntaxNode,
+	owner: &[String],
+	reference: &str,
+	references: &mut HashSet<String>,
+) {
+	let mut current = owner.to_vec();
+	let mut inline = syntax
+		.ancestors()
+		.filter_map(Module::cast)
+		.filter_map(|m| m.name().map(|n| n.text().to_string()))
+		.collect::<Vec<_>>();
+
+	inline.reverse();
+	current.extend(inline);
+
+	if let Some((depth, tail)) = leading_super_depth_and_tail(reference) {
+		if depth <= current.len() {
+			references.insert(crate_absolute_use_path(&current[..current.len() - depth], tail));
+		}
+	} else if let Some(tail) = reference.strip_prefix("self::") {
+		references.insert(crate_absolute_use_path(&current, tail));
+	} else if reference.starts_with("crate::") {
+		references.insert(reference.to_owned());
+	}
+}
+
 fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 	if !ctx.source_file.syntax().descendants().any(|node| Module::can_cast(node.kind())) {
 		return false;
@@ -6898,6 +7051,17 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 	let binding = crate_absolute_use_path(owner, symbol);
 	let glob = crate_absolute_use_path(owner, "*");
 	let relative_binding = owner.last().map(|name| format!("{name}::{symbol}"));
+	let Some(external) = ctx
+		.external_module_references
+		.get_or_init(|| external_module_references(ctx, owner))
+		.as_ref()
+	else {
+		return true;
+	};
+
+	if external.contains(&binding) || external.contains(&glob) {
+		return true;
+	}
 
 	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
 		let reference = compact_path_for_match(&path.syntax().text().to_string());
