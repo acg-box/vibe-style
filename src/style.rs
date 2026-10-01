@@ -7666,8 +7666,6 @@ fn encrypt(recipients: &[String]) {
 }
 "#;
 		let expected = r#"
-use age;
-
 fn encrypt(recipients: &[String]) {
 	let recipients = recipients.iter().map(|s| age::x25519::Recipient::from_str(s).unwrap());
 	let _ = recipients.map(|r| r as &dyn age::Recipient).count();
@@ -9990,5 +9988,58 @@ impl Choice { pub fn value() -> Self { Self::One } }
 
 			assert_eq!(rewritten, repeated);
 		}
+	}
+
+	#[test]
+	fn root_crate_qualification_does_not_import_the_crate_again() {
+		let original = "use fixture::First;\nuse fixture::Second;\npub fn first() -> First { fixture::First {} }\npub fn second() -> Second { fixture::Second {} }\n";
+		let root = env::temp_dir().join(format!("vstyle-root-import-{}", process::id()));
+		let path = root.join("consumer.rs");
+		let provider = root.join("provider.rs");
+		let library = root.join("libfixture.rlib");
+		let ctx = shared::read_file_context_from_text(&path, original.to_owned())
+			.expect("Parse input.")
+			.expect("Input context.");
+		let (_, edits) = style::collect_violations(&ctx, true);
+		let edits = edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-009").collect();
+		let mut rewritten = original.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("Qualify imports.");
+
+		assert!(!rewritten.contains("use fixture"), "{rewritten}");
+		assert!(rewritten.contains("-> fixture::First"), "{rewritten}");
+		assert!(rewritten.contains("-> fixture::Second"), "{rewritten}");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+		fs::write(&provider, "pub struct First {}\npub struct Second {}\n")
+			.expect("Write provider.");
+		fs::write(&path, &rewritten).expect("Write consumer.");
+
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--crate-name=fixture", "--crate-type=rlib"])
+			.arg(&provider)
+			.arg("-o")
+			.arg(&library)
+			.output()
+			.expect("Compile provider.");
+
+		assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--crate-type=lib", "--emit=metadata", "--extern"])
+			.arg(format!("fixture={}", library.display()))
+			.arg(&path)
+			.arg("-o")
+			.arg(root.join("consumer.rmeta"))
+			.output()
+			.expect("Compile consumer.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
 	}
 }
