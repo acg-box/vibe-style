@@ -3400,10 +3400,18 @@ fn normalize_trait_keep_alive_leaf(
 		return None;
 	}
 
+	let has_dependent_inline_child = ctx
+		.source_file
+		.syntax()
+		.children()
+		.filter_map(Module::cast)
+		.any(|module| module.item_list().is_some())
+		&& symbol_referenced_by_child_module(ctx, &symbol);
 	let symbol_is_ambiguous = imported_symbol_path_count(ctx, &symbol) > 1;
 	let should_keep_alive = (!symbol_is_referenced_outside_use(ctx, &symbol)
 		|| symbol_is_ambiguous)
-		&& (!has_child_module_declarations || alias.as_deref().map(str::trim) == Some("_"));
+		&& (!(has_child_module_declarations || has_dependent_inline_child)
+			|| alias.as_deref().map(str::trim) == Some("_"));
 	let rewritten = if should_keep_alive { format!("{base} as _") } else { base.to_owned() };
 	let changed = compact_path_for_match(leaf) != compact_path_for_match(&rewritten);
 	let mut symbols = HashSet::new();
@@ -7781,7 +7789,7 @@ fn collect_file_module_references(
 		let Some(tree) = item.use_tree() else {
 			continue;
 		};
-		let tree_path = compact_path_for_match(&tree.syntax().text().to_string());
+		let tree_path = tree.syntax().text().to_string();
 		let paths = imported_reference_paths_from_use_path(&tree_path);
 
 		for path in paths {
@@ -7960,7 +7968,7 @@ fn symbol_referenced_by_descendant(
 		let Some(tree) = use_item.use_tree() else {
 			continue;
 		};
-		let tree_path = compact_path_for_match(&tree.syntax().text().to_string());
+		let tree_path = tree.syntax().text().to_string();
 		let paths = imported_reference_paths_from_use_path(&tree_path);
 
 		for path in paths {
