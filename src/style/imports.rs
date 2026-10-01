@@ -2573,7 +2573,7 @@ fn normalize_trait_keep_alive_leaf(
 	let symbol_is_ambiguous = imported_symbol_path_count(ctx, &symbol) > 1;
 	let should_keep_alive = (!symbol_is_referenced_outside_use(ctx, &symbol)
 		|| symbol_is_ambiguous)
-		&& !has_child_module_declarations;
+		&& (!has_child_module_declarations || alias.as_deref().map(str::trim) == Some("_"));
 	let rewritten = if should_keep_alive { format!("{base} as _") } else { base.to_owned() };
 	let changed = compact_path_for_match(leaf) != compact_path_for_match(&rewritten);
 	let mut symbols = HashSet::new();
