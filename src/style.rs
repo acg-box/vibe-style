@@ -10251,4 +10251,26 @@ impl Choice { pub fn value() -> Self { Self::One } }
 
 		assert_eq!(rewritten, repeated);
 	}
+	#[test]
+	fn module_layout_preserves_import_group_separators() {
+		let original = "struct Thing;\n\n#[cfg(test)]\nmod tests {\n    use std::fmt::{Debug, Display};\n    use std::path::Path;\n\n    use crate::Thing;\n\n    fn accepts<T: Debug + Display>(_: &Path, _: &Thing) {}\n}\n";
+		let path = Path::new("src/lib.rs");
+		let ctx = shared::read_file_context_from_text(path, original.into())
+			.expect("Parse.")
+			.expect("Context.");
+		let mut violations = Vec::new();
+		let mut edits = Vec::new();
+
+		module::check_module_order(&ctx, &mut violations, &mut edits, true);
+
+		assert!(edits.is_empty(), "{edits:?}");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(path, original, true).expect("Apply fixes.");
+		let (repeated, count, _, _) =
+			style::apply_fix_passes(path, &rewritten, true).expect("Repeat fixes.");
+
+		assert_eq!(rewritten, repeated);
+		assert_eq!(count, 0, "Import grouping and module layout must not oscillate.");
+	}
 }
