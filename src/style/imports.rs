@@ -7332,6 +7332,7 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 		return true;
 	};
 	let binding = crate_absolute_use_path(owner, symbol);
+	let binding_prefix = format!("{binding}::");
 	let glob = crate_absolute_use_path(owner, "*");
 	let relative_binding = owner.last().map(|name| format!("{name}::{symbol}"));
 	let Some(external) = ctx
@@ -7342,7 +7343,11 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 		return true;
 	};
 
-	if external.contains(&binding) || external.contains(&glob) {
+	if external.contains(&glob)
+		|| external
+			.iter()
+			.any(|reference| reference == &binding || reference.starts_with(&binding_prefix))
+	{
 		return true;
 	}
 

@@ -10167,6 +10167,8 @@ impl Choice { pub fn value() -> Self { Self::One } }
 				"use super::theme; pub fn read() -> usize { std::mem::size_of::<theme::Marker>() }",
 				"use super::*; pub fn read() -> usize { std::mem::size_of::<theme::Marker>() }",
 				"use crate::parent::theme; pub fn read() -> usize { std::mem::size_of::<theme::Marker>() }",
+				"use super::theme::Marker; pub fn read() -> usize { std::mem::size_of::<Marker>() }",
+				"use crate::parent::{theme::Marker}; pub fn read() -> usize { std::mem::size_of::<Marker>() }",
 			] {
 				let original = format!(
 					"{imports}\n#[path = \"consumer.rs\"] mod child;\npub fn marker() -> Marker {{ Marker }}\npub fn read() -> usize {{ child::read() }}\n"
