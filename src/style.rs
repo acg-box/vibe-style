@@ -1992,6 +1992,7 @@ pub mod api_code {
 
 		for child in [
 			"use super::*; pub fn run() { let _ = read(\"fixture\"); }",
+			"use super::{self, *}; pub fn run() { let _ = read(\"fixture\"); }",
 			"use super::read as load; pub fn run() { let _ = load(\"fixture\"); }",
 			"pub fn run() { let _ = super::read(\"fixture\"); }",
 			"use crate::read as load; pub fn run() { let _ = load(\"fixture\"); }",
@@ -2018,6 +2019,54 @@ pub mod api_code {
 			edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-004"),
 			"Independent child must not block qualification."
 		);
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
+	fn import003_preserves_aliases_used_by_external_children() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-child-alias-{}-{now}", process::id()));
+		let src = root.join("src");
+		let parent = src.join("lib.rs");
+
+		fs::create_dir_all(&src).expect("Create source directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"child-alias-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(
+			&parent,
+			"use std::io::Error as State;\nmod child;\npub fn run() -> Option<State> { None }\n",
+		)
+		.expect("Write parent.");
+
+		for child in [
+			"use super::{self, *}; pub fn run() -> Option<State> { None }",
+			"pub fn run() -> Option<super::State> { None }",
+		] {
+			fs::write(src.join("child.rs"), child).expect("Write child.");
+
+			let ctx =
+				shared::read_file_context(&parent).expect("Read context.").expect("Have context.");
+			let (violations, edits) = style::collect_violations(&ctx, true);
+
+			assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-003"), "{child}");
+			assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-003" && !v.fixable));
+		}
+
+		fs::write(src.join("child.rs"), "pub fn run() -> Option<std::io::Error> { None }")
+			.expect("Write independent child.");
+
+		let ctx =
+			shared::read_file_context(&parent).expect("Read context.").expect("Have context.");
+		let (_, edits) = style::collect_violations(&ctx, true);
+
+		assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-003"));
 
 		fs::remove_dir_all(root).expect("Remove fixture.");
 	}

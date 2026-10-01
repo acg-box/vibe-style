@@ -2193,7 +2193,8 @@ fn apply_import003_non_keep_alive_alias_rule(
 	let mut referenced_aliases = Vec::new();
 	let mut rewrites = Vec::<(usize, usize, String)>::new();
 	let mut planned_ranges = Vec::<(usize, usize)>::new();
-	let mut fixable = true;
+	let mut fixable =
+		!aliases.iter().any(|(alias, _)| symbol_referenced_by_child_module(ctx, alias));
 
 	for (alias, qualified_path) in &aliases {
 		let referenced = symbol_is_referenced_outside_use(ctx, alias);
@@ -5540,17 +5541,20 @@ fn symbol_from_full_import_path(path: &str) -> Option<String> {
 }
 
 fn imported_full_paths_from_use_path(path: &str) -> Vec<String> {
+	imported_reference_paths_from_use_path(path)
+		.into_iter()
+		.filter(|path| !path.ends_with("::*"))
+		.collect()
+}
+
+fn imported_reference_paths_from_use_path(path: &str) -> Vec<String> {
 	let mut paths = Vec::new();
 
 	if !collect_full_paths_from_use_segment(path.trim(), &mut paths) {
 		return Vec::new();
 	}
 
-	paths
-		.into_iter()
-		.map(|path| path.replace(' ', ""))
-		.filter(|path| !path.is_empty() && !path.ends_with("::*"))
-		.collect()
+	paths.into_iter().map(|path| path.replace(' ', "")).filter(|path| !path.is_empty()).collect()
 }
 
 fn imported_self_full_paths_from_use_path(path: &str) -> HashSet<String> {
@@ -5671,6 +5675,8 @@ fn collect_full_paths_from_use_segment(segment: &str, out: &mut Vec<String>) -> 
 		return true;
 	}
 	if trimmed.ends_with("::*") {
+		out.push(trimmed.to_owned());
+
 		return true;
 	}
 
@@ -6999,11 +7005,7 @@ fn collect_file_module_references(
 			continue;
 		};
 		let tree_path = compact_path_for_match(&tree.syntax().text().to_string());
-		let mut paths = imported_full_paths_from_use_path(&tree_path);
-
-		if tree_path.ends_with("::*") {
-			paths.push(tree_path);
-		}
+		let paths = imported_reference_paths_from_use_path(&tree_path);
 
 		for path in paths {
 			record_module_reference(item.syntax(), owner, &path, references);
@@ -7081,11 +7083,7 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 			continue;
 		};
 		let tree_path = compact_path_for_match(&tree.syntax().text().to_string());
-		let mut paths = imported_full_paths_from_use_path(&tree_path);
-
-		if tree_path.ends_with("::*") {
-			paths.push(tree_path);
-		}
+		let paths = imported_reference_paths_from_use_path(&tree_path);
 
 		for path in paths {
 			let resolved = if let Some((depth, tail)) = leading_super_depth_and_tail(&path) {
