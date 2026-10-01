@@ -4523,6 +4523,50 @@ fn sample() {
 	}
 
 	#[test]
+	fn import007_coordinates_expansion_with_test_module_paths() {
+		let original = "pub mod helper { pub fn run() {} }\n#[cfg(test)]\nmod tests {\n use super::*;\n #[test] fn calls_helper() { super::helper::run(); }\n}\n";
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-glob-plan-{}-{now}", process::id()));
+		let path = root.join("src/lib.rs");
+
+		fs::create_dir_all(root.join("src")).expect("Create fixture directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname='glob-plan'\nversion='0.0.0'\nedition='2024'\n",
+		)
+		.expect("Write manifest.");
+		fs::write(&path, original).expect("Write fixture.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		assert!(!rewritten.contains("use super::*"), "{rewritten}");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let output = process::Command::new("rustc")
+			.arg("--edition=2024")
+			.arg("--test")
+			.arg("--emit=metadata")
+			.arg(&path)
+			.arg("-o")
+			.arg(root.join("fixture.rmeta"))
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(
+			output.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+
+	#[test]
 	fn import004_preserves_relative_parent_depth() {
 		let original =
 			"fn sample() { super::super::render(); wrapper!(super::super::super::render()); }";

@@ -908,6 +908,13 @@ fn check_cfg_test_module_import_rules(
 		let Some(module_body_text) = ctx.text.get(module_body_start..module_body_end) else {
 			continue;
 		};
+		// Re-plan the module after outer rules have expanded or resolved its imports.
+		let emit_edits = emit_edits
+			&& !edits.iter().any(|edit| {
+				matches!(edit.rule, "RUST-STYLE-IMPORT-007" | "RUST-STYLE-IMPORT-010")
+					&& edit.start >= module_body_start
+					&& edit.end <= module_body_end
+			});
 		let Ok(Some(module_ctx)) =
 			shared::read_file_context_from_text(&ctx.path, module_body_text.to_owned())
 		else {
