@@ -1901,6 +1901,53 @@ pub mod api_code {
 	}
 
 	#[test]
+	fn import010_respects_path_attribute_module_ownership() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Read timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-path-module-{}-{now}", process::id()));
+		let src = root.join("src");
+		let child = src.join("migration_tests.rs");
+		let original = "use super::APPLICATION_ID;\nfn fixture() -> u32 { APPLICATION_ID }\n";
+
+		fs::create_dir_all(&src).expect("Create source directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"path-module-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(src.join("lib.rs"), "mod migrations;\n").expect("Write root.");
+		fs::write(
+			src.join("migrations.rs"),
+			"const APPLICATION_ID: u32 = 1;\n#[cfg(test)]\n#[path = \"migration_tests.rs\"]\nmod tests;\n",
+		)
+		.expect("Write parent.");
+		fs::write(&child, original).expect("Write child.");
+
+		let ctx = shared::read_file_context(&child).expect("Read context.").expect("Have context.");
+		let (_, edits) = crate::style::collect_violations(&ctx, true);
+		let edits = edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-010").collect();
+		let mut rewritten = original.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("Apply path rewrite.");
+
+		assert!(rewritten.contains("use crate::migrations::APPLICATION_ID;"), "{rewritten}");
+
+		fs::write(
+			src.join("lib.rs"),
+			"mod migrations;\n#[path = \"migration_tests.rs\"]\nmod alternate;\n",
+		)
+		.expect("Write ambiguous ownership.");
+
+		let (_, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-010"));
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn import010_does_not_report_self_prefix_use() {
 		let original = r#"
 pub mod api_code {
