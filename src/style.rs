@@ -2962,6 +2962,54 @@ use serde::Deserialize;
 	}
 
 	#[test]
+	fn import003_preserves_explicit_keep_alive_with_external_child_modules() {
+		for imports in [
+			"use std::io::Read as _;",
+			"use std::io::{Read as _, Write as _};",
+			"use std::io::{Read as _, Write};",
+			"#[cfg(unix)] use std::os::unix::fs::MetadataExt as _;",
+		] {
+			let original = format!("mod child;\n\n{imports}\n");
+			let ctx = shared::read_file_context_from_text(
+				Path::new("import003_explicit_keep_alive_parent.rs"),
+				original,
+			)
+			.expect("context")
+			.expect("has ctx");
+			let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+			assert!(
+				!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-003"),
+				"must retain explicit keep-alive and named child imports: {imports}"
+			);
+			assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-003"));
+		}
+	}
+
+	#[test]
+	fn import003_restores_directly_referenced_trait_name_with_external_child_modules() {
+		let original = "mod child;\n\nuse std::io::Read as _;\n\nfn sample<T: Read>() {}\n";
+		let ctx = shared::read_file_context_from_text(
+			Path::new("import003_referenced_trait_parent.rs"),
+			original.to_owned(),
+		)
+		.expect("context")
+		.expect("has ctx");
+		let (violations, edits) = crate::style::collect_violations(&ctx, true);
+
+		assert!(violations.iter().any(|v| {
+			v.rule == "RUST-STYLE-IMPORT-003" && v.message.contains("referenced directly")
+		}));
+
+		let mut rewritten = original.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("apply edits");
+
+		assert!(rewritten.contains("use std::io::Read;"));
+		assert!(!rewritten.contains("Read as _"));
+	}
+
+	#[test]
 	fn import003_fix_dedupes_plain_and_keep_alive_trait_imports_when_referenced() {
 		let original = r#"
 use serde::{Deserialize, Deserialize as _, Serialize, Serialize as _};
