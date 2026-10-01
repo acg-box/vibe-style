@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ra_ap_syntax::{
 	AstNode,
-	ast::{HasAttrs, HasVisibility, Item, ItemList, MacroCall, Module},
+	ast::{HasAttrs, HasName, HasVisibility, Item, ItemList, MacroCall, Module},
 };
 use regex::Regex;
 
@@ -10,6 +10,7 @@ use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation}
 
 #[derive(Clone)]
 struct ModuleReorderEntry {
+	type_owner: Option<String>,
 	order: usize,
 	line: usize,
 	kind: TopKind,
@@ -23,6 +24,7 @@ struct ModuleReorderEntry {
 
 #[derive(Clone)]
 struct ScopeTopItem {
+	type_owner: Option<String>,
 	kind: TopKind,
 	line: usize,
 	start_offset: usize,
@@ -641,6 +643,14 @@ fn collect_scope_top_items(ctx: &FileContext, item_list: &ItemList) -> Vec<Scope
 		let hoist_for_macro_scope = scope_item_should_hoist_for_macro_scope(item_list, &item);
 
 		items.push(ScopeTopItem {
+			type_owner: match &item {
+				Item::Struct(node) => node.name().map(|name| name.text().to_string()),
+				Item::Enum(node) => node.name().map(|name| name.text().to_string()),
+				Item::Impl(node) => node.self_ty().and_then(|ty| {
+					shared::extract_impl_target_name(&ty.syntax().text().to_string())
+				}),
+				_ => None,
+			},
 			kind: scope_item_kind(&item),
 			line,
 			start_offset,
@@ -863,6 +873,7 @@ fn collect_scope_module_reorder_entries(
 		let slice = ctx.text.get(item.start_offset..item.end_offset)?;
 
 		entries.push(ModuleReorderEntry {
+			type_owner: item.type_owner.clone(),
 			order: offset,
 			line: item.line,
 			kind: item.kind,
@@ -1024,6 +1035,13 @@ fn collect_module_reorder_entries(
 		let slice = ctx.text.get(start..end_offset)?;
 
 		entries.push(ModuleReorderEntry {
+			type_owner: if item.kind == TopKind::Impl {
+				item.impl_target.clone()
+			} else if matches!(item.kind, TopKind::Struct | TopKind::Enum) {
+				item.name.clone()
+			} else {
+				None
+			},
 			order: offset,
 			line: item.line,
 			kind: item.kind,
@@ -1109,6 +1127,27 @@ fn collect_module_reorder_lines(entries: &[ModuleReorderEntry]) -> ModuleReorder
 	out
 }
 
+fn adjacent_type_anchors(entries: &[ModuleReorderEntry]) -> Vec<usize> {
+	let mut anchor: Option<&ModuleReorderEntry> = None;
+
+	entries
+		.iter()
+		.map(|entry| {
+			if entry.kind == TopKind::Impl
+				&& let Some(owner) = anchor
+				&& owner.type_owner.is_some()
+				&& owner.type_owner == entry.type_owner
+			{
+				return owner.order;
+			}
+
+			anchor = matches!(entry.kind, TopKind::Struct | TopKind::Enum).then_some(entry);
+
+			entry.order
+		})
+		.collect()
+}
+
 fn sorted_module_reorder_entries(entries: &[ModuleReorderEntry]) -> Vec<ModuleReorderEntry> {
 	let mut kind_order = HashMap::new();
 	let mut visibility_batch_order_by_kind: HashMap<(TopKind, String), usize> = HashMap::new();
@@ -1132,9 +1171,12 @@ fn sorted_module_reorder_entries(entries: &[ModuleReorderEntry]) -> Vec<ModuleRe
 		});
 	}
 
+	let anchors = adjacent_type_anchors(entries);
 	let mut ordered = entries.to_owned();
 
-	ordered.sort_by_key(|entry| {
+	ordered.sort_by_key(|original| {
+		let entry = &entries[anchors[original.order]];
+
 		(
 			if entry.hoist_for_macro_scope { 0 } else { 1 },
 			entry.bucket,
@@ -1145,7 +1187,7 @@ fn sorted_module_reorder_entries(entries: &[ModuleReorderEntry]) -> Vec<ModuleRe
 				.copied()
 				.unwrap_or(usize::MAX),
 			if entry.kind == TopKind::Fn && entry.is_async { 1 } else { 0 },
-			entry.order,
+			original.order,
 		)
 	});
 
@@ -1164,8 +1206,12 @@ fn build_module_reorder_replacement(original: &str, ordered: &[ModuleReorderEntr
 				entry.kind,
 				&entry.visibility,
 			);
+			let is_first_impl = matches!(prev.kind, TopKind::Struct | TopKind::Enum)
+				&& entry.kind == TopKind::Impl
+				&& prev.type_owner.is_some()
+				&& prev.type_owner == entry.type_owner;
 
-			if is_compact_group {
+			if is_compact_group || is_first_impl {
 				replacement.push('\n');
 			} else {
 				replacement.push_str("\n\n");
