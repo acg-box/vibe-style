@@ -10,6 +10,7 @@ use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation}
 
 #[derive(Clone)]
 struct ModuleReorderEntry {
+	has_blank_before: bool,
 	type_owner: Option<String>,
 	order: usize,
 	line: usize,
@@ -873,6 +874,10 @@ fn collect_scope_module_reorder_entries(
 		let slice = ctx.text.get(item.start_offset..item.end_offset)?;
 
 		entries.push(ModuleReorderEntry {
+			has_blank_before: offset > 0
+				&& item.line
+					> shared::line_from_offset(&ctx.line_starts, run[offset - 1].end_offset - 1)
+						+ 1,
 			type_owner: item.type_owner.clone(),
 			order: offset,
 			line: item.line,
@@ -1035,6 +1040,7 @@ fn collect_module_reorder_entries(
 		let slice = ctx.text.get(start..end_offset)?;
 
 		entries.push(ModuleReorderEntry {
+			has_blank_before: offset > 0 && item.start_line > run[offset - 1].end_line + 1,
 			type_owner: if item.kind == TopKind::Impl {
 				item.impl_target.clone()
 			} else if matches!(item.kind, TopKind::Struct | TopKind::Enum) {
@@ -1210,8 +1216,12 @@ fn build_module_reorder_replacement(original: &str, ordered: &[ModuleReorderEntr
 				&& entry.kind == TopKind::Impl
 				&& prev.type_owner.is_some()
 				&& prev.type_owner == entry.type_owner;
+			let is_compact_import_group = prev.kind == TopKind::Use
+				&& entry.kind == TopKind::Use
+				&& prev.order + 1 == entry.order
+				&& !entry.has_blank_before;
 
-			if is_compact_group || is_first_impl {
+			if is_compact_group || is_first_impl || is_compact_import_group {
 				replacement.push('\n');
 			} else {
 				replacement.push_str("\n\n");
