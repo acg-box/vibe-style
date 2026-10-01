@@ -5461,6 +5461,10 @@ fn unqualified_macro_token_symbol_rewrites(
 	let mut rewrites = Vec::new();
 
 	for macro_call in ctx.source_file.syntax().descendants().filter_map(MacroCall::cast) {
+		if syntax_is_inside_cfg_test_module(macro_call.syntax()) {
+			continue;
+		}
+
 		let Some(token_tree) = macro_call.token_tree() else {
 			continue;
 		};
