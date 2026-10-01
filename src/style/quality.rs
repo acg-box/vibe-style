@@ -9,7 +9,10 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-use crate::style::shared::{self, Edit, FileContext, SNAKE_CASE_RE, Violation};
+use crate::style::{
+	imports,
+	shared::{self, Edit, FileContext, SNAKE_CASE_RE, Violation},
+};
 
 const NUMERIC_SUFFIXES: [&str; 14] = [
 	"usize", "isize", "u128", "i128", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8", "f64",
@@ -111,6 +114,8 @@ pub(crate) fn check_expect_unwrap(
 		return;
 	}
 
+	let mut external_test_only = None;
+
 	for method_call in ctx.source_file.syntax().descendants().filter_map(MethodCallExpr::cast) {
 		let Some(name) = method_call.name_ref().map(|name| name.text().to_string()) else {
 			continue;
@@ -121,6 +126,10 @@ pub(crate) fn check_expect_unwrap(
 		}
 		if method_call_in_test_context(&method_call) {
 			continue;
+		}
+		if *external_test_only.get_or_insert_with(|| imports::declared_file_is_test_only(&ctx.path))
+		{
+			return;
 		}
 
 		let line = method_call_line(ctx, &method_call);
