@@ -1549,7 +1549,8 @@ fn find_crate_dir(path: &std::path::Path) -> Option<PathBuf> {
 }
 
 fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Option<Vec<String>> {
-	let mut module_path = declared_file_module_path(&ctx.path)?;
+	let mut module_path =
+		ctx.declared_module_path.get_or_init(|| declared_file_module_path(&ctx.path)).clone()?;
 	let mut inline_ancestors = use_item
 		.syntax()
 		.ancestors()
@@ -6864,11 +6865,13 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 		return false;
 	}
 
-	let Some(owner) = declared_file_module_path(&ctx.path) else {
+	let Some(owner) =
+		ctx.declared_module_path.get_or_init(|| declared_file_module_path(&ctx.path)).as_ref()
+	else {
 		return true;
 	};
-	let binding = crate_absolute_use_path(&owner, symbol);
-	let glob = crate_absolute_use_path(&owner, "*");
+	let binding = crate_absolute_use_path(owner, symbol);
+	let glob = crate_absolute_use_path(owner, "*");
 	let relative_binding = owner.last().map(|name| format!("{name}::{symbol}"));
 
 	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {

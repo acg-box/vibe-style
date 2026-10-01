@@ -1996,6 +1996,8 @@ pub mod api_code {
 		)
 		.expect("Write ambiguous ownership.");
 
+		let ctx =
+			shared::read_file_context(&child).expect("Refresh context.").expect("Have context.");
 		let (_, edits) = crate::style::collect_violations(&ctx, true);
 
 		assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-010"));

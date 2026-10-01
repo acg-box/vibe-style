@@ -4,7 +4,7 @@ use std::{
 	io::Write as _,
 	path::{Path, PathBuf},
 	process::{Command, Stdio},
-	sync::{LazyLock, Mutex},
+	sync::{LazyLock, Mutex, OnceLock},
 };
 
 use cargo_metadata::{MetadataCommand, Package, TargetKind};
@@ -197,6 +197,7 @@ pub(crate) struct FileContext {
 	pub(crate) line_starts: Vec<usize>,
 	pub(crate) source_file: SourceFile,
 	pub(crate) top_items: Vec<TopItem>,
+	pub(crate) declared_module_path: OnceLock<Option<Vec<String>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -433,6 +434,7 @@ pub(crate) fn read_file_context_from_text(
 		line_starts,
 		source_file,
 		top_items,
+		declared_module_path: OnceLock::new(),
 	}))
 }
 
