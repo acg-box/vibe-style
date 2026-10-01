@@ -18,7 +18,7 @@ static PURE_TYPEALIAS_RE: LazyLock<Regex> = LazyLock::new(|| {
 	.expect("Compile Swift pure typealias regex.")
 });
 static TRY_FORCE_RE: LazyLock<Regex> =
-	LazyLock::new(|| Regex::new(r"\btry\s*!").expect("Compile Swift try-force regex."));
+	LazyLock::new(|| Regex::new(r"\btry!").expect("Compile Swift try-force regex."));
 static DECIMAL_INTEGER_RE: LazyLock<Regex> = LazyLock::new(|| {
 	Regex::new(r"\b[0-9][0-9_]*\b").expect("Compile Swift decimal integer regex.")
 });
@@ -339,10 +339,12 @@ fn has_force_operator(line: &str) -> bool {
 			continue;
 		}
 
-		let previous = chars[..idx].iter().rev().find(|candidate| !candidate.is_whitespace());
+		// Postfix unwraps are adjacent to the expression. Looking past whitespace
+		// mistakes prefix negation after `guard`, `if`, or `return` for an unwrap.
+		let previous = idx.checked_sub(1).and_then(|previous| chars.get(previous));
 
 		if previous.is_some_and(|prev| {
-			prev.is_ascii_alphanumeric() || matches!(prev, '_' | ')' | ']' | '}')
+			prev.is_alphanumeric() || matches!(prev, '_' | '`' | ')' | ']' | '}')
 		}) {
 			return true;
 		}
@@ -433,6 +435,43 @@ func testExample() {
 		);
 
 		assert!(!rules.contains("SWIFT-STYLE-RUNTIME-001"));
+	}
+
+	#[test]
+	fn prefix_negation_is_not_a_force_operator() {
+		for line in [
+			"guard !changes.isEmpty || frames != nextFrames else { return }",
+			"if !enabled { return }",
+			"return !ready",
+			"while !finished { tick() }",
+			"let ready = !failed",
+			"let ready = try !check()",
+		] {
+			assert!(
+				!rules_for(Path::new("Sources/App/Logic.swift"), line)
+					.contains("SWIFT-STYLE-RUNTIME-001"),
+				"{line}"
+			);
+		}
+	}
+
+	#[test]
+	fn postfix_unwraps_and_forced_keywords_remain_reported() {
+		for line in [
+			"let x = value!",
+			"let x = get()!",
+			"let x = items[0]!",
+			"let x = café!",
+			"let x = `default`!",
+			"let x = value as! Kind",
+			"let x = try! get()",
+		] {
+			assert!(
+				rules_for(Path::new("Sources/App/Logic.swift"), line)
+					.contains("SWIFT-STYLE-RUNTIME-001"),
+				"{line}"
+			);
+		}
 	}
 
 	#[test]
