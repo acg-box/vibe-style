@@ -4529,14 +4529,10 @@ fn collect_import008_from_paths(
 			continue;
 		}
 
-		let replacement =
-			candidate.path.segment().map(|segment| segment.syntax().text().to_string());
-		let Some(replacement) = replacement else {
-			continue;
-		};
+		let replacement = candidate.name_ref.text().to_string();
 		let range = candidate.path.syntax().text_range();
 		let start = usize::from(range.start());
-		let end = usize::from(range.end());
+		let end = usize::from(candidate.name_ref.syntax().text_range().end());
 
 		if start >= end || !seen_ranges.insert((start, end)) {
 			continue;
@@ -4609,7 +4605,7 @@ fn collect_import008_from_type_like_value_paths(
 		let import_path = segments.join("::");
 		let range = candidate.path.syntax().text_range();
 		let start = usize::from(range.start());
-		let end = usize::from(range.end());
+		let end = usize::from(candidate.name_ref.syntax().text_range().end());
 
 		if start >= end || !seen_ranges.insert((start, end)) {
 			continue;
@@ -4695,7 +4691,12 @@ fn collect_import008_from_value_receivers(
 		let Some(receiver_leaf) = segments.get(segments.len().saturating_sub(2)) else {
 			continue;
 		};
-		let Some(leaf) = segments.last() else {
+		let Some(receiver_name) = candidate
+			.path
+			.qualifier()
+			.and_then(|receiver| receiver.segment())
+			.and_then(|segment| segment.name_ref())
+		else {
 			continue;
 		};
 
@@ -4709,10 +4710,10 @@ fn collect_import008_from_value_receivers(
 			continue;
 		}
 
-		let replacement = format!("{receiver_leaf}::{leaf}");
+		let replacement = receiver_leaf.clone();
 		let range = candidate.path.syntax().text_range();
 		let start = usize::from(range.start());
-		let end = usize::from(range.end());
+		let end = usize::from(receiver_name.syntax().text_range().end());
 
 		if start >= end || !seen_ranges.insert((start, end)) {
 			continue;
