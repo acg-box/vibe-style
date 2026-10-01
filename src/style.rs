@@ -1526,6 +1526,59 @@ mod tests {
 	}
 
 	#[test]
+	fn runtime_rules_follow_external_test_module_owners() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-test-owner-{}-{now}", process::id()));
+		let source = root.join("src");
+		let helper = source.join("support.rs");
+		let text = "pub fn fixture(value: Option<usize>) { let _ = value.unwrap(); let _ = value.expect(\"\"); }";
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"test-owner-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(&helper, text).expect("Write helper.");
+		fs::create_dir_all(source.join("nested")).expect("Create nested directory.");
+		fs::write(source.join("bridge.rs"), "#[path = \"support.rs\"] mod fixture;")
+			.expect("Write intermediate owner.");
+
+		for (owner, production) in [
+			("#[cfg(test)]\n#[path = \"support.rs\"] mod fixture;", false),
+			("#[cfg(test)] mod support;", false),
+			("#[cfg(test)] mod bridge;", false),
+			("#[cfg(test)] mod nested { #[path = \"../support.rs\"] mod fixture; }", false),
+			(
+				"#[cfg(test)]\n#[path = \"support.rs\"] mod fixture;\n#[path = \"support.rs\"] mod production;",
+				true,
+			),
+			("#[cfg(not(test))] mod support;", true),
+			("#[cfg(any(test, feature = \"extra\"))] mod support;", true),
+		] {
+			fs::write(source.join("lib.rs"), owner).expect("Write owner.");
+
+			let ctx = shared::read_file_context_from_text(&helper, text.to_owned())
+				.expect("Read helper.")
+				.expect("Get context.");
+			let (violations, _) = style::collect_violations(&ctx, false);
+
+			for rule in ["RUST-STYLE-RUNTIME-001", "RUST-STYLE-RUNTIME-002"] {
+				assert_eq!(
+					violations.iter().any(|v| v.rule == rule),
+					production,
+					"{owner}: {rule}"
+				);
+			}
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn style_fixes_preserve_serde_default_contracts() {
 		// Option fields can still need defaults for sequence input, custom defaults,
 		// and custom deserializers. Their type alone cannot prove redundancy.
