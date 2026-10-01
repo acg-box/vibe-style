@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ra_ap_syntax::{
 	AstNode, TextRange,
-	ast::{self, GenericParamList, HasModuleItem, HasTypeBounds},
+	ast::{AssocItem, GenericParam, GenericParamList, HasModuleItem, HasTypeBounds, Item},
 };
 use regex::Regex;
 
@@ -49,7 +49,7 @@ pub(crate) fn check_impl_rules(
 	emit_edits: bool,
 ) {
 	for item in ctx.source_file.items() {
-		let ast::Item::Impl(impl_item) = item else {
+		let Item::Impl(impl_item) = item else {
 			continue;
 		};
 
@@ -78,7 +78,7 @@ pub(crate) fn check_impl_rules(
 		};
 
 		for assoc in items.assoc_items() {
-			let ast::AssocItem::Fn(function) = assoc else {
+			let AssocItem::Fn(function) = assoc else {
 				continue;
 			};
 			let signature_text = if let Some(body) = function.body() {
@@ -133,7 +133,7 @@ pub(crate) fn check_impl_rules(
 pub(crate) fn check_inline_trait_bounds(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	for item in ctx.source_file.syntax().descendants().filter_map(GenericParamList::cast) {
 		for param in item.generic_params() {
-			if let ast::GenericParam::TypeParam(type_param) = param
+			if let GenericParam::TypeParam(type_param) = param
 				&& type_param.type_bound_list().is_some()
 			{
 				let line = shared::line_from_offset(

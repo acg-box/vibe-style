@@ -3,7 +3,7 @@ use std::{collections::HashSet, path::Path};
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
 	ast::{
-		self, Attr, Fn, HasArgList, HasAttrs, HasModuleItem, HasName, Literal, MacroCall,
+		Attr, Fn, HasArgList, HasAttrs, HasModuleItem, HasName, Item, Literal, MacroCall,
 		MethodCallExpr, Module,
 	},
 };
@@ -278,7 +278,7 @@ pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation
 		}
 	}
 	for item in ctx.source_file.items() {
-		let ast::Item::Module(module) = item else {
+		let Item::Module(module) = item else {
 			continue;
 		};
 		let Some(name) = module.name().map(|name| name.text().to_string()) else {
@@ -297,7 +297,7 @@ pub(crate) fn check_test_rules(ctx: &FileContext, violations: &mut Vec<Violation
 
 		let contains_behavior_tests = module.item_list().is_some_and(|list| {
 			list.items().any(|item| {
-				if let ast::Item::Fn(function) = item {
+				if let Item::Fn(function) = item {
 					function.attrs().any(|attr| {
 						attr.as_simple_atom().map(|atom| atom.as_str() == "test").unwrap_or(false)
 					})

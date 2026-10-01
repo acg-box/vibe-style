@@ -1,6 +1,6 @@
 use ra_ap_syntax::{
 	AstNode,
-	ast::{self, HasAttrs, HasModuleItem, HasName, Module},
+	ast::{HasAttrs, HasModuleItem, HasName, Item, Module},
 };
 
 use crate::style::{
@@ -34,7 +34,7 @@ pub(crate) fn check_test_module_super_glob(
 		};
 
 		for item in item_list.items() {
-			let ast::Item::Use(use_item) = item else {
+			let Item::Use(use_item) = item else {
 				continue;
 			};
 			let Some(use_tree) = use_item.use_tree() else {

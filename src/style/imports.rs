@@ -9,8 +9,8 @@ use std::{
 use ra_ap_syntax::{
 	self, AstNode, AstToken, Edition, SyntaxKind, SyntaxNode, TextSize,
 	ast::{
-		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Module, PathExpr,
-		PathPat, PathType, RecordExpr, RecordPat, TokenTree, Use,
+		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Meta, Module,
+		PathExpr, PathPat, PathType, RecordExpr, RecordPat, TokenTree, TupleStructPat, Use,
 	},
 };
 use regex::Regex;
@@ -3960,7 +3960,7 @@ fn collect_import011_candidates(
 		}
 
 		let Some(token_tree) = (match meta {
-			ast::Meta::TokenTreeMeta(meta) => meta.token_tree(),
+			Meta::TokenTreeMeta(meta) => meta.token_tree(),
 			_ => None,
 		}) else {
 			continue;
@@ -4907,6 +4907,7 @@ fn is_value_path_usage(path: &ast::Path) -> bool {
 	path.syntax().ancestors().any(|node| {
 		PathExpr::cast(node.clone()).is_some()
 			|| PathPat::cast(node.clone()).is_some()
+			|| TupleStructPat::cast(node.clone()).is_some()
 			|| RecordExpr::cast(node.clone()).is_some()
 			|| RecordPat::cast(node).is_some()
 	})
@@ -5180,7 +5181,7 @@ fn unqualified_derive_attr_symbol_rewrites(
 		}
 
 		let Some(token_tree) = (match meta {
-			ast::Meta::TokenTreeMeta(meta) => meta.token_tree(),
+			Meta::TokenTreeMeta(meta) => meta.token_tree(),
 			_ => None,
 		}) else {
 			continue;
