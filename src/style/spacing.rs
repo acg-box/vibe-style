@@ -406,6 +406,8 @@ fn apply_statement_pair_spacing_rule(
 		return;
 	}
 
+	let replacement = single_blank_spacing_replacement(&ctx.lines, between_start, next_start);
+
 	push_spacing_violation_and_edit(
 		ctx,
 		violations,
@@ -415,10 +417,10 @@ fn apply_statement_pair_spacing_rule(
 		"RUST-STYLE-SPACE-003",
 		"Insert exactly one blank line between different statement types.",
 		pair.blank_count != 1,
-		pair.can_autofix_blank_only,
+		replacement.is_some(),
 		between_start,
 		next_start,
-		"\n",
+		replacement.as_deref().unwrap_or_default(),
 	);
 }
 
@@ -468,7 +470,8 @@ fn check_return_like_spacing(
 		let (ret_start, ret_end, _) = &statements[*idx];
 		let between = &ctx.lines[prev_end + 1..*ret_start];
 		let blank_count = between.iter().filter(|line| line.trim().is_empty()).count();
-		let can_autofix = between_is_blank_only(&ctx.lines, prev_end + 1, *ret_start);
+		let replacement = single_blank_spacing_replacement(&ctx.lines, prev_end + 1, *ret_start);
+		let can_autofix = replacement.is_some();
 
 		if blank_count == 1 {
 			continue;
@@ -496,7 +499,7 @@ fn check_return_like_spacing(
 				ctx,
 				prev_end + 1,
 				*ret_start,
-				"\n",
+				replacement.as_deref().unwrap_or_default(),
 				"RUST-STYLE-SPACE-004",
 			) {
 			edits.push(edit);
@@ -1316,6 +1319,20 @@ fn between_same_type_can_autofix(lines: &[String], start: usize, end: usize) -> 
 	}
 
 	lines[start..end].iter().all(|line| line.trim().is_empty() || is_metadata_line(line))
+}
+
+fn single_blank_spacing_replacement(lines: &[String], start: usize, end: usize) -> Option<String> {
+	if between_is_blank_only(lines, start, end) {
+		return Some("\n".to_owned());
+	}
+	if !between_same_type_can_autofix(lines, start, end)
+		|| lines[start..end].iter().any(|line| line.trim().is_empty())
+	{
+		return None;
+	}
+
+	// Insert before metadata without rewriting comment or attribute contents.
+	Some(format!("\n{}\n", lines[start..end].join("\n")))
 }
 
 fn same_type_replacement_without_blank_lines(lines: &[String], start: usize, end: usize) -> String {
