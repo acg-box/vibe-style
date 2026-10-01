@@ -11,7 +11,7 @@ use cargo_metadata::{MetadataCommand, Package, TargetKind};
 use color_eyre::{Result, eyre};
 use ra_ap_syntax::{
 	AstNode, Edition, SourceFile, TextRange,
-	ast::{self, HasAttrs, HasModuleItem, HasName, HasVisibility, Item},
+	ast::{self, HasAttrs, HasModuleItem, HasName, HasVisibility},
 };
 use regex::Regex;
 
@@ -901,7 +901,7 @@ fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
 	None
 }
 
-fn classify_top_kind(item: &Item) -> TopKind {
+fn classify_top_kind(item: &ra_ap_syntax::ast::Item) -> TopKind {
 	match item {
 		ast::Item::Module(_) => TopKind::Mod,
 		ast::Item::Use(_) => TopKind::Use,
@@ -919,7 +919,7 @@ fn classify_top_kind(item: &Item) -> TopKind {
 	}
 }
 
-fn item_name(item: &Item) -> Option<String> {
+fn item_name(item: &ra_ap_syntax::ast::Item) -> Option<String> {
 	match item {
 		ast::Item::Module(node) => node.name().map(|name| name.text().to_string()),
 		ast::Item::TypeAlias(node) => node.name().map(|name| name.text().to_string()),
@@ -933,17 +933,17 @@ fn item_name(item: &Item) -> Option<String> {
 	}
 }
 
-fn item_visibility_is_pub(item: &Item) -> bool {
+fn item_visibility_is_pub(item: &ra_ap_syntax::ast::Item) -> bool {
 	item_visibility_text(item).is_some()
 }
 
-fn item_visibility_key(item: &Item) -> String {
+fn item_visibility_key(item: &ra_ap_syntax::ast::Item) -> String {
 	item_visibility_text(item)
 		.map(|text| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>())
 		.unwrap_or_default()
 }
 
-fn item_visibility_text(item: &Item) -> Option<String> {
+fn item_visibility_text(item: &ra_ap_syntax::ast::Item) -> Option<String> {
 	match item {
 		ast::Item::Module(node) =>
 			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
