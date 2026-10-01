@@ -4528,6 +4528,108 @@ fn sample() {
 	}
 
 	#[test]
+	fn import_rewrites_preserve_descendant_bindings_and_module_aliases() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-descendants-{}-{now}", process::id()));
+		let source = root.join("src");
+		let outer = source.join("outer.rs");
+
+		fs::create_dir_all(&source).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"descendant-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(source.join("lib.rs"), "mod palette; mod outer;").expect("Write root.");
+		fs::write(source.join("palette.rs"), "pub struct Shade; pub fn tone() -> u8 { 1 }")
+			.expect("Write provider.");
+
+		for (original, child) in [
+			(
+				"macro_rules! local { () => { struct Shade; }; }\nlocal!();\nuse crate::palette::*;\n#[path = \"child.rs\"] mod child;\nfn sample() -> u8 { tone() }",
+				"#[test] fn preserved() { let _ = crate::outer::Shade; }",
+			),
+			(
+				"use crate::palette::*;\n#[path = \"child.rs\"] mod child;\nfn sample() -> u8 { tone() }",
+				"use crate::outer::Shade; #[test] fn preserved() { let _ = Shade; }",
+			),
+			(
+				"use crate::palette::*;\n#[path = \"child.rs\"] mod child;\nfn sample() -> u8 { tone() }",
+				"use crate::outer::*; #[test] fn preserved() { let _ = Shade; }",
+			),
+			(
+				"use std::cmp::max;\n#[path = \"child.rs\"] mod child;\nfn sample() -> i32 { max(1, 2) }",
+				"use crate::outer as api; #[test] fn preserved() { assert_eq!(api::max(3, 4), 4); }",
+			),
+			(
+				"use std::cmp::max;\n#[path = \"child.rs\"] mod child;\nfn sample() -> i32 { max(1, 2) }",
+				"use crate::{outer}; #[test] fn preserved() { assert_eq!(outer::max(3, 4), 4); }",
+			),
+		] {
+			fs::write(&outer, original).expect("Write owner.");
+			fs::write(source.join("child.rs"), child).expect("Write child.");
+
+			let (rewritten, _, _, _) =
+				style::apply_fix_passes(&outer, original, true).expect("Fix owner.");
+
+			fs::write(&outer, &rewritten).expect("Write fixed owner.");
+
+			let binary = root.join("fixture");
+			let compiled = process::Command::new("rustc")
+				.args(["--edition=2024", "--test"])
+				.arg(source.join("lib.rs"))
+				.arg("-o")
+				.arg(&binary)
+				.output()
+				.expect("Compile fixture.");
+
+			assert!(
+				compiled.status.success(),
+				"{child}\n{rewritten}\n{}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+
+			let executed = process::Command::new(&binary).output().expect("Run fixture.");
+
+			assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+			assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+		}
+
+		let provider = "#[cfg(test)] use std::io::Read as _;\npub struct Token;\n#[path = \"child.rs\"] mod child;";
+		let child = "use crate::outer::*; #[test] fn preserved() { let _ = Token; assert_eq!(std::io::empty().read(&mut []).unwrap(), 0); }";
+		let child_path = source.join("child.rs");
+
+		fs::write(&outer, provider).expect("Write anonymous trait provider.");
+		fs::write(&child_path, child).expect("Write anonymous trait consumer.");
+
+		let (rewritten, _, _, _) = style::apply_fix_passes(&child_path, child, true)
+			.expect("Fix anonymous trait consumer.");
+
+		assert!(!rewritten.contains("::*"), "{rewritten}");
+
+		fs::write(&child_path, &rewritten).expect("Write fixed trait consumer.");
+
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--test"])
+			.arg(source.join("lib.rs"))
+			.arg("-o")
+			.arg(root.join("fixture"))
+			.output()
+			.expect("Compile trait fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn crate_glob_expansion_preserves_external_traits_and_conditions() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
