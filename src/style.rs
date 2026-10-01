@@ -1389,7 +1389,8 @@ mod tests {
 	use ra_ap_syntax::{AstNode as _, ast::Use};
 
 	use crate::style::{
-		self, Edit, MAX_FIX_PASSES, fixes, imports, semantic, shared, types, violation_signature,
+		self, Edit, MAX_FIX_PASSES, fixes, imports, module, semantic, shared, types,
+		violation_signature,
 	};
 
 	#[test]
@@ -9932,5 +9933,62 @@ fn sample() {
 			"{rewritten}\n{}",
 			String::from_utf8_lossy(&output.stderr)
 		);
+	}
+
+	#[test]
+	fn module_sort_keeps_attached_impls_with_types() {
+		let body = r"#[derive(Clone)]
+struct Private;
+impl Private { fn value() {} }
+impl Default for Private { fn default() -> Self { Self } }
+
+/// Public fixture type.
+pub struct Public;
+impl Public { pub fn value() {} }
+
+pub enum Choice { One }
+impl Choice { pub fn value() -> Self { Self::One } }
+";
+
+		for original in [body.to_owned(), format!("mod nested {{\n{body}}}\n")] {
+			let path = Path::new("attached_impls.rs");
+			let ctx = shared::read_file_context_from_text(path, original.clone())
+				.expect("Parse input.")
+				.expect("Input context.");
+			let mut violations = Vec::new();
+			let mut edits = Vec::new();
+
+			module::check_module_order(&ctx, &mut violations, &mut edits, true);
+
+			let mut sorted = original.clone();
+
+			fixes::apply_edits(&mut sorted, edits).expect("Sort module items.");
+
+			assert!(sorted.contains("pub struct Public;\nimpl Public"), "{sorted}");
+
+			let (rewritten, _, _, _) =
+				style::apply_fix_passes(path, &original, true).expect("Apply fixes.");
+			let ctx = shared::read_file_context_from_text(path, rewritten.clone())
+				.expect("Parse fixture.")
+				.expect("Fixture context.");
+			let (violations, _) = style::collect_violations(&ctx, false);
+
+			assert!(
+				!violations
+					.iter()
+					.any(|v| matches!(v.rule, "RUST-STYLE-MOD-002" | "RUST-STYLE-MOD-005")),
+				"{rewritten}\n{violations:?}"
+			);
+			assert!(rewritten.contains("#[derive(Clone)]\nstruct Private;"), "{rewritten}");
+			assert!(
+				rewritten.contains("/// Public fixture type.\npub struct Public;"),
+				"{rewritten}"
+			);
+
+			let (repeated, _, _, _) =
+				style::apply_fix_passes(path, &rewritten, true).expect("Repeat fixes.");
+
+			assert_eq!(rewritten, repeated);
+		}
 	}
 }
