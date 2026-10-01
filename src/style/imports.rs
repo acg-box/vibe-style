@@ -7673,7 +7673,10 @@ fn apply_pub_use_group_rules(
 			let curr = pair[1];
 			let between = separator_lines(ctx, prev, curr);
 
-			if between.is_empty() || !between.iter().all(|line| line.trim().is_empty()) {
+			if prev.visibility.trim() != curr.visibility.trim()
+				|| between.is_empty()
+				|| !between.iter().all(|line| line.trim().is_empty())
+			{
 				continue;
 			}
 
