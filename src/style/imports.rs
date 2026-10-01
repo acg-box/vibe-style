@@ -11,7 +11,7 @@ use ra_ap_syntax::{
 	ast::{
 		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, IdentPat, Item, MacroCall, Meta,
 		Module, PathExpr, PathPat, PathType, RecordExpr, RecordPat, StmtList, TokenTree,
-		TupleStructPat, Use,
+		TupleStructPat, Use, UseTree,
 	},
 };
 use regex::Regex;
@@ -2237,11 +2237,13 @@ fn apply_import003_non_keep_alive_alias_rule(
 
 			let root_rewrites = alias_root_path_name_ref_rewrites(ctx, alias, qualified_path);
 			let macro_rewrites = alias_macro_token_tree_rewrites(ctx, alias, qualified_path);
+			let use_rewrites = dependent_use_root_rewrites(ctx, alias, qualified_path);
 
 			if type_rewrites.is_empty()
 				&& value_rewrites.is_empty()
 				&& root_rewrites.is_empty()
 				&& macro_rewrites.is_empty()
+				&& use_rewrites.is_empty()
 			{
 				fixable = false;
 			} else {
@@ -2250,6 +2252,7 @@ fn apply_import003_non_keep_alive_alias_rule(
 					.chain(value_rewrites)
 					.chain(root_rewrites)
 					.chain(macro_rewrites)
+					.chain(use_rewrites)
 				{
 					if alias_is_shadowed_by_local_import(ctx, alias, start) {
 						continue;
@@ -2318,6 +2321,7 @@ fn alias_is_shadowed_by_local_import(ctx: &FileContext, alias: &str, offset: usi
 	else {
 		return false;
 	};
+	let containing_use = token.parent_ancestors().find_map(Use::cast);
 
 	token
 		.parent_ancestors()
@@ -2325,6 +2329,10 @@ fn alias_is_shadowed_by_local_import(ctx: &FileContext, alias: &str, offset: usi
 		.filter_map(StmtList::cast)
 		.any(|scope| {
 			scope.syntax().children().filter_map(Use::cast).any(|item| {
+				if containing_use.as_ref() == Some(&item) {
+					return false;
+				}
+
 				item.use_tree().is_some_and(|tree| {
 					imported_symbols_from_use_path(&tree.syntax().text().to_string())
 						.iter()
@@ -2332,6 +2340,53 @@ fn alias_is_shadowed_by_local_import(ctx: &FileContext, alias: &str, offset: usi
 				})
 			})
 		})
+}
+
+fn dependent_use_root_rewrites(
+	ctx: &FileContext,
+	symbol: &str,
+	qualified_path: &str,
+) -> Vec<(usize, usize, String)> {
+	let mut rewrites = Vec::new();
+
+	for tree in ctx.source_file.syntax().descendants().filter_map(UseTree::cast) {
+		if tree.syntax().ancestors().any(|node| Module::can_cast(node.kind()))
+			|| tree
+				.syntax()
+				.ancestors()
+				.skip(1)
+				.filter_map(UseTree::cast)
+				.any(|parent| parent.path().is_some())
+		{
+			continue;
+		}
+
+		let Some(mut path) = tree.path() else {
+			continue;
+		};
+
+		while let Some(qualifier) = path.qualifier() {
+			path = qualifier;
+		}
+
+		if path.syntax().text().to_string().starts_with("::") {
+			continue;
+		}
+
+		let Some(name) = path.segment().and_then(|segment| segment.name_ref()) else {
+			continue;
+		};
+		let range = name.syntax().text_range();
+		let start = usize::from(range.start());
+
+		if is_same_ident(name.text(), symbol)
+			&& !alias_is_shadowed_by_local_import(ctx, symbol, start)
+		{
+			rewrites.push((start, usize::from(range.end()), qualified_path.to_owned()));
+		}
+	}
+
+	rewrites
 }
 
 fn collect_non_keep_alive_alias_bindings(path: &str) -> Vec<(String, String)> {
@@ -2581,6 +2636,7 @@ fn symbol_is_referenced_outside_use(ctx: &FileContext, symbol: &str) -> bool {
 
 	!alias_macro_path_ranges(ctx, symbol).is_empty()
 		|| symbol_has_bare_identifier_pattern(ctx, symbol)
+		|| !dependent_use_root_rewrites(ctx, symbol, symbol).is_empty()
 }
 
 fn normalize_trait_keep_alive_use_path(
@@ -3394,6 +3450,8 @@ fn build_import009_plan<'a>(
 		return Some((false, Vec::new(), Vec::new(), Vec::new()));
 	}
 
+	type_rewrites.extend(dependent_use_root_rewrites(ctx, symbol, imported_path));
+
 	let mut use_item_plans = Vec::new();
 	let mut fixable = true;
 
@@ -3418,11 +3476,7 @@ fn build_import009_plan<'a>(
 		use_item_plans.push((use_item_analysis.item, qualified_symbol_path, rewritten_use_path));
 	}
 
-	if use_item_plans.is_empty() {
-		fixable = false;
-	}
-
-	Some((fixable, type_rewrites, value_rewrites, use_item_plans))
+	Some((fixable && !use_item_plans.is_empty(), type_rewrites, value_rewrites, use_item_plans))
 }
 
 fn symbol_has_bare_identifier_pattern(ctx: &FileContext, symbol: &str) -> bool {
