@@ -7,7 +7,7 @@ use std::{
 };
 
 use ra_ap_syntax::{
-	self, AstNode, Edition, SyntaxNode,
+	self, AstNode, AstToken, Edition, SyntaxNode,
 	ast::{
 		self, Attr, CallExpr, HasAttrs, HasName, HasVisibility, Item, MacroCall, Module, PathExpr,
 		PathPat, PathType, RecordExpr, RecordPat, Use,
@@ -1153,7 +1153,8 @@ fn apply_import010_no_super_use_rule(
 
 		if let Some((super_depth, tail)) = leading_super_depth_and_tail(&use_path) {
 			let current_module_path = current_module_path_segments(ctx, &use_item);
-			let fixable = super_depth <= current_module_path.len();
+			let fixable =
+				current_module_path.as_ref().is_some_and(|path| super_depth <= path.len());
 
 			shared::push_violation(
 				violations,
@@ -1168,6 +1169,9 @@ fn apply_import010_no_super_use_rule(
 				continue;
 			}
 
+			let Some(current_module_path) = current_module_path else {
+				continue;
+			};
 			let parent_depth = current_module_path.len() - super_depth;
 			let replacement_path =
 				crate_absolute_use_path(&current_module_path[..parent_depth], tail);
@@ -1543,8 +1547,8 @@ fn find_crate_dir(path: &std::path::Path) -> Option<PathBuf> {
 	None
 }
 
-fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Vec<String> {
-	let mut module_path = file_module_path_segments(&ctx.path);
+fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Option<Vec<String>> {
+	let mut module_path = declared_file_module_path(&ctx.path)?;
 	let mut inline_ancestors = use_item
 		.syntax()
 		.ancestors()
@@ -1555,7 +1559,134 @@ fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Vec<String
 	inline_ancestors.reverse();
 	module_path.extend(inline_ancestors);
 
-	module_path
+	Some(module_path)
+}
+
+fn declared_file_module_path(path: &std::path::Path) -> Option<Vec<String>> {
+	let Some(crate_dir) = find_crate_dir(path) else {
+		return Some(file_module_path_segments(path));
+	};
+	let Ok(target) = path.canonicalize() else {
+		return Some(file_module_path_segments(path));
+	};
+	let mut matches = BTreeSet::new();
+	let mut stack = HashSet::new();
+
+	for root in ["lib.rs", "main.rs"] {
+		collect_declared_module_paths(
+			&crate_dir.join("src").join(root),
+			&[],
+			&target,
+			&mut stack,
+			&mut matches,
+		);
+	}
+
+	match matches.len() {
+		0 => Some(file_module_path_segments(path)),
+		1 => matches.into_iter().next(),
+		_ => None,
+	}
+}
+
+fn collect_declared_module_paths(
+	file: &std::path::Path,
+	module_path: &[String],
+	target: &std::path::Path,
+	stack: &mut HashSet<PathBuf>,
+	matches: &mut BTreeSet<Vec<String>>,
+) {
+	let Ok(file) = file.canonicalize() else {
+		return;
+	};
+
+	if !stack.insert(file.clone()) {
+		return;
+	}
+	if file == target {
+		matches.insert(module_path.to_vec());
+	}
+
+	if let Ok(text) = fs::read_to_string(&file) {
+		let parsed = ra_ap_syntax::SourceFile::parse(&text, Edition::CURRENT);
+		let parent = file.parent().unwrap_or(&file);
+		let directory = if matches!(
+			file.file_name().and_then(|name| name.to_str()),
+			Some("lib.rs" | "main.rs" | "mod.rs")
+		) {
+			parent.to_path_buf()
+		} else {
+			parent.join(file.file_stem().unwrap_or_default())
+		};
+
+		collect_module_declarations(
+			parsed.tree().syntax(),
+			parent,
+			&directory,
+			module_path,
+			target,
+			stack,
+			matches,
+		);
+	}
+
+	stack.remove(&file);
+}
+
+fn collect_module_declarations(
+	syntax: &SyntaxNode,
+	path_directory: &std::path::Path,
+	directory: &std::path::Path,
+	owner: &[String],
+	target: &std::path::Path,
+	stack: &mut HashSet<PathBuf>,
+	matches: &mut BTreeSet<Vec<String>>,
+) {
+	for module in syntax.children().filter_map(Module::cast) {
+		let Some(name) = module.name().map(|name| name.text().to_string()) else {
+			continue;
+		};
+		let mut module_path = owner.to_vec();
+
+		module_path.push(name.clone());
+
+		if let Some(items) = module.item_list() {
+			let nested = directory.join(&name);
+
+			collect_module_declarations(
+				items.syntax(),
+				&nested,
+				&nested,
+				&module_path,
+				target,
+				stack,
+				matches,
+			);
+
+			continue;
+		}
+
+		let explicit = module.attrs().find_map(|attr| {
+			if attr.path()?.syntax().text() != "path" {
+				return None;
+			}
+
+			let token = attr
+				.syntax()
+				.descendants_with_tokens()
+				.filter_map(|part| part.into_token())
+				.find_map(ast::String::cast)?;
+
+			token.value().ok().map(|value| path_directory.join(value.as_ref()))
+		});
+		let file = explicit.unwrap_or_else(|| {
+			let flat = directory.join(format!("{name}.rs"));
+
+			if flat.is_file() { flat } else { directory.join(name).join("mod.rs") }
+		});
+
+		collect_declared_module_paths(&file, &module_path, target, stack, matches);
+	}
 }
 
 fn file_module_path_segments(path: &std::path::Path) -> Vec<String> {
