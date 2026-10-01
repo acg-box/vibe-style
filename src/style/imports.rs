@@ -266,6 +266,12 @@ pub(crate) fn check_import_rules(
 	);
 	apply_import006_local_use_scope_rule(ctx, violations, edits, emit_edits);
 	check_cfg_test_module_import_rules(ctx, violations, edits, emit_edits);
+
+	// Hoisted groups can contain bindings that shortening would insert separately.
+	// Re-plan shortening against the completed hoist on the next pass.
+	if edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-006") {
+		edits.retain(|edit| edit.rule != "RUST-STYLE-IMPORT-008");
+	}
 }
 
 pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
