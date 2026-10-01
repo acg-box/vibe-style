@@ -4604,6 +4604,65 @@ mod tests {
 	}
 
 	#[test]
+	fn parent_glob_expansion_preserves_method_traits() {
+		let original = r#"mod toolkit {
+    pub mod prelude {
+        pub trait Styled { fn size_full(self) -> Self; }
+        impl Styled for u8 { fn size_full(self) -> Self { self + 1 } }
+        pub trait ParentElement { fn child(self) -> Self; }
+        impl ParentElement for u8 { fn child(self) -> Self { self + 2 } }
+    }
+}
+use toolkit::prelude::{Styled, ParentElement as ChildTrait};
+trait Local { fn local(self) -> Self; }
+impl Local for u8 { fn local(self) -> Self { self + 3 } }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn methods() { assert_eq!(1_u8.size_full().child().local(), 7); }
+}
+"#;
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-glob-traits-{}-{now}", process::id()));
+		let path = root.join("lib.rs");
+		let binary = root.join("fixture");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		assert!(!rewritten.contains("::*"), "{rewritten}");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--test"])
+			.arg(&path)
+			.arg("-o")
+			.arg(&binary)
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		assert!(
+			compiled.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&compiled.stderr)
+		);
+
+		let executed = process::Command::new(&binary).output().expect("Run rewritten fixture.");
+
+		assert!(executed.status.success(), "{}", String::from_utf8_lossy(&executed.stderr));
+		assert!(String::from_utf8_lossy(&executed.stdout).contains("1 passed;"));
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn parent_glob_inventory_ignores_qualified_import_leaves() {
 		let original = "struct Error;\n#[cfg(test)]\nmod tests {\n\tuse super::*;\n\t#[test]\n\tfn sample() {\n\t\tuse std::fmt::{Error as Source};\n\t\tlet _ = Source;\n\t}\n}\n";
 		let parsed = ra_ap_syntax::SourceFile::parse(original, ra_ap_syntax::Edition::CURRENT);
