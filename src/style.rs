@@ -4472,6 +4472,40 @@ fn sample() {
 	}
 
 	#[test]
+	fn import_hoisting_precedes_qualified_path_shortening() {
+		let original = "fn sample(_: std::io::ErrorKind) { use std::io::{ErrorKind, SeekFrom}; let _ = ErrorKind::NotFound; let _ = SeekFrom::Start(0); }\n";
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-group-hoist-{}-{now}", process::id()));
+		let path = root.join("lib.rs");
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+
+		fs::write(&path, &rewritten).expect("Write rewritten fixture.");
+
+		let output = process::Command::new("rustc")
+			.args(["--edition=2024", "--crate-type=lib", "--emit=metadata"])
+			.arg(&path)
+			.arg("-o")
+			.arg(root.join("fixture.rmeta"))
+			.output()
+			.expect("Compile rewritten fixture.");
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+
+		assert!(
+			output.status.success(),
+			"{rewritten}\n{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+
+	#[test]
 	fn import_removal_qualifies_dependent_nested_use_roots() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
