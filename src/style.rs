@@ -10090,4 +10090,60 @@ impl Choice { pub fn value() -> Self { Self::One } }
 
 		fs::remove_dir_all(root).expect("Remove fixture.");
 	}
+	#[test]
+	fn import_shortening_keeps_shared_guarded_type_paths_consistent() {
+		let root = env::temp_dir().join(format!("vstyle-guarded-type-{}", process::id()));
+		let path = root.join("guarded.rs");
+		let original = "pub fn ordinary(value: std::path::PathBuf) -> usize { value.as_os_str().len() }\n#[cfg(test)]\npub fn guarded(value: std::path::PathBuf) -> usize { value.as_os_str().len() }\n#[cfg(any())]\npub fn unavailable(_: unavailable_dependency::Missing) {}\n";
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&path, original, true).expect("Apply fixes.");
+		let ctx = shared::read_file_context_from_text(&path, rewritten.clone())
+			.expect("Parse output.")
+			.expect("Output context.");
+		let (violations, _) = style::collect_violations(&ctx, false);
+
+		assert!(rewritten.contains("ordinary(value: PathBuf)"), "{rewritten}");
+		assert!(rewritten.contains("guarded(value: PathBuf)"), "{rewritten}");
+		assert!(rewritten.contains("unavailable_dependency::Missing"), "{rewritten}");
+		assert!(!rewritten.contains("use unavailable_dependency"), "{rewritten}");
+		assert!(
+			!violations
+				.iter()
+				.any(|v| matches!(v.rule, "RUST-STYLE-IMPORT-008" | "RUST-STYLE-IMPORT-009")),
+			"{rewritten}\n{violations:?}"
+		);
+
+		let (repeated, _, _, _) =
+			style::apply_fix_passes(&path, &rewritten, true).expect("Repeat fixes.");
+
+		assert_eq!(rewritten, repeated);
+
+		fs::create_dir_all(&root).expect("Create fixture directory.");
+		fs::write(&path, &rewritten).expect("Write fixture.");
+
+		for configuration in [None, Some("test")] {
+			let mut command = process::Command::new("rustc");
+
+			command.args(["--edition=2024", "--crate-type=lib", "--emit=metadata"]);
+
+			if let Some(configuration) = configuration {
+				command.args(["--cfg", configuration]);
+			}
+
+			let compiled = command
+				.arg(&path)
+				.arg("-o")
+				.arg(root.join("fixture.rmeta"))
+				.output()
+				.expect("Compile fixture.");
+
+			assert!(
+				compiled.status.success(),
+				"{rewritten}\n{}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
 }
