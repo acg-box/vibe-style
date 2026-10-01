@@ -4485,17 +4485,15 @@ fn collect_import008_from_paths(
 	candidates: &mut Vec<Import008Candidate>,
 	seen_ranges: &mut HashSet<(usize, usize)>,
 ) {
+	let mut guarded_candidates = Vec::new();
+
 	for path_type in ctx.source_file.syntax().descendants().filter_map(PathType::cast) {
 		let Some(candidate) = path_type.path().and_then(|path| {
 			classify_type_path_candidate(ctx, path, PathQualificationRequirement::Qualified)
 		}) else {
 			continue;
 		};
-
-		if syntax_is_inside_cfg_guarded_scope(candidate.path.syntax()) {
-			continue;
-		}
-
+		let guarded = syntax_is_inside_cfg_guarded_scope(candidate.path.syntax());
 		let mut segments = Vec::new();
 
 		if !collect_path_segment_texts(&candidate.path, &mut segments) {
@@ -4539,8 +4537,7 @@ fn collect_import008_from_paths(
 		}
 
 		let line = shared::line_from_offset(&ctx.line_starts, start);
-
-		candidates.push(Import008Candidate {
+		let candidate = Import008Candidate {
 			line,
 			start,
 			end,
@@ -4548,8 +4545,25 @@ fn collect_import008_from_paths(
 			symbol,
 			import_path,
 			replacement,
-		});
+		};
+
+		if guarded {
+			guarded_candidates.push(candidate);
+		} else {
+			candidates.push(candidate);
+		}
 	}
+
+	let unconditional_paths =
+		candidates.iter().map(|candidate| candidate.import_path.clone()).collect::<HashSet<_>>();
+
+	// A shared unconditional use already requires this import in every configuration.
+	// Shorten its guarded occurrences too, without hoisting guarded-only dependencies.
+	candidates.extend(
+		guarded_candidates
+			.into_iter()
+			.filter(|candidate| unconditional_paths.contains(&candidate.import_path)),
+	);
 }
 
 fn collect_import008_from_type_like_value_paths(
