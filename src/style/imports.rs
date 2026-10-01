@@ -1575,7 +1575,7 @@ fn build_crate_glob_item_replacement(
 		!local.contains(name)
 			&& (used.contains(name)
 				|| traits.contains(name)
-				|| symbol_referenced_by_child_module(ctx, name))
+				|| symbol_referenced_by_descendant(ctx, &local_scope, &caller, name))
 	});
 
 	build_scoped_glob_item_replacement(use_item, prefix, prefix, symbols, &items)
@@ -7764,11 +7764,26 @@ fn record_module_reference(
 }
 
 fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
-	if !ctx.source_file.syntax().descendants().any(|node| Module::can_cast(node.kind())) {
+	let Some(owner) =
+		ctx.declared_module_path.get_or_init(|| declared_file_module_path(&ctx.path)).as_ref()
+	else {
+		return true;
+	};
+
+	symbol_referenced_by_descendant(ctx, ctx.source_file.syntax(), owner, symbol)
+}
+
+fn symbol_referenced_by_descendant(
+	ctx: &FileContext,
+	scope: &SyntaxNode,
+	owner: &[String],
+	symbol: &str,
+) -> bool {
+	if !scope.descendants().any(|node| Module::can_cast(node.kind())) {
 		return false;
 	}
 
-	let Some(owner) =
+	let Some(file_owner) =
 		ctx.declared_module_path.get_or_init(|| declared_file_module_path(&ctx.path)).as_ref()
 	else {
 		return true;
@@ -7779,7 +7794,7 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 	let relative_binding = owner.last().map(|name| format!("{name}::{symbol}"));
 	let Some(external) = ctx
 		.external_module_references
-		.get_or_init(|| external_module_references(ctx, owner))
+		.get_or_init(|| external_module_references(ctx, file_owner))
 		.as_ref()
 	else {
 		return true;
@@ -7793,7 +7808,7 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 		return true;
 	}
 
-	for path in ctx.source_file.syntax().descendants().filter_map(ast::Path::cast) {
+	for path in scope.descendants().filter_map(ast::Path::cast) {
 		let reference = compact_path_for_match(&path.syntax().text().to_string());
 
 		if path.syntax().ancestors().any(|node| Module::can_cast(node.kind()))
@@ -7802,7 +7817,7 @@ fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
 			return true;
 		}
 	}
-	for use_item in ctx.source_file.syntax().descendants().filter_map(Use::cast) {
+	for use_item in scope.descendants().filter_map(Use::cast) {
 		if !use_item.syntax().ancestors().any(|node| Module::can_cast(node.kind())) {
 			continue;
 		}
