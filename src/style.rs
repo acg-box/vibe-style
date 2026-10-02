@@ -2647,6 +2647,27 @@ fn sample() {
 	}
 
 	#[test]
+	fn import_groups_preserve_root_alias_origins() {
+		let workspace = env!("CARGO_PKG_NAME").replace('-', "_");
+
+		for (standard_alias, workspace_alias) in [("_", "_"), ("standard", "workspace_alias")] {
+			let text = format!(
+				"use std as {standard_alias};\n\nuse anyhow::Result;\n\nuse {workspace} as {workspace_alias};\nuse crate::support::Marker;\n"
+			);
+			let ctx = shared::read_file_context_from_text(Path::new("root_alias_groups.rs"), text)
+				.expect("context")
+				.expect("has ctx");
+			let (violations, _) = style::collect_violations(&ctx, false);
+			let grouping: Vec<_> = violations
+				.iter()
+				.filter(|v| matches!(v.rule, "RUST-STYLE-IMPORT-001" | "RUST-STYLE-IMPORT-002"))
+				.collect();
+
+			assert!(grouping.is_empty(), "{standard_alias}: {grouping:?}");
+		}
+	}
+
+	#[test]
 	fn import_group_fix_normalizes_spacing_without_reordering_groups() {
 		let original = r#"
 use std::collections::HashSet;
