@@ -3501,8 +3501,11 @@ fn apply_import004_free_fn_macro_rule(
 
 		let local_fn_defined = is_local_fn_defined(ctx, &symbol);
 		let local_macro_defined = is_local_macro_defined(ctx, &symbol);
-		let fn_ranges = unqualified_function_call_ranges(ctx, &symbol);
-		let macro_ranges = unqualified_macro_call_ranges(ctx, &symbol);
+		let mut fn_ranges = unqualified_function_call_ranges(ctx, &symbol);
+		let mut macro_ranges = unqualified_macro_call_ranges(ctx, &symbol);
+
+		retain_parent_call_ranges(ctx, &mut fn_ranges, &mut macro_ranges);
+
 		let needs_fn_fix = !fn_ranges.is_empty() && !local_fn_defined;
 		let needs_macro_fix = !macro_ranges.is_empty()
 			&& !local_macro_defined
@@ -3512,13 +3515,20 @@ fn apply_import004_free_fn_macro_rule(
 			continue;
 		}
 
+		let preserve_binding = symbol_referenced_by_child_module(ctx, &symbol);
 		let mut fixable = false;
 		let mut qualified_symbol_path = String::new();
 		let mut use_item_edit = None;
 
-		if let Some((qualified_path, rewritten_use_path)) =
-			import004_free_fn_fix_plan(ctx, item, path, &symbol, planned_import_paths)
-		{
+		if (!fn_ranges.is_empty() || !macro_ranges.is_empty())
+			&& let Some((qualified_path, rewritten_use_path)) = import004_free_fn_fix_plan(
+				ctx,
+				item,
+				path,
+				&symbol,
+				planned_import_paths,
+				preserve_binding,
+			) {
 			qualified_symbol_path = qualified_path;
 			fixable = true;
 
@@ -4082,12 +4092,11 @@ fn build_import009_plan<'a>(
 			continue;
 		}
 
-		let removal_fix_plan = import004_free_fn_fix_plan(
+		let removal_fix_plan = import004_removal_fix_plan(
 			ctx,
 			use_item_analysis.item,
 			&use_item_analysis.path,
 			symbol,
-			&[],
 		);
 		let Some((qualified_symbol_path, rewritten_use_path)) = removal_fix_plan else {
 			fixable = false;
@@ -7954,8 +7963,17 @@ fn symbol_referenced_by_descendant(
 	}
 
 	for (node, reference) in qualified_reference_paths(scope) {
-		if node.ancestors().any(|node| Module::can_cast(node.kind()))
-			&& (reference == binding || relative_binding.as_ref() == Some(&reference))
+		if !node.ancestors().any(|node| Module::can_cast(node.kind())) {
+			continue;
+		}
+
+		let mut resolved = HashSet::new();
+
+		record_module_reference(&node, file_owner, &reference, &mut resolved);
+
+		if reference == binding
+			|| relative_binding.as_ref() == Some(&reference)
+			|| resolved.contains(&binding)
 		{
 			return true;
 		}
@@ -7995,19 +8013,57 @@ fn symbol_referenced_by_descendant(
 	false
 }
 
+fn retain_parent_call_ranges(
+	ctx: &FileContext,
+	fn_ranges: &mut Vec<(usize, usize)>,
+	macro_ranges: &mut Vec<(usize, usize)>,
+) {
+	let children = ctx
+		.source_file
+		.syntax()
+		.descendants()
+		.filter_map(Module::cast)
+		.filter_map(|module| module.item_list())
+		.map(|items| items.syntax().text_range())
+		.collect::<Vec<_>>();
+	let local = |range: &(usize, usize)| {
+		!children.iter().any(|child| {
+			usize::from(child.start()) <= range.0 && range.1 <= usize::from(child.end())
+		})
+	};
+
+	fn_ranges.retain(local);
+	macro_ranges.retain(local);
+}
+
+fn import004_removal_fix_plan(
+	ctx: &FileContext,
+	item: &TopItem,
+	path: &str,
+	symbol: &str,
+) -> Option<(String, Option<String>)> {
+	if symbol_referenced_by_child_module(ctx, symbol) {
+		return None;
+	}
+
+	import004_free_fn_fix_plan(ctx, item, path, symbol, &[], false)
+}
+
 fn import004_free_fn_fix_plan(
 	ctx: &FileContext,
 	current_item: &TopItem,
 	path: &str,
 	symbol: &str,
 	planned_import_paths: &[String],
+	preserve_binding: bool,
 ) -> Option<(String, Option<String>)> {
-	if symbol_referenced_by_child_module(ctx, symbol) {
-		return None;
-	}
-
 	let (default_qualified_symbol_path, rewritten_use_path_without_symbol) =
 		import004_fix_plan(path, symbol)?;
+
+	if preserve_binding {
+		return Some((default_qualified_symbol_path, Some(path.to_owned())));
+	}
+
 	let Some((parent_module_path, module_symbol)) = import004_parent_module_target(path, symbol)
 	else {
 		return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
@@ -8132,6 +8188,25 @@ fn import004_preferred_module_access_plan(
 			continue;
 		}
 		if import004_use_path_imports_parent_module(&other_path, &compact_parent_module_path) {
+			let conditions = item
+				.attrs
+				.iter()
+				.filter(|attr| attr.trim_start().starts_with("#[cfg"))
+				.collect::<Vec<_>>();
+			let current_conditions = current_item
+				.map(|current| {
+					current
+						.attrs
+						.iter()
+						.filter(|attr| attr.trim_start().starts_with("#[cfg"))
+						.collect::<Vec<_>>()
+				})
+				.unwrap_or_default();
+
+			if !conditions.is_empty() && conditions != current_conditions {
+				return None;
+			}
+
 			keep_parent_module_import = false;
 
 			if is_current_item {
