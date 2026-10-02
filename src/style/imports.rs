@@ -8623,12 +8623,16 @@ fn unqualified_macro_call_ranges(ctx: &FileContext, symbol: &str) -> Vec<(usize,
 
 fn use_origin(path: &str, local_module_roots: &HashSet<String>) -> usize {
 	let trimmed = path.replace("pub ", "");
-	let root = trimmed.trim_start_matches(':').split("::").next().unwrap_or_default();
+	let root = trimmed
+		.trim_start_matches(':')
+		.split(|ch: char| ch == ':' || ch.is_whitespace())
+		.next()
+		.unwrap_or_default();
 	let normalized_root = normalize_ident(root);
 
-	if matches!(root, "std" | "core" | "alloc") {
+	if matches!(normalized_root, "std" | "core" | "alloc") {
 		0
-	} else if matches!(root, "crate" | "self" | "super")
+	} else if matches!(normalized_root, "crate" | "self" | "super")
 		|| local_module_roots.contains(normalized_root)
 		|| WORKSPACE_IMPORT_ROOTS.contains(normalized_root)
 		|| WORKSPACE_IMPORT_ROOTS.contains(&normalized_root.replace('-', "_"))
