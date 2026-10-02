@@ -2048,7 +2048,7 @@ pub mod api_code {
 
 		for child in [
 			"use super::*; pub fn run() { let _ = read(\"fixture\"); }",
-			"use super::{self, *}; pub fn run() { let _ = read(\"fixture\"); }",
+			"use super::{self as parent, *}; pub fn run() { let _ = read(\"fixture\"); }",
 			"use super::read as load; pub fn run() { let _ = load(\"fixture\"); }",
 			"pub fn run() { let _ = super::read(\"fixture\"); }",
 			"use crate::read as load; pub fn run() { let _ = load(\"fixture\"); }",
@@ -2060,10 +2060,73 @@ pub mod api_code {
 				shared::read_file_context(&parent).expect("Read context.").expect("Have context.");
 			let (violations, edits) = style::collect_violations(&ctx, true);
 
-			assert!(!edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-004"), "{child}");
-			assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004" && !v.fixable));
+			assert!(violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004" && v.fixable));
+
+			let edits =
+				edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-004").collect();
+			let mut rewritten = original.to_owned();
+
+			fixes::apply_edits(&mut rewritten, edits).expect("Qualify parent calls.");
+
+			assert!(rewritten.contains("use std::fs::read;"), "{child}: {rewritten}");
+			assert!(rewritten.contains("std::fs::read(\"fixture\")"), "{rewritten}");
+
+			fs::write(&parent, &rewritten).expect("Write qualified parent.");
+
+			let compiled = process::Command::new("rustc")
+				.args(["--edition=2024", "--crate-type=lib"])
+				.arg(&parent)
+				.arg("-o")
+				.arg(root.join("fixture.rlib"))
+				.output()
+				.expect("Compile parent and child.");
+
+			assert!(
+				compiled.status.success(),
+				"{child}: {}",
+				String::from_utf8_lossy(&compiled.stderr)
+			);
+
+			fs::write(&parent, original).expect("Restore next fixture input.");
 		}
 
+		let inline = "use std::fs::read;\npub fn run() { let _ = read(\"fixture\"); }\nmod child { use std::ptr::read; pub fn run() -> u8 { unsafe { read(&7_u8) } } pub fn parent() { let _ = super::read(\"fixture\"); } }\n";
+
+		fs::write(&parent, inline).expect("Write inline shadow fixture.");
+
+		let ctx = shared::read_file_context(&parent)
+			.expect("Read inline fixture.")
+			.expect("Have context.");
+		let (_, edits) = style::collect_violations(&ctx, true);
+		let edits = edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-004").collect();
+		let mut rewritten = inline.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("Qualify only parent calls.");
+
+		assert!(rewritten.contains("std::fs::read(\"fixture\")"), "{rewritten}");
+		assert!(rewritten.contains("unsafe { read(&7_u8) }"), "{rewritten}");
+		assert!(rewritten.contains("super::read(\"fixture\")"), "{rewritten}");
+
+		fs::write(&parent, rewritten).expect("Write transformed inline fixture.");
+
+		let compiled = process::Command::new("rustc")
+			.args(["--edition=2024", "--crate-type=lib"])
+			.arg(&parent)
+			.arg("-o")
+			.arg(root.join("inline.rlib"))
+			.output()
+			.expect("Compile inline shadow fixture.");
+
+		assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+
+		let ctx = shared::read_file_context(&parent)
+			.expect("Read qualified fixture.")
+			.expect("Have context.");
+		let (violations, _) = style::collect_violations(&ctx, false);
+
+		assert!(!violations.iter().any(|v| v.line == 1 && v.rule == "RUST-STYLE-IMPORT-004"));
+
+		fs::write(&parent, original).expect("Restore external fixture.");
 		fs::write(src.join("consumer.rs"), "pub fn run() { let _ = std::fs::read(\"fixture\"); }")
 			.expect("Write independent child.");
 
@@ -2075,6 +2138,51 @@ pub mod api_code {
 			edits.iter().any(|edit| edit.rule == "RUST-STYLE-IMPORT-004"),
 			"Independent child must not block qualification."
 		);
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
+	fn import004_does_not_use_test_only_module_for_production_calls() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-cfg-module-{}-{now}", process::id()));
+		let src = root.join("src");
+		let parent = src.join("lib.rs");
+		let original = "#[cfg(test)] use std::fs;\nuse std::fs::read;\npub fn run() { let _ = read(\"fixture\"); }\n#[cfg(test)] pub fn test_only() { let _ = fs::read(\"fixture\"); }\n";
+
+		fs::create_dir_all(&src).expect("Create source directory.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"cfg-module-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+		fs::write(&parent, original).expect("Write source.");
+
+		let (rewritten, _, _, _) =
+			style::apply_fix_passes(&parent, original, true).expect("Apply fixes.");
+
+		assert!(rewritten.contains("pub fn run() { let _ = std::fs::read("), "{rewritten}");
+
+		fs::write(&parent, &rewritten).expect("Write transformed fixture.");
+
+		for testing in [false, true] {
+			let mut command = process::Command::new("rustc");
+
+			command.args(["--edition=2024", "--crate-type=lib"]);
+
+			if testing {
+				command.arg("--test");
+			}
+
+			command.arg(&parent).arg("-o").arg(root.join("compiled"));
+
+			let compiled = command.output().expect("Compile conditional fixture.");
+
+			assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+		}
 
 		fs::remove_dir_all(root).expect("Remove fixture.");
 	}
