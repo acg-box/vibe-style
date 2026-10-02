@@ -2143,6 +2143,70 @@ pub mod api_code {
 	}
 
 	#[test]
+	fn import004_planned_modules_preserve_configuration_boundaries() {
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.expect("Timestamp.")
+			.as_nanos();
+		let root = env::temp_dir().join(format!("vstyle-planned-cfg-{}-{now}", process::id()));
+		let parent = root.join("src/lib.rs");
+
+		fs::create_dir_all(root.join("src")).expect("Create fixture.");
+		fs::write(
+			root.join("Cargo.toml"),
+			"[package]\nname = \"planned-cfg-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+		)
+		.expect("Write manifest.");
+
+		for imports in [
+			"#[cfg(test)] use std::fs::read_to_string;\nuse std::fs::read;",
+			"use std::fs::read;\n#[cfg(test)] use std::fs::read_to_string;",
+			"#[cfg_attr(not(test), cfg(any()))] use std::fs::read_to_string;\nuse std::fs::read;",
+		] {
+			let original = format!(
+				"{imports}\npub fn run() {{ let _ = read(\"fixture\"); }}\n#[cfg(test)] pub fn test_only() {{ let _ = read_to_string(\"fixture\"); }}\n"
+			);
+
+			fs::write(&parent, &original).expect("Write source.");
+
+			let (rewritten, _, _, _) =
+				style::apply_fix_passes(&parent, &original, true).expect("Apply fixes.");
+
+			fs::write(&parent, &rewritten).expect("Write rewritten source.");
+
+			let (again, _, _, _) =
+				style::apply_fix_passes(&parent, &rewritten, true).expect("Repeat fixes.");
+
+			assert_eq!(again, rewritten, "Conditional fixes must be stable.");
+
+			for testing in [false, true] {
+				let mut command = process::Command::new("rustc");
+
+				command.args(["--edition=2024", "--crate-type=lib"]);
+
+				if testing {
+					command.arg("--test");
+				}
+
+				let compiled = command
+					.arg(&parent)
+					.arg("-o")
+					.arg(root.join("compiled"))
+					.output()
+					.expect("Compile fixture.");
+
+				assert!(
+					compiled.status.success(),
+					"testing={testing}\n{rewritten}\n{}",
+					String::from_utf8_lossy(&compiled.stderr)
+				);
+			}
+		}
+
+		fs::remove_dir_all(root).expect("Remove fixture.");
+	}
+
+	#[test]
 	fn import004_does_not_use_test_only_module_for_production_calls() {
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)

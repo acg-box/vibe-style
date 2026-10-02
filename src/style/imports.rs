@@ -155,6 +155,11 @@ struct Import006TargetScope {
 	key: usize,
 }
 
+struct PlannedImportPath {
+	path: String,
+	conditions: Vec<String>,
+}
+
 struct Import004ModuleAccessPlan {
 	access_path: String,
 	keep_parent_module_import: bool,
@@ -3486,7 +3491,7 @@ fn apply_import004_free_fn_macro_rule(
 	emit_edits: bool,
 	item: &TopItem,
 	path: &str,
-	planned_import_paths: &mut Vec<String>,
+	planned_import_paths: &mut Vec<PlannedImportPath>,
 ) -> bool {
 	if !path.contains("::") {
 		return false;
@@ -3543,7 +3548,10 @@ fn apply_import004_free_fn_macro_rule(
 				if use_item_edit.is_none() {
 					fixable = false;
 				} else {
-					planned_import_paths.extend(rewritten_use_path);
+					planned_import_paths.extend(rewritten_use_path.map(|path| PlannedImportPath {
+						path,
+						conditions: import_conditions(item),
+					}));
 				}
 			}
 		}
@@ -8054,7 +8062,7 @@ fn import004_free_fn_fix_plan(
 	current_item: &TopItem,
 	path: &str,
 	symbol: &str,
-	planned_import_paths: &[String],
+	planned_import_paths: &[PlannedImportPath],
 	preserve_binding: bool,
 ) -> Option<(String, Option<String>)> {
 	let (default_qualified_symbol_path, rewritten_use_path_without_symbol) =
@@ -8087,15 +8095,21 @@ fn import004_free_fn_fix_plan(
 		return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
 	};
 
-	for planned_path in planned_import_paths {
+	for planned in planned_import_paths {
 		if import004_use_path_conflicts_with_parent_module(
-			planned_path,
+			&planned.path,
 			&parent_module_path,
 			&module_symbol,
 		) {
 			return None;
 		}
-		if import004_use_path_imports_parent_module(planned_path, &parent_module_path) {
+		if import004_use_path_imports_parent_module(&planned.path, &parent_module_path) {
+			if !planned.conditions.is_empty()
+				&& planned.conditions != import_conditions(current_item)
+			{
+				return Some((default_qualified_symbol_path, rewritten_use_path_without_symbol));
+			}
+
 			module_access_plan.keep_parent_module_import = false;
 		}
 	}
@@ -8146,6 +8160,10 @@ fn import004_parent_module_target(path: &str, symbol: &str) -> Option<(String, S
 	Some((parent_module_path, normalize_ident(&module_symbol).to_owned()))
 }
 
+fn import_conditions(item: &TopItem) -> Vec<String> {
+	item.attrs.iter().filter(|attr| attr.trim_start().starts_with("#[cfg")).cloned().collect()
+}
+
 fn import004_preferred_module_access_plan(
 	ctx: &FileContext,
 	current_item: Option<&TopItem>,
@@ -8188,20 +8206,8 @@ fn import004_preferred_module_access_plan(
 			continue;
 		}
 		if import004_use_path_imports_parent_module(&other_path, &compact_parent_module_path) {
-			let conditions = item
-				.attrs
-				.iter()
-				.filter(|attr| attr.trim_start().starts_with("#[cfg"))
-				.collect::<Vec<_>>();
-			let current_conditions = current_item
-				.map(|current| {
-					current
-						.attrs
-						.iter()
-						.filter(|attr| attr.trim_start().starts_with("#[cfg"))
-						.collect::<Vec<_>>()
-				})
-				.unwrap_or_default();
+			let conditions = import_conditions(item);
+			let current_conditions = current_item.map(import_conditions).unwrap_or_default();
 
 			if !conditions.is_empty() && conditions != current_conditions {
 				return None;
