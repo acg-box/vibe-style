@@ -43,7 +43,7 @@ jobs:
           build-warnings: warn
 
       - name: Install cargo-make
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-make
 
