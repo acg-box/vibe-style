@@ -2,319 +2,39 @@
 
 # vibe-style
 
-Style checker with Rust syntax and semantic analysis, first-batch Swift checks, and a safe auto-fixer for deterministic code layout.
+Check Rust style with syntax and semantic analysis, run read-only Swift checks, and apply validated Rust fixes.
 
 [![License](https://img.shields.io/badge/License-GPLv3%20only-blue.svg)](https://spdx.org/licenses/GPL-3.0-only.html)
-[![Language Checks](https://github.com/acgxv/vibe-style/actions/workflows/language.yml/badge.svg?branch=main)](https://github.com/acgxv/vibe-style/actions/workflows/language.yml)
-[![Release](https://github.com/acgxv/vibe-style/actions/workflows/release.yml/badge.svg)](https://github.com/acgxv/vibe-style/actions/workflows/release.yml)
-[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/acgxv/vibe-style)](https://github.com/acgxv/vibe-style/tags)
-[![GitHub last commit](https://img.shields.io/github/last-commit/acgxv/vibe-style?color=red&style=plastic)](https://github.com/acgxv/vibe-style)
+[![Docs](https://img.shields.io/badge/docs-OpenWiki-blue)](openwiki/quickstart.md)
+[![Release](https://github.com/acg-box/vibe-style/actions/workflows/release.yml/badge.svg)](https://github.com/acg-box/vibe-style/actions/workflows/release.yml)
+[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/acg-box/vibe-style)](https://github.com/acg-box/vibe-style/tags)
+[![GitHub last commit](https://img.shields.io/github/last-commit/acg-box/vibe-style?color=red&style=plastic)](https://github.com/acg-box/vibe-style)
 
 </div>
 
-## Overview
-
-`vibe-style` enforces a strict Rust style contract with stable rule IDs (`RUST-STYLE-*`).
-It also includes a conservative first batch of read-only Swift checks with stable
-`SWIFT-STYLE-*` rule IDs.
-It supports:
-
-- `curate`: check and report violations.
-- `tune`: apply safe automatic fixes, then re-check.
-- `coverage`: print implemented rule IDs.
-
-The checker implementation is the source of truth for parser- and AST-level edge cases.
-
-## Installation
-
-Methods are listed from easiest to most advanced.
-
-### Install prebuilt binaries (curl)
-
-#### Unix (Linux/macOS)
-
-```sh
-VERSION="$(curl -fsSL https://api.github.com/repos/acgxv/vibe-style/releases/latest | grep -oE '"tag_name": "v[^"]+"' | cut -d'"' -f4)"
-OS="$(uname -s)"
-ARCH="$(uname -m)"
-
-case "${OS}:${ARCH}" in
-	Linux:x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
-	Darwin:arm64) TARGET="aarch64-apple-darwin" ;;
-	*) echo "Unsupported platform: ${OS}/${ARCH}" >&2; exit 1 ;;
-esac
-
-ASSET="vibe-style-${TARGET}-${VERSION}.tgz"
-curl -fsSLO "https://github.com/acgxv/vibe-style/releases/download/${VERSION}/${ASSET}"
-tar -xzf "${ASSET}"
-
-INSTALL_DIR="$HOME/.cargo/bin"
-mkdir -p "${INSTALL_DIR}"
-install -m 0755 "vibe-style-${TARGET}-${VERSION}/vstyle" "${INSTALL_DIR}/vstyle"
-install -m 0755 "vibe-style-${TARGET}-${VERSION}/cargo-vstyle" "${INSTALL_DIR}/cargo-vstyle"
-```
-
-#### Windows (PowerShell)
-
-```powershell
-$Repo = "acgxv/vibe-style"
-$Version = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest").tag_name
-$Target = "x86_64-pc-windows-msvc"
-$Asset = "vibe-style-$Target-$Version.zip"
-
-Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/$Version/$Asset" -OutFile $Asset
-Expand-Archive -Path $Asset -DestinationPath .
-
-$InstallDir = "$env:USERPROFILE\.cargo\bin"
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-
-Copy-Item "vibe-style-$Target-$Version\vstyle.exe" "$InstallDir\vstyle.exe" -Force
-Copy-Item "vibe-style-$Target-$Version\cargo-vstyle.exe" "$InstallDir\cargo-vstyle.exe" -Force
-setx PATH "$env:PATH;$InstallDir"
-```
-
-Open a new terminal after running `setx`.
-
-Supported prebuilt targets:
-
-- `x86_64-unknown-linux-gnu`
-- `aarch64-apple-darwin`
-- `x86_64-pc-windows-msvc`
-
-### GitHub Actions
-
-Use the composite action to install a prebuilt release and run a read-only style check:
-
-```yaml
-- uses: actions/checkout@v6
-- uses: acgxv/vibe-style@v0.2.5
-  with:
-    language: rust
-    workspace: true
-    args: --all-features
-```
-
-The action runs `vstyle curate --language <language>`, adds `--workspace` when
-`workspace: true`, and appends `args`. Use `language: swift` for Swift checks, and use
-`version: v0.2.5` when CI should pin a specific `vibe-style` release. Use
-`version: checkout` only when the workflow should build `vibe-style` from the action
-checkout, such as this repository's own local `uses: ./` workflow.
-
-### Install from crates.io (requires Rust/Cargo)
-
-```sh
-# Install both binaries (`vstyle` and `cargo-vstyle`).
-cargo install vibe-style
-```
-
-After installation, you can use both `vstyle ...` and `cargo vstyle ...`.
-
-### Install prebuilt binaries (cargo-binstall, requires Rust/Cargo)
-
-```sh
-# Optional: install cargo-binstall once.
-cargo install cargo-binstall
-
-# Then install prebuilt binaries for this crate.
-cargo binstall vibe-style
-```
-
-### Build from source
-
-```sh
-git clone https://github.com/acgxv/vibe-style
-cd vibe-style
-cargo build --release
-```
-
-Binaries:
-
-- `target/release/vstyle`
-- `target/release/cargo-vstyle`
-
-### Install as a cargo subcommand (local source)
-
-```sh
-cargo install --path . --bin cargo-vstyle
-```
-
-After installation, you can run `cargo vstyle ...`.
-
-## Usage
-
-### Basic commands
-
-`curate` and `tune` require an explicit `--language`.
-
-```sh
-# Check style.
-vstyle curate --language rust
-
-# Apply safe fixes, then re-check.
-vstyle tune --language rust
-
-# Same as tune, but fail if violations remain.
-vstyle tune --language rust --strict
-
-# Include verbose cache diagnostics in addition to tune progress.
-vstyle tune --language rust --verbose
-
-# Print implemented rule IDs.
-vstyle coverage
-```
-
-`tune` prints progress telemetry to stderr for the initial scan, each fix round, scoped
-fix batches, semantic validation, and the final scan when fixes were applied. This
-output is emitted even when stderr is redirected so long-running workspace repairs
-remain observable in logs.
-
-### Cargo-like target selection
-
-```sh
-# Workspace-wide.
-vstyle curate --language rust --workspace
-
-# Swift workspace-wide.
-vstyle curate --language swift --workspace
-
-# Selected packages.
-vstyle tune --language rust -p api -p db-service
-
-# Feature flags.
-vstyle tune --language rust -p api --features serde,tracing
-vstyle tune --language rust -p api --all-features --no-default-features
-```
-
-### Exit behavior
-
-- `curate`
-  - Exit `0`: no violations.
-  - Exit `1`: violations found.
-- `tune`
-  - Exit `0`: even if unresolved violations remain.
-  - Exit `1`: unresolved violations remain and `--strict` is used.
-  - Internal fix or semantic-validation error: restore all selected source files to their
-    start-of-command contents, then return a failure.
-
-Use `--language rust` to check Rust files and `--language swift` to check Swift files.
-File discovery scans every selected `*.rs` or `*.swift` file that is not matched by Git ignore
-rules inside that package scope. Git tracking state is not part of file discovery. With
-`--workspace`, Rust files are selected from workspace package roots and Swift files are selected
-from the Cargo workspace root.
-
-### CI policy
-
-CI runs the current checkout directly for Rust read-only style verification so the style gate can
-reuse the same Cargo build graph as Clippy and tests. The release workflow then runs the composite
-action against the exact tag and newly published binary asset before it publishes the crate to
-crates.io. Use `vstyle tune` locally when you want to apply safe automatic fixes (for example, via
-`cargo make lint`).
-
-### Release benchmark
-
-Release-performance acceptance is based on the locally built `vstyle` binary, not on an installed
-`cargo-vstyle` subcommand and not on debug-profile timings.
-
-Use the checked-in harness:
-
-```sh
-cargo make bench-release-vstyle
-```
-
-By default the harness builds the shipping `final-release` profile from `Cargo.toml` and runs both
-`vstyle curate --language rust --workspace` and
-`vstyle tune --language rust --workspace --verbose` inside a disposable Git
-worktree at the current commit. This keeps `tune` from rewriting the primary checkout while still
-preserving the Git ignore boundary used for file discovery.
-
-Treat the checked-in self-host benchmark as a release-path regression guard, not as a universal
-microbenchmark for every hotspot. On the current workspace it is usually a no-op `tune`; if
-`--verbose` reports `Semantic cache: 0 hit(s), 0 miss(es)`, that run did not enter semantic
-validation and should not be used to judge semantic-path changes in `src/style/semantic.rs`.
-Use a semantic-positive workload before drawing conclusions about semantic validation performance.
-
-Historical benchmark baseline artifacts are not kept in this repository. Use fresh local runs or
-the non-blocking `Benchmarks` workflow artifacts when benchmark evidence matters.
-
-To compare the plain `release` profile diagnostically:
-
-```sh
-VSTYLE_BENCH_PROFILE=release cargo make bench-release-vstyle
-```
-
-`cargo make lint-vstyle` remains the repo-native style gate, but it is not the release benchmark
-source of truth because it routes through language-specific `cargo vstyle curate` tasks and can
-resolve to an installed subcommand outside the locally built binary under test.
-
-### Semantic benchmark
-
-Use the semantic-specific harness when a change targets `src/style/semantic.rs` or semantic
-validation fallback behavior:
-
-```sh
-cargo make bench-semantic-vstyle
-```
-
-This harness builds the local release binary once, creates a disposable Git fixture crate
-based on the `tests/let_mut_reorder.rs` semantic-validation shape, generates a local `Cargo.lock`,
-and runs `vstyle tune --language rust --verbose` twice:
-
-- a cold run after clearing `target/vstyle-cache/semantic`
-- a warm rerun after restoring the original fixture sources while keeping the cache directory
-
-Use this semantic benchmark to judge `XY-95`-style work; do not compare semantic-path changes only
-against the self-host no-op benchmark above.
-
-Historical semantic benchmark artifacts are not kept in this repository. Use fresh local runs or
-the non-blocking `Benchmarks` workflow artifacts when semantic evidence matters.
-
-### Benchmark tracking
-
-The repository also tracks both benchmark harnesses through a non-blocking GitHub Actions workflow.
-Use the `Benchmarks` workflow for periodic project-level tracking, scheduled baseline refreshes, and
-manual reruns when you want artifact-backed evidence without turning performance into a PR gate.
-
-Use direct current-worktree timings first when a local rule change makes the repository's own
-sources newly fixable. The checked-in `bench-release-vstyle` harness builds the current binary but
-benchmarks a detached `HEAD` worktree, so self-host drift in uncommitted files must be fixed and
-committed before the harness becomes authoritative again.
-
-Use the release benchmark for general workspace-scan, fix-engine, import, module, spacing, or
-quality-path changes. Use the semantic benchmark for `src/style/semantic.rs`, semantic cache key
-changes, or semantic-validation fallback changes. Run both when a change touches both lanes.
-
-The operational runbook for selecting the right benchmark evidence lives in
-`openwiki/runbooks/benchmark-tracking.md`.
-
-## Configuration
-
-There is currently no user configuration file.
-Rules are built into the checker.
-
-### Environment variables
-
-- `VSTYLE_MAX_IMPORT_SUGGESTION_ROUNDS`
-  - Controls how many semantic missing-import suggestion rounds `vstyle tune` will perform.
-  - Default: `2`.
-  - Increasing this may fix more missing-import cases but will run additional `cargo check --message-format=json` rounds.
-
-### Semantic cache
-
-- `--verbose` prints semantic cache hit/miss statistics for each command.
-- Cache files are written under `target/vstyle-cache/semantic/` and keyed by:
-  - vstyle version metadata,
-  - `rustc -Vv` output,
-  - `Cargo.lock` hash,
-  - selected cargo options,
-  - selected `*.rs` style file fingerprints.
-
-## Rule Catalog
-
-### File structure
+## Feature Highlights
+
+### Rust and Swift Style Checks
+
+- Check Rust module layout, imports, generics, types, logging, spacing, and tests with
+  36 stable `RUST-STYLE-*` rule IDs.
+- Run six read-only Swift checks with stable `SWIFT-STYLE-*` rule IDs.
+- Use `curate` to report violations, `tune` to apply supported Rust fixes, and
+  `coverage` to list the implemented rules.
+- Select Cargo packages, workspace scope, and feature flags. File discovery follows
+  Git ignore rules and includes untracked source files in the selected scope.
+- Validate Rust binding changes with Cargo checks. If a fix or semantic-validation
+  error occurs, `tune` restores all selected source files to their initial contents.
+- Run checks in CI with the composite GitHub Action.
+
+<details>
+<summary>Rule catalog</summary>
+
+**File structure**
 
 - `RUST-STYLE-FILE-001`: Do not use `mod.rs`; use flat module files.
 
-### Module layout
+**Module layout**
 
 - `RUST-STYLE-MOD-001`: Keep top-level item order as `mod`, `use`, `macro_rules!`, `type`, `const`, `static`, `trait`, `enum`, `struct`, `impl`, `fn`.
 - `RUST-STYLE-MOD-002`: Place `pub` items before non-`pub` items within the same kind. Visibility boundaries define separate batches and must be separated by exactly one blank line.
@@ -323,11 +43,7 @@ Rules are built into the checker.
 - `RUST-STYLE-MOD-005`: Keep each type adjacent to related `impl` blocks, with no blank line between the type and its first `impl`.
 - `RUST-STYLE-MOD-007`: In `#[cfg(test)] mod tests`, remove unused `use super::*;` keep-alive imports during `tune`.
 
-### Serde
-
-Serde defaults are part of the data contract. The checker does not remove them based on an `Option<T>` field type. A default can permit missing sequence elements, provide a custom value, or support a custom deserializer. The former `RUST-STYLE-SERDE-001` rule was removed because its fixes could change deserialization behavior.
-
-### Imports and paths
+**Imports and paths**
 
 - `RUST-STYLE-IMPORT-001`: Group imports in this order: standard library, third-party, self/workspace/local-module roots.
 - `RUST-STYLE-IMPORT-002`: Use exactly one blank line between groups; do not use import-group header comments; normalize `use a::{b, b::c}` to `use a::{b::{self, c}}`.
@@ -342,7 +58,7 @@ Serde defaults are part of the data contract. The checker does not remove them b
 - `RUST-STYLE-IMPORT-011`: Order `#[derive(...)]` entries like imports: `std`/`core`/`alloc` first, then third-party derives, then workspace derives; alphabetize within each group.
 - `RUST-STYLE-IMPORT-012`: Do not add crate keep-alive imports `use dep as _;` unless another path in the same package uses that crate.
 
-### Types and generics
+**Types and generics**
 
 - `RUST-STYLE-IMPL-001`: Use `Self` instead of concrete type names in `impl` method signatures.
 - `RUST-STYLE-IMPL-003`: Keep `impl` blocks contiguous and ordered as inherent, standard-library traits, third-party traits, then workspace-member traits.
@@ -352,29 +68,29 @@ Serde defaults are part of the data contract. The checker does not remove them b
 - `RUST-STYLE-TYPE-001`: Do not add type aliases that are only pure renames.
 - `RUST-STYLE-LET-001`: Place immutable `let` bindings before mutable ones when the reorder is semantically safe.
 
-### Logging and runtime safety
+**Logging and runtime safety**
 
 - `RUST-STYLE-LOG-002`: Use structured logging fields and complete-sentence log messages.
 - `RUST-STYLE-RUNTIME-001`: Do not use `unwrap()` in non-test code.
 - `RUST-STYLE-RUNTIME-002`: `expect()` must use a clear, user-actionable string literal message.
 
-### Numeric literals
+**Numeric literals**
 
 - `RUST-STYLE-NUM-001`: Separate numeric literal suffixes with an underscore (for example, `10_f32`).
 - `RUST-STYLE-NUM-002`: Use underscore grouping for integers with more than three digits.
 
-### Readability and spacing
+**Readability and spacing**
 
 - `RUST-STYLE-READ-002`: Keep functions at or under 120 lines.
 - `RUST-STYLE-SPACE-003`: Do not insert blank lines within the same statement type. Use exactly one blank line between different statement types. Keep constant declaration groups compact only within the same visibility batch.
 - `RUST-STYLE-SPACE-004`: Insert exactly one blank line before each `return` and before final tail expressions unless the body is a single expression.
 
-### Tests
+**Tests**
 
 - `RUST-STYLE-TEST-001`: Use descriptive `snake_case` test names.
 - `RUST-STYLE-TEST-002`: Reserve `#[cfg(test)] mod _test` for keep-alive imports only.
 
-### Swift first batch
+**Swift first batch**
 
 - `SWIFT-STYLE-FILE-001`: Do not use `mod.swift`; use flat Swift entry files.
 - `SWIFT-STYLE-IMPORT-004`: Do not import individual Swift symbols; import modules instead.
@@ -385,39 +101,246 @@ Serde defaults are part of the data contract. The checker does not remove them b
 
 The governing Swift applicability map lives in `openwiki/specifications/swift-style-rule-applicability.md`.
 
-## Development
+</details>
 
-This repository uses `cargo make` tasks from `Makefile.toml`.
+## Status
+
+The Rust checker supports syntax analysis, semantic validation, and automatic fixes.
+Swift support covers an initial set of read-only checks. Swift fixes are not implemented.
+
+Rule behavior is defined by the checker source and its tests. Run `vstyle coverage`
+for the active rule list. Serde default attributes are preserved, including defaults
+on `Option<T>` fields.
+
+## Workspace Posture
+
+- The root `Cargo.toml` owns the `vibe-style` package, dependencies, and release profiles.
+- `src/main.rs` and `src/cli.rs` provide the `vstyle` and `cargo-vstyle` commands.
+- `src/style.rs` and `src/style/` own rule checks, file selection, fixes, and semantic validation.
+- `tests/` owns integration tests and regression fixtures.
+- `scripts/` owns the release and semantic benchmark harnesses.
+- `action.yml` owns the composite GitHub Action.
+- `Makefile.toml` and `.github/workflows/` own local checks, CI, and release jobs.
+- `openwiki/` contains generated documentation. Use source code and tests to verify behavior.
+
+## Usage
+
+### Installation
+
+#### Build from Source
+
+Use the stable Rust toolchain selected by `rust-toolchain.toml`.
 
 ```sh
-# Format.
-cargo make fmt
-cargo make fmt-check
+# Clone the repository.
+git clone https://github.com/acg-box/vibe-style
+cd vibe-style
 
-# Full read-only verification.
-cargo make check
+# Build both binaries with the shipping release profile.
+cargo build --profile final-release --locked --bins
 
-# Rust-only clippy check.
-cargo make check-rust
-
-# vibe-style read-only check.
-cargo make check-vstyle
-
-# Apply lint fixes (clippy + vibe-style).
-cargo make lint
-
-# Apply vibe-style fixes.
-cargo make lint-vstyle
-
-# Rust tests.
-cargo make test-rust
+# Install both binaries from the local package.
+cargo install --path . --locked
 ```
 
-## Documentation
+The build writes `vstyle` and `cargo-vstyle` to `target/final-release/`.
+After installation, use either `vstyle ...` or `cargo vstyle ...`.
 
-Durable repository docs start at `openwiki/quickstart.md`.
-Documentation placement and naming rules live in `openwiki/agent-context.md`.
+To compile and install the published crate instead, run:
 
-## License
+```sh
+cargo install vibe-style --locked
+```
 
-Licensed under [GPL-3.0-only](LICENSE).
+#### Download Pre-built Binary
+
+Download an archive from [GitHub Releases](https://github.com/acg-box/vibe-style/releases/latest).
+
+- **macOS**: `vibe-style-aarch64-apple-darwin-v<VERSION>.tgz` for Apple Silicon.
+- **Windows**: `vibe-style-x86_64-pc-windows-msvc-v<VERSION>.zip` for x86-64 MSVC.
+- **Unix**: `vibe-style-x86_64-unknown-linux-gnu-v<VERSION>.tgz` for x86-64 GNU/Linux.
+
+Extract the archive. Copy both binaries to a directory on `PATH`, such as
+`~/.cargo/bin` on Unix or `%USERPROFILE%\.cargo\bin` on Windows.
+
+If `cargo-binstall` is available, it can install the prebuilt binaries:
+
+```sh
+cargo binstall vibe-style
+```
+
+### Configuration
+
+#### Runtime Settings
+
+Rules are built into the checker. There is no user configuration file.
+`curate` and `tune` require `--language rust` or `--language swift`.
+
+Set `VSTYLE_MAX_IMPORT_SUGGESTION_ROUNDS` to control the number of missing-import
+suggestion rounds during Rust fixes. The default is `2`. A larger value can require
+more `cargo check --message-format=json` runs.
+
+Semantic cache files are stored under `target/vstyle-cache/semantic/`. Cache keys include
+vstyle version metadata, compiler details, the lockfile, Cargo options, and selected
+Rust source files. Use `--verbose` to print cache hit and miss counts.
+
+### Interaction
+
+```sh
+# Check Rust style across the workspace.
+vstyle curate --language rust --workspace
+
+# Check Swift style without changing files.
+vstyle curate --language swift --workspace
+
+# Apply supported Rust fixes, then fail if violations remain.
+vstyle tune --language rust --workspace --strict
+
+# Select packages and features.
+vstyle tune --language rust -p api -p db-service --features serde,tracing
+vstyle tune --language rust -p api --all-features --no-default-features
+
+# Include semantic cache statistics.
+vstyle tune --language rust --verbose
+
+# List implemented rule IDs.
+vstyle coverage
+```
+
+`tune` writes progress to stderr, including when stderr is redirected. It reports
+scan phases, fix rounds, scoped fix batches, and semantic validation.
+
+| Command | Exit behavior |
+| --- | --- |
+| `curate` | Exit `0` when no violations remain; exit `1` when violations are found. |
+| `tune` | Exit `0` after a completed run, including when violations remain. |
+| `tune --strict` | Exit `1` when violations remain. |
+| Internal fix or semantic-validation error | Restore selected source files and return a failure. |
+
+Use the GitHub Action to install a release and run a read-only check:
+
+```yaml
+- uses: actions/checkout@v7
+- uses: acg-box/vibe-style@v0.2.5
+  with:
+    language: rust
+    workspace: true
+    args: --all-features
+    version: v0.2.5
+```
+
+Set `language: swift` to check Swift files. `version` defaults to `latest`.
+Use an explicit release tag for a fixed binary version. Use `version: checkout`
+when the action must build the source in its own checkout.
+
+### Update
+
+Update an installation from crates.io:
+
+```sh
+cargo install vibe-style --locked --force
+```
+
+For a prebuilt installation, download the new release archive and replace both
+binaries. For a source installation, pull the new source and repeat the local install
+command. Update both the action ref and its `version` input when CI pins a release.
+
+## Development
+
+`rust-toolchain.toml` selects stable Rust. Formatting uses nightly rustfmt.
+The local tasks require `cargo-make`, `taplo`, and `cargo-nextest`.
+Use the host-managed developer tools and the repository toolchain settings.
+
+```sh
+# Correct Rust and TOML formatting.
+cargo make fmt
+
+# Check formatting without changing files.
+cargo make fmt-check
+
+# Run formatting, Clippy, style checks, and tests.
+cargo make check
+
+# Run individual Rust checks or tests.
+cargo make check-rust
+cargo make test-rust
+
+# Apply Clippy and style fixes.
+cargo make lint
+```
+
+The style task in `cargo make check` uses the installed `cargo-vstyle` command.
+CI checks the current source with a local build:
+
+```sh
+cargo run --locked --all-features --bin vstyle -- \
+  curate --language rust --workspace --all-features
+```
+
+Use the benchmark harnesses when a change affects scan, fix, or semantic-validation performance:
+
+```sh
+cargo make bench-release-vstyle
+cargo make bench-semantic-vstyle
+```
+
+The release harness builds the local `final-release` binary and measures a disposable
+checkout of `HEAD`. Commit source changes before using it to measure those changes.
+The semantic harness uses a fixture that requires semantic validation and measures
+cold and warm cache runs. A no-op self-check does not measure semantic performance.
+Set `VSTYLE_BENCH_PROFILE=release` to compare the standard release profile.
+
+The `Benchmarks` workflow stores run artifacts. Use fresh results for comparisons;
+benchmark baselines are not stored in the repository. See the
+[benchmark runbook](openwiki/runbooks/benchmark-tracking.md) for the measurement procedure.
+
+### Architecture
+
+- `src/cli.rs` maps commands, language selection, and Cargo options to the style engine.
+- `src/style/shared.rs` defines rule IDs and resolves package and source-file scope.
+- `src/style/bindings.rs` and `src/style/imports.rs` handle Rust binding and import analysis.
+- The other `src/style/` modules own rule groups, edit application, and semantic checks.
+- `tests/` verifies command behavior and source transformations.
+- The release workflow builds three platform archives, publishes the GitHub Release,
+  checks the released action, and publishes the crate to crates.io.
+- Generated documentation starts at [OpenWiki quickstart](openwiki/quickstart.md).
+  Documentation routing is described in [agent context](openwiki/agent-context.md).
+
+## Support Me
+
+If you find this project helpful and would like to support its development, you can buy me a coffee!
+
+Your support is greatly appreciated and motivates me to keep improving this project.
+
+- **Fiat**
+    - [Ko-fi](https://ko-fi.com/hack_ink)
+    - [Afdian](https://afdian.com/a/hack_ink)
+- **Crypto**
+    - **Bitcoin**
+        - `bc1pedlrf67ss52md29qqkzr2avma6ghyrt4jx9ecp9457qsl75x247sqcp43c`
+    - **Ethereum**
+        - `0x3e25247CfF03F99a7D83b28F207112234feE73a6`
+    - **Polkadot**
+        - `156HGo9setPcU2qhFMVWLkcmtCEGySLwNqa3DaEiYSWtte4Y`
+
+Thank you for your support!
+
+## Appreciation
+
+We would like to extend our heartfelt gratitude to the following projects and contributors:
+
+- The Rust community for their continuous support and development of the Rust ecosystem.
+
+## Additional Acknowledgements
+
+- TODO
+
+---
+
+<div align="right">
+
+### License
+
+<sup>Licensed under [GPL-3.0-only](LICENSE).</sup>
+
+</div>
