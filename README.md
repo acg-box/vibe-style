@@ -221,12 +221,12 @@ Use the GitHub Action to install a release and run a read-only check:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: acg-box/vibe-style@v0.2.5
+- uses: acg-box/vibe-style@v0.2.6
   with:
     language: rust
     workspace: true
     args: --all-features
-    version: v0.2.5
+    version: v0.2.6
 ```
 
 Set `language: swift` to check Swift files. `version` defaults to `latest`.
