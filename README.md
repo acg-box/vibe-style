@@ -220,8 +220,8 @@ scan phases, fix rounds, scoped fix batches, and semantic validation.
 Use the GitHub Action to install a release and run a read-only check:
 
 ```yaml
-- uses: actions/checkout@v7
-- uses: acg-box/vibe-style@v0.2.6
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+- uses: acg-box/vibe-style@20c475a2834b26c380304cab312a24ff58ce5518 # v0.2.6
   with:
     language: rust
     workspace: true
