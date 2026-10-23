@@ -2,11 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use ra_ap_syntax::{
 	AstNode,
-	ast::{HasAttrs, HasName, HasVisibility, Item, ItemList, MacroCall, Module},
+	ast::{HasAttrs, HasName, Item, ItemList, MacroCall, Module},
 };
 use regex::Regex;
 
-use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
+use crate::style::{
+	shared::{self, Edit, FileContext, TopItem, TopKind, Violation},
+	syntax,
+};
 
 #[derive(Clone)]
 struct ModuleReorderEntry {
@@ -166,7 +169,7 @@ fn push_mod001_order_violations(
 				ctx,
 				item.line,
 				"RUST-STYLE-MOD-001",
-				"Top-level module item order does not match rust.md order.",
+				"Top-level module item order does not match the required order.",
 				mod001_fixable_lines.contains(&item.line),
 			);
 		}
@@ -639,7 +642,7 @@ fn collect_scope_top_items(ctx: &FileContext, item_list: &ItemList) -> Vec<Scope
 		let line = shared::line_from_offset(&ctx.line_starts, syntax_start);
 		let start_offset = shared::offset_from_line(&ctx.line_starts, line).unwrap_or(syntax_start);
 		let end_offset = usize::from(text_range.end());
-		let visibility = scope_item_visibility_key(&item);
+		let visibility = shared::item_visibility_key(&item);
 		let attrs = item.attrs().map(|attr| attr.syntax().text().to_string()).collect::<Vec<_>>();
 		let hoist_for_macro_scope = scope_item_should_hoist_for_macro_scope(item_list, &item);
 
@@ -652,7 +655,7 @@ fn collect_scope_top_items(ctx: &FileContext, item_list: &ItemList) -> Vec<Scope
 				}),
 				_ => None,
 			},
-			kind: scope_item_kind(&item),
+			kind: shared::classify_top_kind(&item),
 			line,
 			start_offset,
 			end_offset,
@@ -665,24 +668,6 @@ fn collect_scope_top_items(ctx: &FileContext, item_list: &ItemList) -> Vec<Scope
 	}
 
 	items
-}
-
-fn scope_item_kind(item: &Item) -> TopKind {
-	match item {
-		Item::Module(_) => TopKind::Mod,
-		Item::Use(_) => TopKind::Use,
-		Item::MacroRules(_) => TopKind::MacroRules,
-		Item::MacroCall(_) => TopKind::MacroRules,
-		Item::TypeAlias(_) => TopKind::Type,
-		Item::Const(_) => TopKind::Const,
-		Item::Static(_) => TopKind::Static,
-		Item::Trait(_) => TopKind::Trait,
-		Item::Enum(_) => TopKind::Enum,
-		Item::Struct(_) => TopKind::Struct,
-		Item::Impl(_) => TopKind::Impl,
-		Item::Fn(_) => TopKind::Fn,
-		_ => TopKind::Other,
-	}
 }
 
 fn scope_item_should_hoist_for_macro_scope(item_list: &ItemList, item: &Item) -> bool {
@@ -712,7 +697,7 @@ fn scope_has_macro_call(item_list: &ItemList, macro_name: &str) -> bool {
 			continue;
 		};
 
-		if !is_same_ident_local(last_segment.trim(), macro_name) {
+		if !syntax::is_same_ident(last_segment.trim(), macro_name) {
 			continue;
 		}
 
@@ -720,45 +705,6 @@ fn scope_has_macro_call(item_list: &ItemList, macro_name: &str) -> bool {
 	}
 
 	false
-}
-
-fn is_same_ident_local(lhs: &str, rhs: &str) -> bool {
-	let lhs = lhs.strip_prefix("r#").unwrap_or(lhs);
-	let rhs = rhs.strip_prefix("r#").unwrap_or(rhs);
-
-	lhs == rhs
-}
-
-fn scope_item_visibility_key(item: &Item) -> String {
-	scope_item_visibility_text(item)
-		.map(|text| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>())
-		.unwrap_or_default()
-}
-
-fn scope_item_visibility_text(item: &Item) -> Option<String> {
-	match item {
-		Item::Module(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Use(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::TypeAlias(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Const(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Static(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Trait(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Enum(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Struct(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Fn(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		Item::Impl(node) =>
-			node.visibility().map(|visibility| visibility.syntax().text().to_string()),
-		_ => None,
-	}
 }
 
 fn scope_separator_blank_only(ctx: &FileContext, prev: &ScopeTopItem, next: &ScopeTopItem) -> bool {
@@ -905,7 +851,7 @@ fn push_scope_reorder_violations(
 			ctx,
 			*line,
 			"RUST-STYLE-MOD-001",
-			"Top-level module item order does not match rust.md order.",
+			"Top-level module item order does not match the required order.",
 			true,
 		);
 	}

@@ -54,8 +54,9 @@ jobs:
             CLAUDE.md
             .github/workflows/openwiki-update.yml
           branch: openwiki/update
-          commit-message: "docs: update OpenWiki"
-          title: "docs: update OpenWiki"
+          author: "XV <xv@acg.box>"
+          commit-message: "Update OpenWiki documentation"
+          title: "Update OpenWiki documentation"
           body: |
             Automated OpenWiki documentation update.
 

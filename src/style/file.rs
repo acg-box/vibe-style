@@ -5,7 +5,10 @@ use ra_ap_syntax::{
 	ast::{MacroCall, Path, Use},
 };
 
-use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
+use crate::style::{
+	shared::{self, Edit, FileContext, TopItem, TopKind, Violation},
+	syntax,
+};
 
 pub(crate) fn check_mod_rs(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	if ctx.path.file_name().is_some_and(|name| name == "mod.rs") {
@@ -41,7 +44,7 @@ pub(crate) fn check_error_rs_no_use(
 		.top_items
 		.iter()
 		.filter_map(|item| item.name.as_deref())
-		.map(|name| normalize_ident(name).to_owned())
+		.map(|name| syntax::normalize_ident(name).to_owned())
 		.collect::<HashSet<_>>();
 	let mut symbol_paths: HashMap<String, HashSet<String>> = HashMap::new();
 	let mut symbol_ranges: HashMap<String, Vec<(usize, usize, String)>> = HashMap::new();
@@ -130,44 +133,9 @@ pub(crate) fn check_error_rs_no_use(
 	}
 }
 
-fn normalize_ident(name: &str) -> &str {
-	name.strip_prefix("r#").unwrap_or(name)
-}
-
-fn is_same_ident(lhs: &str, rhs: &str) -> bool {
-	normalize_ident(lhs) == normalize_ident(rhs)
-}
-
 fn extract_use_path(item: &TopItem) -> Option<String> {
-	find_use_path_range(&item.raw)
+	syntax::find_use_path_range(&item.raw)
 		.and_then(|(start, end)| item.raw.get(start..end).map(|s| s.trim().to_owned()))
-}
-
-fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
-	for (idx, _) in text.match_indices("use") {
-		let prev = text[..idx].chars().next_back();
-		let next = text.get(idx + 3..).and_then(|tail| tail.chars().next());
-		let is_prev_boundary = prev.is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'));
-		let is_next_whitespace = next.is_some_and(char::is_whitespace);
-
-		if !is_prev_boundary || !is_next_whitespace {
-			continue;
-		}
-
-		let bytes = text.as_bytes();
-		let mut start = idx + 3;
-
-		while start < bytes.len() && bytes[start].is_ascii_whitespace() {
-			start += 1;
-		}
-
-		let tail = text.get(start..)?;
-		let semi = tail.find(';')?;
-
-		return Some((start, start + semi));
-	}
-
-	None
 }
 
 fn collect_import_bindings_from_use_path(path: &str) -> Option<Vec<(String, String)>> {
@@ -243,7 +211,7 @@ fn collect_import_bindings_from_segment(segment: &str, out: &mut Vec<(String, St
 				}
 
 				let symbol = prefix.rsplit("::").next().unwrap_or(prefix).trim();
-				let symbol = normalize_ident(symbol);
+				let symbol = syntax::normalize_ident(symbol);
 
 				if symbol.is_empty() {
 					return false;
@@ -287,7 +255,7 @@ fn collect_import_bindings_from_segment(segment: &str, out: &mut Vec<(String, St
 
 	let full_path = base.replace(' ', "");
 	let symbol = alias.unwrap_or_else(|| base.rsplit("::").next().unwrap_or(base)).trim();
-	let symbol = normalize_ident(symbol);
+	let symbol = syntax::normalize_ident(symbol);
 
 	if symbol.is_empty() || matches!(symbol, "self" | "super" | "crate" | "*") {
 		return false;
@@ -320,7 +288,7 @@ fn unqualified_path_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text(), symbol) {
+		if !syntax::is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -361,7 +329,7 @@ fn unqualified_macro_call_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text(), symbol) {
+		if !syntax::is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 

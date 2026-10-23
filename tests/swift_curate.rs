@@ -1,16 +1,13 @@
 #![allow(missing_docs, unused_crate_dependencies)]
 
-use std::{
-	env, fs,
-	path::{Path, PathBuf},
-	process::{self, Command},
-	time::{SystemTime, UNIX_EPOCH},
-};
+#[path = "support/fixture.rs"] mod fixture;
 
-fn create_temp_workspace_root() -> PathBuf {
-	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Clock.").as_nanos();
-	let root = env::temp_dir().join(format!("vstyle-swift-curate-{}-{stamp}", process::id()));
-	let _ = fs::remove_dir_all(&root);
+use std::{fs, path::Path, process::Command};
+
+use fixture::Fixture;
+
+fn create_temp_workspace_root() -> Fixture {
+	let root = Fixture::new("swift-curate");
 
 	fs::create_dir_all(root.join("crates/app/src")).expect("Create Rust package src.");
 	fs::create_dir_all(root.join("Sources/App")).expect("Create Swift sources.");
@@ -37,7 +34,7 @@ edition = "2021"
 	fs::write(root.join("crates/app/src/lib.rs"), "").expect("Write Rust lib.");
 	fs::write(
 		root.join(".gitignore"),
-		"/target\n/Sources/App/Ignored.swift\n/Sources/App/IgnoredTracked.swift\n",
+		"/target\n/Sources/App/Ignored.swift\n/Sources/App/IgnoredTracked.swift\n/Sources/App/忽略.swift\n",
 	)
 	.expect("Write gitignore.");
 
@@ -74,6 +71,8 @@ func testForceAllowed() {
 		.expect("write ignored Swift source");
 	fs::write(temp_dir.join("Sources/App/IgnoredTracked.swift"), "let value = trackedIgnored!\n")
 		.expect("write tracked ignored Swift source");
+	fs::write(temp_dir.join("Sources/App/忽略.swift"), "let value = ignoredUnicode!\n")
+		.expect("Write ignored Unicode source.");
 	fs::write(temp_dir.join("Tests/AppTests.swift"), swift_test_source)
 		.expect("write Swift test source");
 }
@@ -176,6 +175,7 @@ fn assert_swift_curate_reports_expected_violations(temp_dir: &Path) {
 		"non-ignored Swift files should be scanned regardless of tracking state"
 	);
 	assert!(!stdout.contains("Ignored.swift"), "git-ignored Swift files should not be scanned");
+	assert!(!stdout.contains("忽略.swift"), "Ignored Unicode paths must not be scanned:\n{stdout}");
 	assert!(
 		!stdout.contains("IgnoredTracked.swift"),
 		"git-ignored Swift files should not be scanned even when tracked"

@@ -1,16 +1,13 @@
 #![allow(missing_docs, unused_crate_dependencies)]
 
-use std::{
-	env, fs,
-	path::PathBuf,
-	process::Command,
-	time::{SystemTime, UNIX_EPOCH},
-};
+#[path = "support/fixture.rs"] mod fixture;
 
-fn create_temp_crate_root() -> PathBuf {
-	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Clock.").as_nanos();
-	let root = env::temp_dir().join(format!("vstyle-mod007-{}", stamp));
-	let _ = fs::remove_dir_all(&root);
+use std::{fs, process::Command};
+
+use fixture::Fixture;
+
+fn create_temp_crate_root() -> Fixture {
+	let root = Fixture::new("mod007-super-import");
 
 	fs::create_dir_all(root.join("src")).expect("Create src.");
 	fs::write(

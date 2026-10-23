@@ -905,14 +905,13 @@ fn parse_ufcs_target_call(text: &str) -> Option<(String, String)> {
 		return None;
 	}
 
-	let chars = text.chars().collect::<Vec<_>>();
 	let mut depth = 0_i32;
 	let mut close_idx = None;
 
-	for (idx, ch) in chars.iter().enumerate() {
-		if *ch == '<' {
+	for (idx, ch) in text.char_indices() {
+		if ch == '<' {
 			depth += 1;
-		} else if *ch == '>' {
+		} else if ch == '>' {
 			depth -= 1;
 
 			if depth == 0 {

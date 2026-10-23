@@ -2,33 +2,19 @@ use std::{
 	cmp::Reverse,
 	collections::{BTreeMap, BTreeSet},
 	env, fs,
-	io::ErrorKind,
 	path::{Path, PathBuf},
-	process::{self, Command, Stdio},
-	sync::{
-		OnceLock,
-		atomic::{AtomicU64, Ordering},
-	},
+	process::{Command, Stdio},
+	sync::OnceLock,
 };
 
 use color_eyre::{Result, eyre};
 use serde_json::Value;
 
-use crate::style::shared::CargoOptions;
+use crate::style::shared::{self, CargoOptions};
 
 const DEFAULT_MAX_IMPORT_SUGGESTION_ROUNDS: usize = 2;
 const MAX_IMPORT_SUGGESTION_ROUNDS_ENV: &str = "VSTYLE_MAX_IMPORT_SUGGESTION_ROUNDS";
 const HARD_MAX_IMPORT_SUGGESTION_ROUNDS: usize = 16;
-const CACHE_DIR_SUFFIX: &str = "target/vstyle-cache/semantic";
-
-static SEMANTIC_CACHE_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
-static SEMANTIC_CACHE_MISS_COUNT: AtomicU64 = AtomicU64::new(0);
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct SemanticCacheStats {
-	pub(crate) hits: u64,
-	pub(crate) misses: u64,
-}
 
 #[derive(Clone, Debug)]
 struct ImportSuggestion {
@@ -40,21 +26,21 @@ pub(crate) fn apply_semantic_fixes(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
 	initial_stdout: Option<String>,
-	verbose: bool,
 	progress: bool,
 ) -> Result<usize> {
 	if files.is_empty() {
 		return Ok(0);
 	}
 
-	let style_files = files.iter().map(|path| normalize_path(path)).collect::<BTreeSet<_>>();
+	let style_files =
+		files.iter().map(|path| shared::normalize_path(path)).collect::<BTreeSet<_>>();
 	let mut applied_total = 0_usize;
 	let mut next_stdout = initial_stdout;
 
 	for _ in 0..max_import_suggestion_rounds() {
 		let stdout = match next_stdout.take() {
 			Some(stdout) => stdout,
-			None => run_semantic_cargo_check(cargo_options, files, verbose, progress)?,
+			None => run_semantic_cargo_check(cargo_options, progress)?,
 		};
 		let suggestions = collect_missing_import_suggestions(&stdout);
 		let mut applied_round = 0_usize;
@@ -80,14 +66,13 @@ pub(crate) fn apply_semantic_fixes(
 pub(crate) fn collect_compiler_error_files_with_output(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
-	verbose: bool,
 	progress: bool,
 ) -> Result<(String, BTreeSet<PathBuf>)> {
 	if files.is_empty() {
 		return Ok((String::new(), BTreeSet::new()));
 	}
 
-	let stdout = run_semantic_cargo_check(cargo_options, files, verbose, progress)?;
+	let stdout = run_semantic_cargo_check(cargo_options, progress)?;
 	let compiler_error_files = collect_compiler_error_files_from_output(&stdout);
 
 	Ok((stdout, compiler_error_files))
@@ -106,30 +91,9 @@ pub(crate) fn semantic_check_succeeded(output: &str) -> Option<bool> {
 pub(crate) fn collect_compiler_error_files(
 	files: &[PathBuf],
 	cargo_options: &CargoOptions,
-	verbose: bool,
 	progress: bool,
 ) -> Result<BTreeSet<PathBuf>> {
-	Ok(collect_compiler_error_files_with_output(files, cargo_options, verbose, progress)?.1)
-}
-
-pub(crate) fn cache_stats() -> SemanticCacheStats {
-	SemanticCacheStats {
-		hits: SEMANTIC_CACHE_HIT_COUNT.load(Ordering::Relaxed),
-		misses: SEMANTIC_CACHE_MISS_COUNT.load(Ordering::Relaxed),
-	}
-}
-
-pub(crate) fn reset_cache_stats() {
-	SEMANTIC_CACHE_HIT_COUNT.store(0, Ordering::Relaxed);
-	SEMANTIC_CACHE_MISS_COUNT.store(0, Ordering::Relaxed);
-}
-
-fn record_cache_hit() {
-	SEMANTIC_CACHE_HIT_COUNT.fetch_add(1, Ordering::Relaxed);
-}
-
-fn record_cache_miss() {
-	SEMANTIC_CACHE_MISS_COUNT.fetch_add(1, Ordering::Relaxed);
+	Ok(collect_compiler_error_files_with_output(files, cargo_options, progress)?.1)
 }
 
 fn max_import_suggestion_rounds() -> usize {
@@ -170,30 +134,8 @@ fn max_import_suggestion_rounds() -> usize {
 	})
 }
 
-fn run_semantic_cargo_check(
-	cargo_options: &CargoOptions,
-	files: &[PathBuf],
-	verbose: bool,
-	progress: bool,
-) -> Result<String> {
+fn run_semantic_cargo_check(cargo_options: &CargoOptions, progress: bool) -> Result<String> {
 	let args = semantic_check_args(cargo_options);
-	let cache_path = semantic_cache_path(cargo_options, files, verbose);
-
-	if let Some(cache_path) = cache_path.as_ref() {
-		match read_cached_semantic_output(cache_path, verbose) {
-			Some(stdout) if semantic_check_succeeded(&stdout).is_some() => {
-				record_cache_hit();
-
-				return Ok(stdout);
-			},
-			Some(_) | None => {
-				record_cache_miss();
-			},
-		}
-	} else {
-		record_cache_miss();
-	}
-
 	let mut cmd = Command::new("cargo");
 
 	for arg in args {
@@ -215,10 +157,6 @@ fn run_semantic_cargo_check(
 			"Semantic cargo check exited with status {} without a `build-finished` result.",
 			output.status
 		));
-	}
-
-	if let Some(cache_path) = cache_path {
-		write_cached_semantic_output(&cache_path, &stdout, verbose);
 	}
 
 	Ok(stdout)
@@ -252,233 +190,6 @@ fn semantic_check_args(cargo_options: &CargoOptions) -> Vec<String> {
 	}
 
 	args
-}
-
-fn semantic_cache_path(
-	cargo_options: &CargoOptions,
-	files: &[PathBuf],
-	verbose: bool,
-) -> Option<PathBuf> {
-	let key = match semantic_cache_key(cargo_options, files, verbose) {
-		Ok(key) => key,
-		Err(err) => {
-			log_verbose_error(verbose, &format!("Semantic cache key generation failed: {err}."));
-
-			return None;
-		},
-	};
-	let cache_dir = semantic_cache_dir(verbose)?;
-
-	Some(cache_dir.join(format!("{key}.txt")))
-}
-
-fn semantic_cache_key(
-	cargo_options: &CargoOptions,
-	files: &[PathBuf],
-	verbose: bool,
-) -> Result<String> {
-	let args = semantic_check_args(cargo_options);
-	let mut input = String::new();
-
-	input.push_str("vstyle=");
-	input.push_str(env!("CARGO_PKG_VERSION"));
-	input.push('\n');
-	input.push_str("vstyle_git=");
-	input.push_str(env!("VERGEN_GIT_SHA"));
-	input.push('\n');
-	input.push_str("vstyle_target=");
-	input.push_str(env!("VERGEN_CARGO_TARGET_TRIPLE"));
-	input.push('\n');
-	input.push_str("rustc_version=");
-	input.push_str(&rustc_version_signature(verbose));
-	input.push('\n');
-	input.push_str("cargo_lock=");
-	input.push_str(&cargo_lock_fingerprint(verbose).unwrap_or_else(|| "missing".to_owned()));
-	input.push('\n');
-	input.push_str("cargo_args=");
-	input.push_str(&args.join(" "));
-	input.push('\n');
-	input.push_str("style_files=");
-
-	let mut style_files = files.to_vec();
-
-	style_files.sort();
-
-	for file in style_files {
-		let fingerprint = file_fingerprint(&file, verbose)?;
-
-		input.push('\n');
-		input.push_str(&normalize_cache_path(&fingerprint.0));
-		input.push(':');
-		input.push_str(&fingerprint.1);
-	}
-
-	Ok(stable_hash_hex(input.as_bytes()))
-}
-
-fn semantic_cache_dir(verbose: bool) -> Option<PathBuf> {
-	let base = match env::current_dir() {
-		Ok(current) => current,
-		Err(err) => {
-			log_verbose_error(verbose, &format!("Failed to resolve current directory: {err}."));
-
-			return None;
-		},
-	};
-	let cache_dir = base.join(CACHE_DIR_SUFFIX);
-
-	if let Err(err) = fs::create_dir_all(&cache_dir) {
-		log_verbose_error(verbose, &format!("Failed to create cache directory: {err}."));
-
-		return None;
-	}
-
-	Some(cache_dir)
-}
-
-fn read_cached_semantic_output(cache_path: &Path, verbose: bool) -> Option<String> {
-	let output = match fs::read_to_string(cache_path) {
-		Ok(contents) => contents,
-		Err(err) if err.kind() == ErrorKind::NotFound => return None,
-		Err(err) => {
-			log_verbose_error(
-				verbose,
-				&format!("Could not read semantic cache file '{}': {err}.", cache_path.display()),
-			);
-
-			return None;
-		},
-	};
-
-	Some(output)
-}
-
-fn write_cached_semantic_output(cache_path: &Path, stdout: &str, verbose: bool) {
-	let temp_path = cache_path.with_file_name(format!(
-		".{}.{}.tmp",
-		cache_path.file_name().and_then(|name| name.to_str()).unwrap_or("semantic-cache"),
-		process::id()
-	));
-
-	if let Err(err) = fs::write(&temp_path, stdout) {
-		log_verbose_error(
-			verbose,
-			&format!("Could not write semantic cache temp file '{}': {err}.", temp_path.display()),
-		);
-
-		return;
-	}
-	if let Err(err) = fs::rename(&temp_path, cache_path) {
-		let _ = fs::remove_file(&temp_path);
-
-		log_verbose_error(
-			verbose,
-			&format!("Could not write semantic cache file '{}': {err}.", cache_path.display()),
-		);
-	}
-}
-
-fn file_fingerprint(path: &Path, verbose: bool) -> Result<(PathBuf, String)> {
-	let absolute = if path.is_absolute() {
-		path.to_path_buf()
-	} else {
-		let cwd = env::current_dir().map_err(|err| {
-			eyre::eyre!("Failed to resolve current directory for cache fingerprint: {err}.")
-		})?;
-
-		cwd.join(path)
-	};
-	let bytes = match fs::read(&absolute) {
-		Ok(bytes) => bytes,
-		Err(err) => {
-			log_verbose_error(
-				verbose,
-				&format!(
-					"Failed to read style file '{}' for cache fingerprint: {err}.",
-					absolute.display()
-				),
-			);
-
-			return Err(eyre::eyre!(
-				"Failed to read style file '{}' for cache fingerprint: {err}.",
-				absolute.display()
-			));
-		},
-	};
-	let hash = stable_hash_hex(&bytes);
-	let canonical = normalize_path(&absolute);
-
-	Ok((canonical, hash))
-}
-
-fn cargo_lock_fingerprint(verbose: bool) -> Option<String> {
-	let cwd = match env::current_dir() {
-		Ok(cwd) => cwd,
-		Err(err) => {
-			log_verbose_error(verbose, &format!("Failed to resolve current directory: {err}."));
-
-			return None;
-		},
-	};
-	let lock_path = cwd.join("Cargo.lock");
-	let bytes = match fs::read(&lock_path) {
-		Ok(contents) => contents,
-		Err(err) => {
-			log_verbose_error(verbose, &format!("Failed to read Cargo.lock for cache key: {err}."));
-
-			return None;
-		},
-	};
-
-	Some(stable_hash_hex(&bytes))
-}
-
-fn rustc_version_signature(verbose: bool) -> String {
-	let output = match Command::new("rustc").arg("-Vv").output() {
-		Ok(output) => output,
-		Err(err) => {
-			log_verbose_error(verbose, &format!("Failed to run rustc -Vv for cache key: {err}."));
-
-			return "unknown".to_owned();
-		},
-	};
-
-	match String::from_utf8(output.stdout) {
-		Ok(version) => version.trim_end().to_owned(),
-		Err(err) => {
-			log_verbose_error(verbose, &format!("Failed to decode rustc -Vv output: {err}."));
-
-			"unknown".to_owned()
-		},
-	}
-}
-
-fn normalize_cache_path(path: &Path) -> String {
-	path.to_string_lossy().replace('\\', "/")
-}
-
-fn stable_hash_hex(value: &[u8]) -> String {
-	let mut hash = 0xcbf29ce484222325u64;
-
-	for &byte in value {
-		hash ^= byte as u64;
-		hash = hash.wrapping_mul(0x100000001b3);
-	}
-
-	format!("{hash:016x}")
-}
-
-fn log_verbose_error(verbose: bool, message: &str) {
-	if verbose {
-		eprintln!("{message}");
-	}
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-	match fs::canonicalize(path) {
-		Ok(canonical) => canonical,
-		Err(_) => path.to_path_buf(),
-	}
 }
 
 fn collect_missing_import_suggestions(output: &str) -> BTreeMap<PathBuf, Vec<ImportSuggestion>> {
@@ -555,7 +266,7 @@ fn select_best_import_from_help_spans(spans: &[Value]) -> Option<(PathBuf, Impor
 		}
 
 		candidates.push((
-			normalize_path(Path::new(file_name)),
+			shared::normalize_path(Path::new(file_name)),
 			ImportSuggestion { line, imports: imports.clone() },
 			import_candidate_rank(&imports[0]),
 		));
@@ -713,7 +424,7 @@ fn collect_compiler_error_files_from_output(output: &str) -> BTreeSet<PathBuf> {
 			continue;
 		};
 
-		result.insert(normalize_path(Path::new(file_name)));
+		result.insert(shared::normalize_path(Path::new(file_name)));
 	}
 
 	result
@@ -728,14 +439,17 @@ mod tests {
 		time::{SystemTime, UNIX_EPOCH},
 	};
 
-	use crate::style::semantic::{self, ImportSuggestion, fs};
+	use crate::style::{
+		semantic::{self, ImportSuggestion, fs},
+		shared,
+	};
 
 	#[test]
 	fn extracts_use_suggestions_from_rustc_help_replacement() {
 		let output = r#"{"reason":"compiler-message","message":{"children":[{"level":"help","spans":[{"file_name":"a.rs","line_start":1,"suggested_replacement":"use std::collections::HashMap;\n\n"}]}]}}"#;
 		let suggestions = semantic::collect_missing_import_suggestions(output);
 		let imports = suggestions
-			.get(&semantic::normalize_path(Path::new("a.rs")))
+			.get(&shared::normalize_path(Path::new("a.rs")))
 			.expect("import suggestions");
 
 		assert!(
@@ -780,5 +494,7 @@ mod tests {
 			semantic::apply_missing_import_suggestions(&path, &suggestions).expect("Re-apply.");
 
 		assert_eq!(second, 0);
+
+		fs::remove_file(&path).expect("Remove fixture.");
 	}
 }

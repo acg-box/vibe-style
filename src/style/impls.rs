@@ -6,8 +6,10 @@ use ra_ap_syntax::{
 };
 use regex::Regex;
 
-use crate::style::shared::{
-	self, Edit, FileContext, TopItem, TopKind, Violation, WORKSPACE_IMPORT_ROOTS,
+use crate::style::{
+	shared::{self, Edit, FileContext, TopItem, TopKind, Violation},
+	syntax,
+	workspace::WORKSPACE_IMPORT_ROOTS,
 };
 
 pub(crate) fn check_impl_adjacency(
@@ -646,7 +648,7 @@ fn collect_impl_trait_order_hints(ctx: &FileContext) -> HashMap<String, HashSet<
 		let Some(root) = path.split("::").next() else {
 			continue;
 		};
-		let root = normalize_ident(root.trim());
+		let root = syntax::normalize_ident(root.trim());
 		let order = if matches!(root, "std" | "core" | "alloc") {
 			1
 		} else if matches!(root, "crate" | "self" | "super")
@@ -667,39 +669,8 @@ fn collect_impl_trait_order_hints(ctx: &FileContext) -> HashMap<String, HashSet<
 }
 
 fn extract_use_path_from_item_text(text: &str) -> Option<String> {
-	find_use_path_range(text)
+	syntax::find_use_path_range(text)
 		.and_then(|(start, end)| text.get(start..end).map(|s| s.trim().to_owned()))
-}
-
-fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
-	for (idx, _) in text.match_indices("use") {
-		let prev = text[..idx].chars().next_back();
-		let next = text.get(idx + 3..).and_then(|tail| tail.chars().next());
-		let is_prev_boundary = prev.is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'));
-		let is_next_whitespace = next.is_some_and(char::is_whitespace);
-
-		if !is_prev_boundary || !is_next_whitespace {
-			continue;
-		}
-
-		let bytes = text.as_bytes();
-		let mut start = idx + 3;
-
-		while start < bytes.len() && bytes[start].is_ascii_whitespace() {
-			start += 1;
-		}
-
-		let tail = text.get(start..)?;
-		let semi = tail.find(';')?;
-
-		return Some((start, start + semi));
-	}
-
-	None
-}
-
-fn normalize_ident(name: &str) -> &str {
-	name.strip_prefix("r#").unwrap_or(name)
 }
 
 fn imported_symbols_from_use_path(path: &str) -> Vec<String> {

@@ -10,7 +10,7 @@ keywords    = []
 license     = "GPL-3.0-only"
 name        = "vibe-style"
 readme      = "README.md"
-repository  = "https://github.com/acgxv/vibe-style"
+repository  = "https://github.com/acg-box/vibe-style"
 resolver    = "3"
 version     = "0.2.7"
 
@@ -39,6 +39,7 @@ cargo_metadata = { version = "~0.23" }
 clap           = { version = "~4.6", features = ["derive"] }
 color-eyre     = { version = "~0.6" }
 # rust-analyzer releases can break APIs in each 0.0.x release.
+# Keep unicode-ident at 1.0.24 in Cargo.lock while this lexer uses Unicode 17.
 ra_ap_syntax = { version = "=0.0.359" }
 rayon        = { version = "~1.12" }
 regex        = { version = "~1.13" }

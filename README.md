@@ -180,9 +180,9 @@ Set `VSTYLE_MAX_IMPORT_SUGGESTION_ROUNDS` to control the number of missing-impor
 suggestion rounds during Rust fixes. The default is `2`. A larger value can require
 more `cargo check --message-format=json` runs.
 
-Semantic cache files are stored under `target/vstyle-cache/semantic/`. Cache keys include
-vstyle version metadata, compiler details, the lockfile, Cargo options, and selected
-Rust source files. Use `--verbose` to print cache hit and miss counts.
+Each semantic validation invokes Cargo. Cargo owns the build cache and checks source,
+manifest, dependency, and build-script changes before it reuses compiler results.
+vstyle does not store compiler output in a separate persistent cache.
 
 ### Interaction
 
@@ -200,7 +200,7 @@ vstyle tune --language rust --workspace --strict
 vstyle tune --language rust -p api -p db-service --features serde,tracing
 vstyle tune --language rust -p api --all-features --no-default-features
 
-# Include semantic cache statistics.
+# Include semantic recovery details.
 vstyle tune --language rust --verbose
 
 # List implemented rule IDs.
@@ -269,8 +269,8 @@ cargo make test-rust
 cargo make lint
 ```
 
-The style task in `cargo make check` uses the installed `cargo-vstyle` command.
-CI checks the current source with a local build:
+Local tasks and CI use `cargo make check-vstyle` to check the current source with a
+local build. This task runs:
 
 ```sh
 cargo run --locked --all-features --bin vstyle -- \
@@ -284,10 +284,12 @@ cargo make bench-release-vstyle
 cargo make bench-semantic-vstyle
 ```
 
-The release harness builds the local `final-release` binary and measures a disposable
-checkout of `HEAD`. Commit source changes before using it to measure those changes.
+The release harness builds the local `final-release` binary and measures a temporary
+source snapshot of `HEAD`. Commit source changes before using it to measure those changes.
 The semantic harness uses a fixture that requires semantic validation and measures
-cold and warm cache runs. A no-op self-check does not measure semantic performance.
+cold and warm Cargo builds. Both runs invoke Cargo. A no-op self-check does not measure
+semantic performance. The harnesses share setup and timing code in
+`scripts/benchmark-common.bash` and remove their temporary source directories on exit.
 Set `VSTYLE_BENCH_PROFILE=release` to compare the standard release profile.
 
 The `Benchmarks` workflow stores run artifacts. Use fresh results for comparisons;
@@ -297,10 +299,17 @@ benchmark baselines are not stored in the repository. See the
 ### Architecture
 
 - `src/cli.rs` maps commands, language selection, and Cargo options to the style engine.
-- `src/style/shared.rs` defines rule IDs and resolves package and source-file scope.
-- `src/style/bindings.rs` and `src/style/imports.rs` handle Rust binding and import analysis.
+- `src/style.rs` exposes the style engine and rule coverage to the CLI.
+- `src/style/engine.rs` owns check state, fix rounds, semantic recovery, and rollback.
+- `src/style/rules.rs` dispatches Rust rules. `shared.rs` owns source contexts and diagnostics;
+  `syntax.rs` owns common Rust syntax helpers.
+- `src/style/workspace.rs` owns Cargo package selection and Git ignore file discovery.
+- `src/style/imports.rs` coordinates import plans. Its child modules own aliases, scopes,
+  use paths, grouping, local imports, qualification, derives, and shortening. Shared
+  analysis, reference rewrites, and rule sequencing have separate owners.
 - The other `src/style/` modules own rule groups, edit application, and semantic checks.
-- `tests/` verifies command behavior and source transformations.
+- `src/style/tests/` groups engine regression tests by responsibility. `tests/` verifies
+  command behavior and source transformations, with shared temporary-directory ownership.
 - The release workflow builds three platform archives, publishes the GitHub Release,
   checks the released action, and publishes the crate to crates.io.
 - Generated documentation starts at [OpenWiki quickstart](openwiki/quickstart.md).

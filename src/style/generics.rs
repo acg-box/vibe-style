@@ -1,11 +1,12 @@
 use ra_ap_syntax::{
 	AstNode,
-	ast::{
-		self, GenericArg, GenericArgList, HasGenericArgs, LetStmt, Path, PathSegment, TypeAnchor,
-	},
+	ast::{self, GenericArg, GenericArgList, HasGenericArgs, LetStmt, PathSegment, TypeAnchor},
 };
 
-use crate::style::shared::{self, Edit, FileContext, Violation};
+use crate::style::{
+	shared::{self, Edit, FileContext, Violation},
+	syntax,
+};
 
 const RULE_ID_UNNECESSARY_TURBOFISH: &str = "RUST-STYLE-GENERICS-002";
 const RULE_ID_TURBOFISH_CANONICAL: &str = "RUST-STYLE-GENERICS-003";
@@ -194,7 +195,7 @@ fn associated_turbofish_range(
 	let path = path_expr.path()?;
 	let mut segments = Vec::<PathSegment>::new();
 
-	if !collect_simple_path_segments(&path, &mut segments) {
+	if !syntax::collect_simple_path_segments(&path, &mut segments) {
 		return None;
 	}
 
@@ -234,7 +235,7 @@ fn explicit_type_segment_info(let_type: &ra_ap_syntax::ast::Type) -> Option<Expl
 	let path = path_type.path()?;
 	let mut segments = Vec::<PathSegment>::new();
 
-	if !collect_simple_path_segments(&path, &mut segments) {
+	if !syntax::collect_simple_path_segments(&path, &mut segments) {
 		return None;
 	}
 
@@ -270,30 +271,6 @@ fn unwrap_turbofish_wrappers(mut expr: ra_ap_syntax::ast::Expr) -> ra_ap_syntax:
 	}
 }
 
-fn collect_simple_path_segments(path: &Path, out: &mut Vec<PathSegment>) -> bool {
-	if let Some(qualifier) = path.qualifier()
-		&& !collect_simple_path_segments(&qualifier, out)
-	{
-		return false;
-	}
-
-	let Some(segment) = path.segment() else {
-		return false;
-	};
-
-	if segment.type_anchor().is_some()
-		|| segment.parenthesized_arg_list().is_some()
-		|| segment.ret_type().is_some()
-		|| segment.return_type_syntax().is_some()
-	{
-		return false;
-	}
-
-	out.push(segment);
-
-	true
-}
-
 fn canonicalize_type_anchor(type_anchor: &TypeAnchor) -> Option<String> {
 	let anchor_type = type_anchor.ty()?;
 	let ast::Type::PathType(path_type) = anchor_type else {
@@ -302,7 +279,7 @@ fn canonicalize_type_anchor(type_anchor: &TypeAnchor) -> Option<String> {
 	let path = path_type.path()?;
 	let mut segments = Vec::<PathSegment>::new();
 
-	if !collect_simple_path_segments(&path, &mut segments) {
+	if !syntax::collect_simple_path_segments(&path, &mut segments) {
 		return None;
 	}
 

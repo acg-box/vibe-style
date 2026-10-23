@@ -365,8 +365,7 @@ fn is_swift_test_file(path: &Path) -> bool {
 	let text = path.to_string_lossy().replace('\\', "/");
 	let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
 
-	text.contains("/Tests/")
-		|| text.contains("/tests/")
+	text.split('/').any(|part| matches!(part, "Tests" | "tests"))
 		|| file_name.ends_with("Tests.swift")
 		|| file_name.ends_with("Test.swift")
 }
@@ -435,6 +434,13 @@ func testExample() {
 		);
 
 		assert!(!rules.contains("SWIFT-STYLE-RUNTIME-001"));
+
+		for path in ["Tests/Support.swift", "tests/Support.swift"] {
+			assert!(
+				!rules_for(Path::new(path), "func make() { let value = missing! }")
+					.contains("SWIFT-STYLE-RUNTIME-001")
+			);
+		}
 	}
 
 	#[test]
