@@ -20,6 +20,7 @@ on:
       - 'Cargo.lock'
       - 'Makefile.toml'
       - 'scripts/bench-*.sh'
+      - 'scripts/benchmark-common.bash'
       - 'src/**'
 
 concurrency:

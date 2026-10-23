@@ -25,6 +25,7 @@ use crate::style::{self, CargoOptions, RunSummary, StyleLanguage};
 	styles = styles(),
 )]
 pub(crate) struct Cli {
+	/// Include semantic recovery details.
 	#[arg(short = 'v', long, global = true)]
 	verbose: bool,
 
@@ -40,7 +41,6 @@ impl Cli {
 				let summary = style::run_check(&cargo.as_options())?;
 
 				print_summary(&summary, false);
-				print_semantic_cache_stats(verbose);
 
 				if summary.violation_count > 0 {
 					if *strict {
@@ -59,7 +59,6 @@ impl Cli {
 				let summary = style::run_fix(&cargo.as_options(), verbose, true)?;
 
 				print_summary(&summary, true);
-				print_semantic_cache_stats(verbose);
 
 				if summary.violation_count > 0 {
 					eprintln!(
@@ -167,16 +166,6 @@ fn print_summary(summary: &RunSummary, fix_mode: bool) {
 	if summary.unfixable_count > 0 {
 		println!("{} violation(s) require manual fixes.", summary.unfixable_count);
 	}
-}
-
-fn print_semantic_cache_stats(verbose: bool) {
-	if !verbose {
-		return;
-	}
-
-	let stats = style::semantic_cache_stats();
-
-	println!("Semantic cache: {} hit(s), {} miss(es).", stats.hits, stats.misses);
 }
 
 fn styles() -> Styles {

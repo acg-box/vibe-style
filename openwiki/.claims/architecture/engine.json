@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:dd039252a5dc92c092092756ee49b6f78074213f503ee8cf5ec5b9cdc68a78b9",
+  "claims": [
+    {
+      "id": "claim_e9087fe3a9f443399b5b99723988c1bc",
+      "statement": "The engine snapshots selected source files before tuning and restores the command-start snapshot after a failed run that changed files; rollback failure is reported with the original failure.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L122-L154",
+          "version": "repo-lines-v1:sha256:f8f3824989f3fed6d192a0e681766d1daf3d6c5a36a14abc50c428993a7ea80d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzMmRhN2U3MTdhYzQ2NmNhMjg0N2FiZjAyNzA2NDZlMWM1ODBiYjk2MzhlMjQzY2I2NDUxY2RjODZhZjNmMjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmNjlhNGM2ZWU3NzRhOGY4ODE4NGFlM2Q5NmIzMjE0YmZjZjk3OGM1YTU1MWNmOGE4MTQ1OGFlMWNmYTc5ZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiMzQwYTkwMjlkY2IyOWM1YTRhYzU0NzE2YWU4ZWRmYTU0NjQ4YzU1NmFlYjM3ZjZlNmQ0MTA5ODMwOGU5ODUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5a556de1f50140b29d27c5a741e48df8",
+      "statement": "Tuning has four outer rounds and eight per-file passes, skips fix rounds when no fixable violations exist, and refreshes changed-file state before deciding whether to continue.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L156-L245",
+          "version": "repo-lines-v1:sha256:f9e78578bea0542d19941c45bf814e6637a331e8939abbd32535b7a95a35fa00:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzNGFiOTU0ZDQxZjU1OWZmOThhN2QwMjNkY2M1MTNhNmMwNTgwMTRhODJhOWRlZTU4OWVhYWI5YjBkMWUwYjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyOTY0MDc5YzNjNWM4MTUyMGVmMzNhMmI5ZDJlMTVhMWI4NGQ3MjgwZGI4NTkwZGNkNjU3NDdlM2UwMTJhNDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVlYjk5YmVjMGQ4NjJhMjcwNzNkYTAzODU4ZmY3ZTk4YzhkYjY4YWFkY2ZlOGNmMTA0ZGY2NTY4MDU1NzhjYmUifQ"
+        },
+        {
+          "resource": "repo://src/style/engine.rs#L19-L21",
+          "version": "repo-lines-v1:sha256:4f0b02598b152f6969ebd4ab75df27142c8638df06aacaafceeb3609901f133b:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGE1YzMyN2YxM2UyNDM5YjUxOTYyYzNkNmQ2MTc2NTQ0NTBlOTRkY2I2ZmNlMmRjYjc5MWQzZjBlMzUwYzU1ZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzQ0NjVkMjA0ZjUxNTQ4Y2YzOTJiY2U4NzM1Y2YzMDc4ZTQ3OTI5ZTQxZTU1Y2IwYTZiMjc2M2JmOTc4NmQ1MiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmI4MTliMzU1ZWU5NzI1ZjdmZWY0OGJiMjcyNDgxYWRhOGFjMDBlZWYwNmU2OTg4Nzc2OTAyYTU3ZDMwMTQ1YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDRhZTg1MzQ0ZDk5NTNmODc0NjBlNWRkNWM1ZjczMzM0MGM5ZGFmYmI0MWQ2NTU1YzQwODdhYzI5N2I2YmJjYSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_6a9abdc333cf40f6bd31c62cfa5031f2",
+      "statement": "Workspace tuning can split into package scopes; fix scopes run in parallel only when multiple scopes have disjoint selected file sets.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L376-L455",
+          "version": "repo-lines-v1:sha256:1ab9ad23026d53df086c3379e4ab49912f8a7b36a96b5959908ce77d970c45a6:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU3NzkzYzE0NGE5NmI0ZDI0NzM0MGExOThhZTk0MGRhYzY0NjM3Yzg3M2JlYjVmMDIwZjMzNzExMjVjMjQ3N2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1YmQ4ZGRjNjc5YmFlYTNkZTE4YzA1NTEzOGIxMGVmZGI5Y2Q1MWEwZmZkNjE1MWJlNDg2NmQ1YzNjNWE3NWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bdc65f220e02481ca1e60ac3c840f94b",
+      "statement": "Engine regression files are private test modules under the engine, while integration targets share owned temporary directories with Drop cleanup.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L1218-L1251",
+          "version": "repo-lines-v1:sha256:8e981a4cde531394e455015ae88c9c1ea71116f33b1066ad7596c49677264008:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0YzIzOGUzZmYzNWE4MTYxZDE4Y2VmMDhmNzU0MWFmZTIyYjRlMmY4MzFlNTM2YTMyMTA3MTJkOTAyMDNlYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQyYjI1YjhiMjdhNTQzOTBlMDk1ODI1ZGU5MmMwOWQ3MGRiOWI4NWQwODJlZDBkZjdmZDIxNGMzNDc2ZWZlZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/support/fixture.rs",
+          "version": "repo-file-v1:sha256:d3b7a4585b98838a7dc8c1bb7465c3c6bd67486ea01ead4696fcf1ab3ed5b049"
+        }
+      ]
+    },
+    {
+      "id": "claim_ced27fab23cc4e1d83b420efb4d22274",
+      "statement": "The type policy owns a module-qualified TypeAliasRenamePlan; the engine collects it before per-file fixes and retains transaction and compiler-recovery ownership.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L668-L689",
+          "version": "repo-lines-v1:sha256:b03aea7e6b16087d987aeb32010de68cfe558dcca727750a0b9d435aadf670e0:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5MzBmMTJkMDlkMmZlZDMyYzVjMGU0MWIwMmQ4MGNhMmNiOGNlNGFjNjU2NWI0OWQ5N2EyMTQzZGNiMTQ3ODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkzYzhjODdlNTc4NGY3YmM2ZDRhNTJkNTQ5YTdkZjQ3MGY5MmExNGNiYTdkNzkxNWI5ZWFjZWM5M2Y2NjUxNzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg1NjY2MWMyODdlNTg5ZjM0N2U5NGIxYzExOWNkNDk2OTYxMmMyZWU3Mzg0YWQyYzRkODQ4MzBlN2IzNjE1ODMifQ"
+        },
+        {
+          "resource": "repo://src/style/types/renames.rs#L26-L100",
+          "version": "repo-lines-v1:sha256:620be85cb46b0dd188fb01773feb367d5c96d5c5e267fc2f7c5d74c7939abb96:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg2YjQyMjdkMjNhYzQ0ZWNjNGI2ODg2YzIzNWI4OTFkNTliMGUwYjUzOTMyNTI4YTlmYWE2ZmEyYjlmZjRhYTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2ODIxYTgzZTQ5MTVjMWNmNGZhZGRjMTAwMWUwMGJmODM0NzVkNWM4OGEwNDg2ZDdmNzU0NDA5YzVmZDY1YWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFjZTQzZDkxNTc3ZGEwOTJiMmYxNzg0MmIyMTQ5ZjIzMjZmMTZjMjc0YjcwMzhmMTU5MzIwYTBmYzRkMmVkZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVlZDcyOTI4ODczZGI1MWE2YjA4MDJjODE1YzA4OWZmZjY5NjkxNjk5NGU4MDhlZjFmY2FhYTZlMWUwZmE3M2IifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4398e99f16424357bff8126f751f6b18",
+      "statement": "Shared item ranges expand to physical lines only when text outside the syntax span is whitespace; the edit guard identifies complete string, byte, C-string and character literals from parser tokens.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/fixes.rs#L160-L182",
+          "version": "repo-lines-v1:sha256:7e94300cc3788c35b8eee9024014200229896331277540f233e0ca9d96735c0d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdmMjU5YzdmOTRmNDg5YmZmM2E5NWQ3ZWQ3ZjU0OWRiNDFmZmJjMGI0NDEyNmFjNmUzNTE5YTk3OGJhMjdkZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNiODJhZTBiYzFhYWZjZWUxMmI3MTJkNjI0NDk4NDQyMTNlMTZhNWUyOTE5Nzg4ZTQxZGEzY2NiMjA5OTJkMWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdkMDlkYzk0NzE0ZDZjZGU4NjIxYjA2ZmUyN2Y4OWU2NzUxMDgzMjkzNjIzODc5ZTE2NjExM2FiZmUxZmZiMGQifQ"
+        },
+        {
+          "resource": "repo://src/style/shared.rs#L258-L277",
+          "version": "repo-lines-v1:sha256:85b6d91901b591138f739b56963729d4cf56c3543da004af8a7f0da4a275ef58:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM2ZTk0MTM1N2QzMjkxOWE5MGZiZGEwMThkMTYwYzViZWM4NDM4M2FhNzQ1NTRiNGIyNjNmMTAzMWI1ZjA4ZTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImExNjdiZjdkYWFlMWUyN2Q5OTJjZGVkYjk0Y2FlNTFmOWVjODBmYjBlNGYwOWUyY2EzMjJkZThmMThhNjViZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ3YjRiMTYwM2VkNjVmYjY2ZmQ0ZDAwNzQ0YjUzMzgwODIzMGZiMzUzZjQzMWQwYjgxYmRhMjk3MmQ0MDQ0M2QifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e422817c81d84e81a43f23275b8cac54",
+      "statement": "Binding-sensitive integration tests compare program output before and after tuning, and test-import cleanup verifies inline and multiline test functions remain discoverable.",
+      "evidence": [
+        {
+          "resource": "repo://tests/mod007_super_import.rs",
+          "version": "repo-file-v1:sha256:f7d88f8bbea0df2aa96cb04bc2ca172e6ade92cc9ad9b375380f3f38ebf8fa40"
+        },
+        {
+          "resource": "repo://tests/type_alias_rename.rs#L89-L136",
+          "version": "repo-lines-v1:sha256:de49e5b540133440de8e898d81c245d989150dd25e59897123656238992cc902:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiNDc5NDM0ZTI5MjQ0ZjdlZTBkZjQ2ZDZjOTY3YmNjMmI2Mzc3YjU5YWRhMTA3ZjI0ODI0MDA2ZmE5YzhlZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmZjQ0YmMxMTkyMzdkMWFlZDZjNzIxYzMxNTkxNzQ3OGU2MzQ2ZGU0ZmI0NDc1ZmEyOTA5MGQ5MzgzMjk5MDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUyOWMxMjBlMGFiYzc0MTQyNWNjMDNjMWViY2ViYjM0OWUxNzg4NDg3YmFmYzMxZDcwZDJiNTUyNTA5NzZhNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNlNDEzZjU3MjE2M2MzYThkNjk0ZmNjZmU0YmJjOTZiNWY1YmRkZmI4NDU1Y2RmYTQzNjU0OWMzYzJiNDk3ZWUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T02:37:02.452Z"
+  }
+}

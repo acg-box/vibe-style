@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+mod renames;
+
+pub(crate) use renames::{TypeAliasRenamePlan, build_type_alias_usage_rename_edits};
 
 use ra_ap_syntax::{
 	AstNode, SyntaxKind,
@@ -8,7 +10,10 @@ use ra_ap_syntax::{
 	},
 };
 
-use crate::style::shared::{self, Edit, FileContext, Violation};
+use crate::style::{
+	shared::{self, Edit, FileContext, Violation},
+	syntax,
+};
 
 const RULE_ID: &str = "RUST-STYLE-TYPE-001";
 const MESSAGE: &str = "Do not use type aliases that only rename another type.";
@@ -20,7 +25,9 @@ enum AliasGenericParam {
 
 #[derive(Clone, Debug)]
 pub(crate) struct TypeAliasRenameFix {
-	pub(crate) alias: String,
+	origin: Vec<String>,
+	replacement: Vec<String>,
+	preserve_module: bool,
 	pub(crate) target: String,
 	pub(crate) definition_edits: Vec<Edit>,
 }
@@ -47,7 +54,7 @@ pub(crate) fn check_type_alias_renames(ctx: &FileContext, violations: &mut Vec<V
 
 		let start = usize::from(path_type.syntax().text_range().start());
 		let line = shared::line_from_offset(&ctx.line_starts, start);
-		let fixable = type_alias_autofix_plan(ctx, &type_alias, &rhs_path, &aliases).is_some();
+		let fixable = type_alias_autofix_plan(ctx, &type_alias, &rhs_path).is_some();
 
 		shared::push_violation(violations, ctx, line, RULE_ID, MESSAGE, fixable);
 	}
@@ -70,7 +77,12 @@ pub(crate) fn collect_type_alias_rename_fixes(ctx: &FileContext) -> Vec<TypeAlia
 		let Some(rhs_path) = path_type.path() else {
 			continue;
 		};
-		let Some(plan) = type_alias_autofix_plan(ctx, &type_alias, &rhs_path, &aliases) else {
+
+		if !is_meaningless_alias(&rhs_path, &aliases) {
+			continue;
+		}
+
+		let Some(plan) = type_alias_autofix_plan(ctx, &type_alias, &rhs_path) else {
 			continue;
 		};
 
@@ -78,38 +90,6 @@ pub(crate) fn collect_type_alias_rename_fixes(ctx: &FileContext) -> Vec<TypeAlia
 	}
 
 	out
-}
-
-pub(crate) fn build_type_alias_usage_rename_edits(
-	ctx: &FileContext,
-	renames: &BTreeMap<String, String>,
-	skip_ranges: &[(usize, usize)],
-) -> Vec<Edit> {
-	if renames.is_empty() {
-		return Vec::new();
-	}
-
-	let mut edits = Vec::new();
-
-	for segment in ctx.source_file.syntax().descendants().filter_map(PathSegment::cast) {
-		let Some(name_ref) = segment.name_ref() else {
-			continue;
-		};
-		let Some(replacement) = renames.get(name_ref.text()) else {
-			continue;
-		};
-		let range = name_ref.syntax().text_range();
-		let start = usize::from(range.start());
-		let end = usize::from(range.end());
-
-		if skip_ranges.iter().any(|(skip_start, skip_end)| start < *skip_end && end > *skip_start) {
-			continue;
-		}
-
-		edits.push(Edit { start, end, replacement: replacement.clone(), rule: RULE_ID });
-	}
-
-	edits
 }
 
 fn is_meaningless_type_alias_item(type_alias: &TypeAlias) -> bool {
@@ -133,7 +113,7 @@ fn is_meaningless_type_alias_item(type_alias: &TypeAlias) -> bool {
 fn is_meaningless_alias(path: &Path, aliases: &[AliasGenericParam]) -> bool {
 	let mut segments = Vec::<PathSegment>::new();
 
-	if !collect_simple_path_segments(path, &mut segments) {
+	if !syntax::collect_simple_path_segments(path, &mut segments) {
 		return false;
 	}
 	if segments.is_empty() {
@@ -171,38 +151,98 @@ fn type_alias_autofix_plan(
 	ctx: &FileContext,
 	type_alias: &TypeAlias,
 	rhs_path: &Path,
-	aliases: &[AliasGenericParam],
 ) -> Option<TypeAliasRenameFix> {
-	if !is_meaningless_alias(rhs_path, aliases) {
+	if !matches!(
+		type_alias.syntax().parent()?.kind(),
+		SyntaxKind::SOURCE_FILE | SyntaxKind::ITEM_LIST
+	) {
 		return None;
 	}
 
 	let alias_name = type_alias.name()?.text().to_string();
+	let resolved_target = renames::resolve_path(ctx, rhs_path)?;
+	let mut origin = renames::module_scope(ctx, type_alias.syntax())?;
+
+	origin.push(alias_name.clone());
+
+	if origin
+		.iter()
+		.map(|part| syntax::normalize_ident(part))
+		.eq(resolved_target.iter().map(|part| syntax::normalize_ident(part)))
+	{
+		return None;
+	}
+
 	let mut rhs_segments = Vec::<PathSegment>::new();
 
-	if !collect_simple_path_segments(rhs_path, &mut rhs_segments) || rhs_segments.is_empty() {
+	if !syntax::collect_simple_path_segments(rhs_path, &mut rhs_segments) || rhs_segments.is_empty()
+	{
 		return None;
 	}
 
 	let target_segment = rhs_segments.last()?;
 	let target_name = target_segment.name_ref()?.text().to_string();
 	let alias_is_public = type_alias.visibility().is_some();
+	let definition_edits =
+		alias_definition_edits(ctx, type_alias, rhs_path, &rhs_segments, &target_name)?;
+	let preserve_module =
+		alias_is_public && !(resolved_target.len() == 1 && is_primitive_type_ident(&target_name));
+	let replacement = if preserve_module {
+		let mut path = origin[..origin.len() - 1].to_vec();
+
+		path.push(target_name.clone());
+
+		path
+	} else {
+		resolved_target
+	};
+
+	Some(TypeAliasRenameFix {
+		target: target_name,
+		definition_edits,
+		origin,
+		replacement,
+		preserve_module,
+	})
+}
+
+fn alias_definition_edits(
+	ctx: &FileContext,
+	type_alias: &TypeAlias,
+	rhs_path: &Path,
+	rhs_segments: &[PathSegment],
+	target_name: &str,
+) -> Option<Vec<Edit>> {
+	let alias_is_public = type_alias.visibility().is_some();
+	let target_segment = rhs_segments.last()?;
 	let alias_start = usize::from(type_alias.syntax().text_range().start());
 	let alias_end = usize::from(type_alias.syntax().text_range().end());
+	let type_start = usize::from(type_alias.type_token()?.text_range().start());
+	let prefix = ctx.text.get(alias_start..type_start)?;
 	let mut definition_edits = Vec::new();
 
 	if alias_is_public {
 		if rhs_segments.len() >= 2 {
-			let rhs_text = rhs_path.syntax().text().to_string();
+			let mut rhs_text = rhs_path.syntax().text().to_string();
+
+			if let Some(args) = target_segment.generic_arg_list() {
+				let base = usize::from(rhs_path.syntax().text_range().start());
+				let range = args.syntax().text_range();
+
+				rhs_text.replace_range(
+					usize::from(range.start()) - base..usize::from(range.end()) - base,
+					"",
+				);
+			}
 
 			definition_edits.push(Edit {
 				start: alias_start,
 				end: alias_end,
-				replacement: format!("pub use {rhs_text};"),
+				replacement: format!("{prefix}use {rhs_text};"),
 				rule: RULE_ID,
 			});
 		} else if let Some((use_start, use_end, use_path, use_is_pub)) =
-			find_simple_sibling_use_importing_ident(ctx, type_alias, target_name.as_str())
+			find_simple_sibling_use_importing_ident(ctx, type_alias, target_name)
 		{
 			if use_is_pub {
 				// The target is already exported; remove the alias and rewrite callers.
@@ -216,7 +256,7 @@ fn type_alias_autofix_plan(
 				definition_edits.push(Edit {
 					start: alias_start,
 					end: alias_end,
-					replacement: format!("pub use {use_path};"),
+					replacement: format!("{prefix}use {use_path};"),
 					rule: RULE_ID,
 				});
 				definition_edits.push(Edit {
@@ -226,7 +266,7 @@ fn type_alias_autofix_plan(
 					rule: RULE_ID,
 				});
 			}
-		} else if is_primitive_type_ident(&target_name) {
+		} else if is_primitive_type_ident(target_name) {
 			definition_edits.push(Edit {
 				start: alias_start,
 				end: alias_end,
@@ -245,7 +285,7 @@ fn type_alias_autofix_plan(
 		});
 	}
 
-	Some(TypeAliasRenameFix { alias: alias_name, target: target_name, definition_edits })
+	Some(definition_edits)
 }
 
 fn is_primitive_type_ident(name: &str) -> bool {
@@ -273,18 +313,8 @@ fn is_primitive_type_ident(name: &str) -> bool {
 
 fn simple_use_path_text(text: &str) -> Option<String> {
 	let text = text.trim();
-	let start = text.find("use")?;
-	let after = text.get(start + 3..)?;
-	let bytes = after.as_bytes();
-	let mut idx = 0_usize;
-
-	while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
-		idx += 1;
-	}
-
-	let tail = after.get(idx..)?;
-	let semi = tail.find(';')?;
-	let use_path = tail[..semi].trim();
+	let (start, end) = syntax::find_use_path_range(text)?;
+	let use_path = text.get(start..end)?.trim();
 
 	if use_path.is_empty()
 		|| use_path.contains('{')
@@ -310,7 +340,9 @@ fn find_simple_sibling_use_importing_ident(
 			continue;
 		}
 
-		let path_text = simple_use_path_text(&use_item.syntax().text().to_string())?;
+		let Some(path_text) = simple_use_path_text(&use_item.syntax().text().to_string()) else {
+			continue;
+		};
 		let last = path_text.rsplit("::").next().unwrap_or(path_text.as_str()).trim();
 
 		if last != ident {
@@ -354,7 +386,7 @@ fn generic_arg_matches_param(
 			};
 			let mut segments = Vec::<PathSegment>::new();
 
-			if !collect_simple_path_segments(&path, &mut segments) {
+			if !syntax::collect_simple_path_segments(&path, &mut segments) {
 				return false;
 			}
 			if segments.len() != 1 {
@@ -407,26 +439,38 @@ fn alias_generic_keys(type_alias: &TypeAlias) -> Option<Vec<AliasGenericParam>> 
 	Some(out)
 }
 
-fn collect_simple_path_segments(path: &Path, out: &mut Vec<PathSegment>) -> bool {
-	if let Some(qualifier) = path.qualifier()
-		&& !collect_simple_path_segments(&qualifier, out)
-	{
-		return false;
+#[cfg(test)]
+mod tests {
+	use std::path::Path;
+
+	use crate::style::{fixes, shared, types};
+
+	#[test]
+	fn alias_reexports_preserve_visibility_attributes_and_generic_constructors() {
+		let original =
+			"/// Collection.\n#[cfg(test)]\npub(crate) type Items<T> = std::vec::Vec<T>;\n";
+		let ctx = shared::read_file_context_from_text(Path::new("aliases.rs"), original.to_owned())
+			.expect("Parse source.")
+			.expect("Source context.");
+		let edits = types::collect_type_alias_rename_fixes(&ctx)
+			.into_iter()
+			.flat_map(|plan| plan.definition_edits)
+			.collect();
+		let mut rewritten = original.to_owned();
+
+		fixes::apply_edits(&mut rewritten, edits).expect("Rewrite alias.");
+
+		assert_eq!(rewritten, "/// Collection.\n#[cfg(test)]\npub(crate) use std::vec::Vec;\n");
 	}
 
-	let Some(segment) = path.segment() else {
-		return false;
-	};
+	#[test]
+	fn alias_reexports_find_simple_imports_after_grouped_imports() {
+		let original =
+			"use std::fmt::{Debug, Display};\nuse std::io::Error;\npub type Failure = Error;\n";
+		let ctx = shared::read_file_context_from_text(Path::new("aliases.rs"), original.to_owned())
+			.expect("Parse source.")
+			.expect("Source context.");
 
-	if segment.type_anchor().is_some()
-		|| segment.parenthesized_arg_list().is_some()
-		|| segment.ret_type().is_some()
-		|| segment.return_type_syntax().is_some()
-	{
-		return false;
+		assert_eq!(types::collect_type_alias_rename_fixes(&ctx).len(), 1);
 	}
-
-	out.push(segment);
-
-	true
 }

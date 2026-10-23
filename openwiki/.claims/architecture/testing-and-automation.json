@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e5d50b7c79c2aaf81b272ba50d68ed964066ff2c05a788e104687173d526f94c",
+  "claims": [
+    {
+      "id": "claim_b56cfd18d8874057ba733ec355371538",
+      "statement": "The broad check task composes formatting, strict Clippy, current-source style checks, and nextest; the language workflow runs the corresponding repository commands.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/language.yml",
+          "version": "repo-file-v1:sha256:e956a2c3e8bc10aca1a2b5ddde755f0b7253374dfdaed78e0b4bf1b200bc280c"
+        },
+        {
+          "resource": "repo://Makefile.toml",
+          "version": "repo-file-v1:sha256:b934fb4ca6830dd01f5bc0c18d2d728cfe87542d0f36b0d0e4c4daaea1749991"
+        }
+      ]
+    },
+    {
+      "id": "claim_9cb81f9a5c0a4720abc82abc7f2f32b8",
+      "statement": "The composite Action performs read-only curate for the selected language and can install release archives or compile the checkout, whereas local lint-vstyle applies strict tune fixes.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile.toml",
+          "version": "repo-file-v1:sha256:b934fb4ca6830dd01f5bc0c18d2d728cfe87542d0f36b0d0e4c4daaea1749991"
+        },
+        {
+          "resource": "repo://action.yml",
+          "version": "repo-file-v1:sha256:aa373307b831e13ae6aff5c6601193f8032300c81d09e6429383338f30549093"
+        }
+      ]
+    },
+    {
+      "id": "claim_ede928ed86e64739a917aea4352c1a2b",
+      "statement": "Release tag pushes build three platform archives, publish a GitHub Release, smoke-test the released Action, then publish the crate; manual recovery requires an annotated tag matching HEAD and a clean checkout before cargo publish --locked.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/release.yml",
+          "version": "repo-file-v1:sha256:a40727c09a4b6210dcf0654a359aa2d5b74cb83a8b7e7c1f87df1a469956b2d2"
+        }
+      ]
+    },
+    {
+      "id": "claim_820008dc45764d9988f04a76df5fe13a",
+      "statement": "Both benchmark steps run in a single job with separate outcomes and artifact lanes, retain successful artifacts for 14 days, and share a final failure gate.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/benchmark.yml",
+          "version": "repo-file-v1:sha256:05757bdec4c8c50bf82ce76bf8564ef19df285e0b2050985f5f1acba96425558"
+        }
+      ]
+    },
+    {
+      "id": "claim_8b05c026d6ce4807b6000e38d98fb5de",
+      "statement": "The OpenWiki workflow updates generated documentation and opens an update PR with the imperative subject Update OpenWiki documentation and the XV author identity.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/openwiki-update.yml#L33-L63",
+          "version": "repo-lines-v1:sha256:cf9d04678caf84babbebcad732e77ad56c97f133c3b0e400df1a83b08a7d4859:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwZThmOWZhNDBlN2JkMDQ5OWQxYzBkODNmZDc1OGFhODViMzA4NDJkYmQ2MWYwZWE2YjdhZTEwZWZlYzc2ZDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0Nzc5NmQzMTczMmZiY2U4OTk4YTJmN2U3YjFiYjk3NTVjMjNlNTg1MDMyMGI5MDkzN2Q4MmMzZmQwZTYyYTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZkYWUwODNlMWUwMDE4YmUwOTI5NDcwOGEyNmIwYTljNDViMjViY2QyNDRmZDY4ZTI3MWVjZWJkYjdmNTU2ZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_55d6901d57084c3eabb30c580651dfbc",
+      "statement": "Type-alias integration fixtures run original and tuned programs and compare output for namespace collisions, separate module identities, qualified private targets, generic shadows, and import-alias conflicts.",
+      "evidence": [
+        {
+          "resource": "repo://tests/type_alias_rename.rs#L88-L223",
+          "version": "repo-lines-v1:sha256:fababb9348f87f190dceeadbf2c72cf4aa810dd05e41dc980e72403b98960b83:eyJzZWxlY3RlZExpbmVDb3VudCI6MTM2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJmZDU1ZmNmNjEzYjAzNTFjNjNiMGY0MDJkZjE5MTJlM2JiMjdhNGNjMDZiZGIyOTNmNDU3Y2I2YWVhMjU1MGRmIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI0YmU5ZWYwZTA4NDNkNjcxNGNiOWVmOTNhN2ZmODcwMWZlNTMwZTk4OGUxYTg0N2Q2MTA3NmM1MGI0ODlhMDRlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_2f0dcf755d334d59bd31abc0940c68e4",
+      "statement": "Test-import regressions check inline and multiline source forms and require retained test discovery; internal cases exercise item spans, balanced braces, literal prefixes, Unicode lifetimes, and module documentation.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/tests/interactions.rs#L13-L50",
+          "version": "repo-lines-v1:sha256:90b99bd48825a701ef85c4070f7abfa4cb6daa5ec615eee687cee894ddb518cc:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZiYWZmOGVhMmNiNTMxMTQ4MzBlYzFmMDY5NWUzNmE3ZjA1ODI0OGQxNDc5ZDA1NWQ1NDU5ZTQyM2JjMjRmNjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxYmM3Y2QxZTNhMjExY2ZkYWZlODVkMTkxZmE5OTVkMmQyNWFiOWY1N2YyZWRhMWVhYmI1NmZlMzM0NDdjZDMifQ"
+        },
+        {
+          "resource": "repo://src/style/tests/layout.rs#L1007-L1028",
+          "version": "repo-lines-v1:sha256:273ceffbd9070f97055f9390422f585bc89d0c2e774f5d0a90b2972f4b14b2bc:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEwZDJkNjJhZTI2NGI4ODc0N2ZjM2JjZjEzNDYwZjM4ZmM2MzAzNzE2ZjMzYmMyZjUyMjdiM2JiODQzZjZmNjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://src/style/tests/layout.rs#L874-L889",
+          "version": "repo-lines-v1:sha256:02315e6523a647407ef4259ef813f4502f9a673fdb8c9cabc3cbd2bed9f0c80c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUxMTgyMWQ5Njk0NWYxYmMyN2EzYzlmMDliYTA5MGUxZmIwMzU2ZDk2YzkxZmM5NWI2NTAwNTMwN2EwYzcyZTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzMTE5NzllNmIwY2Q2YTA4ZjliYWMyMWQ5OTUyMjgzYTFjMTcxMWQzYTkxOTc3NjA0ZjU4YmUyYzg3MDJjZjcifQ"
+        },
+        {
+          "resource": "repo://tests/mod007_super_import.rs#L120-L159",
+          "version": "repo-lines-v1:sha256:088840e1fc89ba88306b4323603168c9b3b2c63f6990e3456dbcc77b9118b75d:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI1YmIxYWY1MjFiZWNkNTVkNzA1NmE4YTlhMGRkMWViY2RhMWZjNzlmZjIzZjc0NTc3NmY0OTk1ODMzNTI5MjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T02:37:02.452Z"
+  }
+}

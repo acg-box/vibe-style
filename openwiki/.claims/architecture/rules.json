@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:b61d723940df058bf2be74211deca98cf612916154730322bb78219ea72ac243",
+  "claims": [
+    {
+      "id": "claim_53cbf13909de45278a3a27132519374b",
+      "statement": "The active registry contains 42 IDs: 36 Rust rules and six Swift rules; coverage prints this registry and does not register a Serde-specific rule.",
+      "evidence": [
+        {
+          "resource": "repo://src/style.rs#L28-L32",
+          "version": "repo-lines-v1:sha256:0da6ec52c972755349bb68f7254a86278414bfa2281aa2611b05de4d37f56fe4:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGYzZmRiMzYxYmZjODg0NmRhN2ZjOWQyNjFhMDI3NmVhY2VjMDM3YTkyMTAyZTNjZmRkMDg5YTlkZTE5YmUzNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGNhYzAyY2M2Zjc2NzI4MzhlNjJjOGVjNGRmZGVlNzJlMjAxYjIzMjU2NTQyNDdlNzRmOTVhYzI3OWVlMzNjNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://src/style/shared.rs#L15-L58",
+          "version": "repo-lines-v1:sha256:2cb6eeee727ff2cb52fe8cfb308dd6139aa444115ef8ad19b2b50f6a982f890e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1MzAxNTA2MDZjYWRiNWYwNDA4YzRhYzJiMDllNmRiZWI1NTE1NmJhMjUwMGIwMGY0YjVjMGUxZGQ0YzJhZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwMmQyYzBkNmRjNWU3NGQ5MmZhMTRiOTFkYmVhMjY0MDkwYmViMzVmZGI5MTg4ZDliMzQxMTgxZGNlOWY0Y2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2NGFhM2M0ZTJkNzczNGFlMzk2NzdiNzc5ZjU2ODIxMWM5ZTYxZjVmOWRkZWY1NDFkMTFiNTk5YTE0OTAzYjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1ZjlmNmY5MTQxNTdhN2Y1YzE0ZmE0MGNkYjNmYjBmOTM0YjYwOWFiMDlmNTg1N2Y4ZTNmMDM1NGYwM2U4Y2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4cd2f6bd659044e1b4a8dcc843b26bbc",
+      "statement": "Shared violations record file, line, rule, message, and fixability, while edits record a byte range, replacement, and owning rule.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/shared.rs#L64-L91",
+          "version": "repo-lines-v1:sha256:5e34c102156a5e21a09cc8d47a9d3c42e315724e7d48b00fd2ad6b7c5b97f418:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjNjBiOWU5Y2Y4YjI3MmNiMTVmM2EyZDVhN2IwMWM2NDU3NWI1MGEyMjBlN2Q2Nzc1NTVhMmQ5NThkYzhhNWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkwZmVmNTg1OWIzZDUxYjllM2U5NDQ3MGQ3YzJiMWUyN2E0MjkzYTQ2YjUxNjFkM2JjNGQxYTE1NzA1YWFmZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJiYTQ4NTE5YTQzN2E5ZjgwMjBiZjZhMjI4YTYxYjg0YmE1NGE2MjdhNDIzMDU2NTlmOWUzNWMzMTg2NzAzNTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7a3fecb460d341b19bb0024e21857b0f",
+      "statement": "Rust dispatch groups checks by rule owner, with import processing coordinated through shared planning and specialized child modules.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/imports.rs",
+          "version": "repo-file-v1:sha256:e6912b39e45e94d7f1d0e307ca31c490312c67b2f739881343e27882060e8996"
+        },
+        {
+          "resource": "repo://src/style/rules.rs",
+          "version": "repo-file-v1:sha256:f635dc2b8fa725eaad433b18598135f4e4df9fc96252e4f5692512961f9b4861"
+        }
+      ]
+    },
+    {
+      "id": "claim_1cd23459e2a14643a62e378ffc9c25f7",
+      "statement": "Import expansion is shared AST logic for inventories, impl ordering, error-file qualification, and alias planning; module documentation and macro_rules names use AST properties.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/file.rs#L140-L165",
+          "version": "repo-lines-v1:sha256:2d5b056112f76f12c117f994f974b3de8842287144ae0cf7e8efec17a6c3e0b7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5MzIyNjdkYWNjOWQ5MmE2YjhjMGMyYWI4OWRlZWY3YzE1MWE3MjI4ZDI0ZDZmM2I0ZDY4NTQ1OGE4NGU3NDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzY2UxN2Y5ZTk3NWM0OTdiMDUyMGNjNDk5ZjkwOWM3YWQ5ZjUzMzZjNTNlYmM3ZGUxYTI5NmFlNjk2NmJkOWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY0YmVhMWY1MzVlODY3MDQ3MzlkZDcyNjY3NTU5N2FjMDE3YjI1ZDQ5YTJmNzA4MjI5Yzg2MzE3OGI4YWMyOWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiY2IzZGMzNmQ0OTQ2NmE5ZjZkNjdlZmM0ZjYxNTM3NWI1ZjYxN2FkODVkNDFjZWQ5OWM5M2U4NWFiNTliZWYifQ"
+        },
+        {
+          "resource": "repo://src/style/impls.rs",
+          "version": "repo-file-v1:sha256:411a0d62fbefa020d5e6b2f3f7b38e82bcd99a8d0e9f0719de4c87d958451d8e"
+        },
+        {
+          "resource": "repo://src/style/imports/paths.rs",
+          "version": "repo-file-v1:sha256:fcb250b1da2b5ce49d6c91e43962f9f017db7116769516a47dfab1c5b37c78e7"
+        },
+        {
+          "resource": "repo://src/style/module.rs#L627-L636",
+          "version": "repo-lines-v1:sha256:3ad5f17e02248205654329e5d58d9dd14e42391a55767715a76208697707685b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI2YTQ1ZjY0YjMwNGQ3MmYxMjMzOTdiNTI0YzhjODk3YmFiNjFiODE0NTI1ZWVjZDAxMTgwYjUzZDg4ZmM2ZDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZkNDE0YmNiN2I0YmI2MjZjMWZmNzkwODUzZTVmZjE5YWM4YWUxNDRjNmM4YmEyNDRlNTdlYTdlNDhmNWM4OWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg3NjUxOWI2N2ZiOTM0Y2Q3ZjVlOTc1YzRlNzY3MThhYmIxZGE4YjIwZDFiMWE3Yjk4OTE2ZDU0NTQwYjNiMDgifQ"
+        },
+        {
+          "resource": "repo://src/style/module.rs#L97-L101",
+          "version": "repo-lines-v1:sha256:2d0f4de150ca2a110efdb0e664dd368420eeb018f8a0e509ddaf91c2354e8aa2:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzY3ODM1YzE1ZjhlMDBhYzZkNTYwY2Y4ZTE5ZTI3YjM3ZTcyZjgxZDMwMmU1ZWMxYmJiZDAwYmQyZTQwNjJkNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjI5NjQwNzljM2M1YzgxNTIwZWYzM2EyYjlkMmUxNWExYjg0ZDcyODBkYjg1OTBkY2Q2NTc0N2UzZTAxMmE0MCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDVjNjc0MjVmYzFlMGQ5ZjM5NzdkZTM0MzBhMWJhZDcyYmMzYTc2NWMzZWNhMTQ0MzZlZThmNThmOWQyNTMyMCJ9"
+        },
+        {
+          "resource": "repo://src/style/syntax.rs",
+          "version": "repo-file-v1:sha256:7b7efa3ee759b4e32cc1891bc91217bedcc3715ead99ea3022b03a7dc6d274b1"
+        }
+      ]
+    },
+    {
+      "id": "claim_9acc2389e3c348b4a57ef51e49814d0d",
+      "statement": "Type aliases are planned by module-qualified type identity, preserve public metadata or private resolved target paths, and retain manual boundaries for unresolved, block-local, duplicate conditional, and unsupported import-owner cases.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/types.rs#L149-L290",
+          "version": "repo-lines-v1:sha256:2db955f01713aca1c7d0379d8892745ed6519255a4d573d55e793d6c94b61c20:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlMjJlNGIyZDQ0MGEyYTQyYjU0Zjc4NjU5ODMyNTUxZDMwMTdhOTA4MDkzZGQ0NDc0OGU3N2RlMzhhZTMxZDJkIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIxN2JlYmYwMWFmNWRmMGViMWMwOGMzZmFkOGNmZjBkNmQzMGFiOTdjZDFjNTMxZDA4OThkOWU0ZjZkZDc0YTU1In0"
+        },
+        {
+          "resource": "repo://src/style/types/renames.rs#L142-L227",
+          "version": "repo-lines-v1:sha256:b513b45dde5a7e3bce9980a44bd76a7aa6e98903e440d590fb68a1fdcf672301:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MjIyMmFkZTUzOGIxN2JmN2IxZDU4NzdmZGY2MWMwZTIxZTg1ZjRlYzE4YjZlMjI2NTc5MTY4ODYzZDhmMjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxMzA4MTkyMzM2MGYxODFiMGFmY2VmYWZlZDc3NmEwMTE3NjhjMjk3MWVkZTE3MjYyNTk1Y2JlM2M3M2M0MzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1MjFlMzJiODg4ZTc0YzkxMzg4OGIxODE2MDI3NGYyZWU1OTIzNWY5NzQ5ODU5YTdiYzMwNmI0NDliOGNmZGUifQ"
+        },
+        {
+          "resource": "repo://src/style/types/renames.rs#L30-L82",
+          "version": "repo-lines-v1:sha256:b43e3b0e5f1eb752f1673249debf9dbc01835bc18102a95f69e9f5ea1d52e41a:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5NjM5OTc2NWZlOTRiOWMzYjZiYjk3ZmExOTcxNjZiNmNiMjA2NzY2NDA1YzIwOTZlMzlkMjE4NzcxYTcwOTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5ZmQyNDUxYjgxOTcwN2VlMTFmNmVkMDU4MGZiMzMwMmM5ZWFiM2U0NTFiNGViMDlmZjZjNmM1NzNjNmJhZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI5NzI0ZGE3M2IzYTQ3ZDM1ZjkxZDJiMmJmZGZjZjgwODQ1YzA2NzVmYzc3MDEzODNiYzFkN2E4M2IwMWU0OWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE0MDFjYTZmOWJkYjBlMGEwZjM3M2Y2ZDRhNzUwYTBiNmM3ZjRiMjk5YzNhYTUxZmZlMDNkNTliNGMzOTc0YmUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c2854d4068e141a49dd3c0c89c9427e9",
+      "statement": "Import shortening reserves generic parameter names; import-alias removal and error-file qualification decline conflicting generic bindings, and primitive alias references retain qualification when shadowed.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/file.rs#L42-L55",
+          "version": "repo-lines-v1:sha256:bfd97a20a540fa133d388bde29590d9fb697168e755992b9bb99d8aca5267cd5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZiNTM4MDQ5ZDAzZDU0Y2MwY2E4MDY5NjE5OWExN2U2N2EyYjBmMzZlMTE0Mjg3NDA5NzhiNzViYTA1MjgzOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwMTU4NjQwZDY0Njg5YTRmNGViNjhhZWRlZTQyNmNmNzk4Yjg0N2I3OTdlZDgzNzE4NjQ2MTlhZDA1Njc2YmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1NGIzMDY0Mzk5MWQ1ZWIzOTIzYTMyZjhkYTcyMzNjYzQ5YTgzMmQ4YzkwNzBlZWJhNDliYjI2OGI2MTM3YTQifQ"
+        },
+        {
+          "resource": "repo://src/style/imports/aliases.rs#L162-L170",
+          "version": "repo-lines-v1:sha256:238f03b56f7def12fe2e68f3f31257d5e3dbf9690130c78f77c2ebeeb4485ef6:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTA1NzJjYjdjOTY4MjI4NWY0MzJjOGQ2NDI5ZjhiZjE5NTA5Mzk5MTZkZDE4ZjIyYjcxYjQxMTI4YzE3Zjc2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTkwZmEwMTQxNGE1Yjk3ZWI4Yjc2YWY0ODVlMDAxYmExYjc5MTlhYjE3ODQ2NDMyNjU4MTE5Y2I3MWM4M2I4NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2YwOTg4M2MxM2EwZWYzZGQ2ODk4ZjE2NjI1NTczNmUyMmI5YmMzOWI3MWY1OTc1NDVhNzZmOTU2NTNjZWNmZCJ9"
+        },
+        {
+          "resource": "repo://src/style/imports/analysis.rs#L110-L127",
+          "version": "repo-lines-v1:sha256:105e357a23697e6653137ba731dae0638c62959dc5a7c511a8341e331ce95794:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwZTZkNzNkNWNiYzAyMzlhMGVjMjJiMDRlMDdmOWI4NmZhNGQyNTQ0YmJhNDcyNjE1NWI0ZDkyM2U3ODYyNDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiZTYzYzIzNzg1ZmVhY2ZkY2EyZTQxM2FhMDRlNDM3NmNlYzhkNmExMjllMjRjNGVlNDdlYTFjZjgzNmY2YWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxMGQyMmVmYzhmMTQyMTRmZTU5YzkwOTEyYjM2OTBiODNhMTgwZjY5NDQ4ZWQxY2I1ZDIwZjkyMDU3ODIwYzUifQ"
+        },
+        {
+          "resource": "repo://src/style/syntax.rs#L15-L22",
+          "version": "repo-lines-v1:sha256:cee66f751413c5758aea3e63ae2ba04620e2f02b27da0d055ca4e59afef701de:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWJkMDgxMzdlMWE4MTJiZWI5ZTk2MjdlOTU3NTQ1Njk4Nzk2MGJmZmFmNzMwMmM2OGExOTkxODQzMjNmNGY4NCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2ZjOGJkN2MyNjNmNGJkZDJlMmY2N2JkYmRjZjFkODZkYWU4NDdjNzllYTQwZDUwYzU4MzEzYmQzODM4NTc0ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjYzZjNjZGNhZTIxOTUwNGFiN2Q4OGQ2MmU4MjJhZDNiNTdkYjVkNTA0ZThlNzNhOGEzNzc3ZGEyN2ZjMWRhZCJ9"
+        },
+        {
+          "resource": "repo://src/style/types/renames.rs#L207-L221",
+          "version": "repo-lines-v1:sha256:78a55e167fd18c041c32ae3fac178da8406992ab9e9134024a3f0b71daf5fcd9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2ODA2ZjE1NWM1YWMxYWUyNzIyY2EwNmYyYWM5Y2FkY2I4ODFiOTEyM2NiNjI0YTNjMTA0NzViNDQ0OWRjMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM2MGI4OGEwNWQ1YjUzODQ3NjAyMjliZTYwNTcyZmU2MmIxYzI5Y2RjNTdlZGI1ZTY5NTFkYWE0ZmQ0NmM4MDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlNTM4NGM0M2Q5ZTgyOWY0YTAyMzI5ZWFmMTgxOGNlYmUwOTVmOTk4NDhiNDU1MGU5NDUwMDM5MGQ4MmU1NDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlkNTdjNGNjZWZlZGY1OTllZmI2NTY0MmEyOTk1ZDc0NmYyZjg2NDdiZDY2NjFjMGQxZDk3OWFhYjZjZGU1NzgifQ"
+        },
+        {
+          "resource": "repo://tests/type_alias_rename.rs#L195-L223",
+          "version": "repo-lines-v1:sha256:9d693d2f17269d03b0cbbc61c01ef4784b8a59da8bb9188ddb6671e0a4dac048:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc1ZGZjMjZlN2FmMjU3ZWQ2NmJlZGVkMWVhOGRhODM5ZDBiOWY2NGUzYmMwYjg5NjQ0ODY3NWM2NWQyNTJmYzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T02:37:02.452Z"
+  }
+}

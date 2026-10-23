@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:40d655be593b91879bf80a61075bcff3d934a7217dc87c6fcdcd41bc0110e3e4",
+  "claims": [
+    {
+      "id": "claim_9ddfbb319f044b3685e6c97f4c4c94ad",
+      "statement": "Fix scopes require a successful pre-edit build-finished status before writes and require successful final validation after semantic recovery or a failed post-edit check.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L463-L566",
+          "version": "repo-lines-v1:sha256:46cb0ad4a067b09efcd650fb5454333db26324407d0070903cc50eeed637f951:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIzOTYyZmY0NjZmMmVlZTU3YjlmMzZlNDdiOTU1M2RiMTQzOWI3NTJlOTVkMDIzY2UxYmU0NTJiMTIxNTI1OTM0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhYTg1MDViMDJiMGFmMmMwMmIwMDUyNjVjYjYxNDA0YTQ5OGUwMmZjZTQ1YWRlZGY4ZmE0YTUzOGFhYjc0MTc3IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlODA3MDJiYjU5NjFkOWJmYTFhOGU2MzRmNmU5ZTNlMzQ3ZTY4N2JlMmI0ZWZhM2MyNjhlODRkMGViN2QwMjdiIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_79ecee2c23cd4ca7b7d0c893fd8c2e80",
+      "statement": "An internal tune failure after source changes restores selected command-start snapshots, while a rollback failure is reported together with the original error.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L128-L160",
+          "version": "repo-lines-v1:sha256:f8f3824989f3fed6d192a0e681766d1daf3d6c5a36a14abc50c428993a7ea80d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzMmRhN2U3MTdhYzQ2NmNhMjg0N2FiZjAyNzA2NDZlMWM1ODBiYjk2MzhlMjQzY2I2NDUxY2RjODZhZjNmMjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmNjlhNGM2ZWU3NzRhOGY4ODE4NGFlM2Q5NmIzMjE0YmZjZjk3OGM1YTU1MWNmOGE4MTQ1OGFlMWNmYTc5ZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiMzQwYTkwMjlkY2IyOWM1YTRhYzU0NzE2YWU4ZWRmYTU0NjQ4YzU1NmFlYjM3ZjZlNmQ0MTA5ODMwOGU5ODUifQ"
+        },
+        {
+          "resource": "repo://src/style/engine.rs#L808-L842",
+          "version": "repo-lines-v1:sha256:8351128139e60cd69589058c1215e803717ea081faf885966d8a5f4210a867ae:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiZDdjZGJhZTVmMmRmYjY0ZDNjYTE1OGIwMjkzNWEwMjBhY2Y2NjM3MDZiN2M2ZWYzNGEyODhjMGFhZjlkNTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1OWJjMTI3Mzk5MzExMWVkNTk5NTZmYTE0ZGI2MzNiYTE2ODQwNDQwMjEwMGEyNDExY2E5ZmZlZjc4OWY3ZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhMDg4ODQ1YzdjYjEzMGRiZmQ4YTkzMDVkODBkMjYzMWM2ZTIyY2MxOWRkODJjZjA3NGVhMTc5NGE0NjBlYzIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5cef0ebedd94446aac090491557bb64f",
+      "statement": "Strict-mode failure for remaining style violations is handled by the CLI after a completed engine run, so it keeps validated edits rather than triggering internal-error rollback.",
+      "evidence": [
+        {
+          "resource": "repo://src/cli.rs#L58-L72",
+          "version": "repo-lines-v1:sha256:f2054303b1b628b13e4e5092b46bf76e8f07c58fb36f4a29a464bd090ef5b78d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzOTg0NGZmOWNkYzk1MjhkNDliNWZjNzQ0NzAzNWQwMjY1YTE5NmU2YmJhN2VkNDdkZWEyNTZlYzU2YTYyYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkYzc2MDIwYmFlNzA1NzdlNjRiMzMwZGNhODNmZGYyNGYzZDc1OTNhMDE1NGQ4YWJlYzZkYzYzZjU4OTdmZDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZjZDFlOGZlNzQyZjlkMTZiOWFlODIxMTYxMzZmYjk5OGQ5Y2Y2OTg2MmU2OTM0ZDIyZGYyNmQxNmYxNmNjZjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE4NmU1YzY1OGRkNjAwN2RjYjM0M2ZlZWYxZGFlNzlkMjBmYzNkMjg3Y2NlYzllN2UwMDE0ODJiODQ0NWQ5YTcifQ"
+        },
+        {
+          "resource": "repo://src/style/engine.rs#L128-L160",
+          "version": "repo-lines-v1:sha256:f8f3824989f3fed6d192a0e681766d1daf3d6c5a36a14abc50c428993a7ea80d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzMmRhN2U3MTdhYzQ2NmNhMjg0N2FiZjAyNzA2NDZlMWM1ODBiYjk2MzhlMjQzY2I2NDUxY2RjODZhZjNmMjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmNjlhNGM2ZWU3NzRhOGY4ODE4NGFlM2Q5NmIzMjE0YmZjZjk3OGM1YTU1MWNmOGE4MTQ1OGFlMWNmYTc5ZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiMzQwYTkwMjlkY2IyOWM1YTRhYzU0NzE2YWU4ZWRmYTU0NjQ4YzU1NmFlYjM3ZjZlNmQ0MTA5ODMwOGU5ODUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_454a0f3a095345e7ae842032ebf3910d",
+      "statement": "A later invalid companion file without style edits must cause pre-edit validation failure and leave the main source unchanged.",
+      "evidence": [
+        {
+          "resource": "repo://tests/let_mut_reorder.rs#L414-L458",
+          "version": "repo-lines-v1:sha256:9aa0e509371a790cda4d63c3047e49e85ad262ca0a73dff85a9981d2a083a6f7:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhYTJkZThiZjRmOTA1OWVlODAyZTkzOTliZjAxZTMxYWNhMjdiNzBjNmMwM2JiY2M1MWVjZmE4ZTE0ZTBhMjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

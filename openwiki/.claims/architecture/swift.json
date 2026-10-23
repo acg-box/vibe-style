@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:8a43641d85b10be04383934cb18b507e3b070d7c1caae5e6e0fc4db2d0d2c672",
+  "claims": [
+    {
+      "id": "claim_ec6369bb70834364b7cc68ce4b847b2e",
+      "statement": "The Swift backend runs six source-text rules after masking comments and strings, emits only non-fixable violations, and does not require Swift compiler output.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/swift.rs#L373-L387",
+          "version": "repo-lines-v1:sha256:1a460566ff9388d8cee42c9f492c799426803ae2ab6979d48c5abb1d12e51e3f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY4YjhlMzU0OTQ1YWVjMTg0MjhmZjg1YzFmOGE2ZGFjY2QzZTA4OTg4NTZkMGEwMjgyMmFkZmI0MjU5MTA5YTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjViOTY2MzI1ZjI1ZjU4N2FkMWJlZjRhY2E1MGRkZjE5OTliODk1NzEzZmMxMDVlNDJmOWIzOTAyNGMxMWJkZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
+        },
+        {
+          "resource": "repo://src/style/swift.rs#L61-L204",
+          "version": "repo-lines-v1:sha256:6dab31c1aab54a3adccff3dac1d508e1886e6a1d47a708de59e613ba2c0a32bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3ZTY2MmI0Zjk2Zjg4MmY3NWUwOTVmYTBkOTQ4OWZkOGU4MmYxYTFiM2I0N2YwMjgwOGM5MDFlYzFiNGRkNGFhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlNjgwNmYxNTVjNWFjMWFlMjcyMmNhMDZmMmFjOWNhZGNiODgxYjkxMjNjYjYyNGEzYzEwNDc1YjQ0NDlkYzJlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmMzRlNDNjZTRmNDEzZWJlYWI5OTQ5MzEzNTU1YmVkOGQxZWYyOWFmZDNhMGQ3OTJjNGNhOGExZTg4ZTE0NTUyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI4MjFkYWQxNGYyYzIxMGMxNThiNjNkYjAyY2Q2ZjM0NjE3MjkyNmFkYjU2NmUwNGE0NGVmZWIwNzhmOGM5YjE3In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_5ccb65d3f21d46b694b8615639d3b407",
+      "statement": "Swift runtime-force diagnostics are exempt in Tests or tests path components and in filenames ending with Tests.swift or Test.swift, including root-relative test paths.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/swift.rs#L105-L124",
+          "version": "repo-lines-v1:sha256:ccce088ddff17ce9dcd446be3360a27083c1541c5586f49517b7a6514db48397:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0ZWZjNDk0MThkMjZkY2YxMjliMjJhNmFhMjExMDhjZWVjMzc2NzdhMzJkMDhlOWQ1ZmVlMzVkZGE2NmJiOWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM4ZmM1NmUzOWRlNjQ0ZWM0NDdhZDM2NWYxMTI1YTM5NTBmMTA1MTM3NzZkMDU5NWM3OGFkMzEzNDc3ZGIyMjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYyOTY0MDc5YzNjNWM4MTUyMGVmMzNhMmI5ZDJlMTVhMWI4NGQ3MjgwZGI4NTkwZGNkNjU3NDdlM2UwMTJhNDAifQ"
+        },
+        {
+          "resource": "repo://src/style/swift.rs#L364-L371",
+          "version": "repo-lines-v1:sha256:60312737e6fa2100586264b0ba4b8d0c5f4e3c725ed072a6bb47b9c6576353c5:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjc3NGYxZDMyOGI2N2FlMzc4ZWJhYWJjZjE0NDQ1ODNiMWVlMzk5MWYwOTRhMzQ4Y2NkNmVlM2UyMDljZTc2OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTNjOGM4N2U1Nzg0ZjdiYzZkNGE1MmQ1NDlhN2RmNDcwZjkyYTE0Y2JhN2Q3OTE1YjllYWNlYzkzZjY2NTE3MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZWZkZWU3NGRhZDZiZDI3ZmFlOTc2ZjQ1YjVhNThmYzZlNzEzMjlhYjA2MGIxYzdmMmQ2MTU2YjUwNjllNjZmNiJ9"
+        },
+        {
+          "resource": "repo://src/style/swift.rs#L423-L444",
+          "version": "repo-lines-v1:sha256:5a0ee9cd58d135535450105d2eec6c833d71afc5cac81c7fe39d621693bcc0b2:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzNWI0ZmQ2YjE3MDRhMzdhYzRiYjQxNGNhM2ZmN2Y1MTEwNmFiYTVlMDE4NTdlOTM2ZGI0MzlmZTA4NzY0MzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3Y2RhODJkYTYwNjIzOGUwNWU2MjM5OTU2OWM1ZWUwMzk5MzQxOTY0OGFlNWQ0M2EyYmY4Y2Q2MzQ3ZjgyNjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjExMmFjOWE3NjMwNjM1ZTMxMmViYjM3MGNkMzgwOGJiYWY2OTFjNTMzYWRiMWMyMjdjN2Y3MDZhMDNiMmYwZjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM2NzVlY2U3NzhiM2VhODI2OGIzNDIyZDM3YjZmNGI2ZDNlOWZmZjFkZDgwNWE4Zjc4OTA0YTI2MGE2ZjIxM2QifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2b7f0398bc8a4ec093619c998aa01278",
+      "statement": "Swift workspace selection uses the Cargo workspace root; package flags select package roots, and Git-ignore filtering excludes ignored tracked and Unicode paths while allowing visible untracked sources.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/workspace.rs#L71-L159",
+          "version": "repo-lines-v1:sha256:9ed60d1b48b0b4393f0a61b23518808484eb0fd0f2e63f90a6ee34d35685ab78:eyJzZWxlY3RlZExpbmVDb3VudCI6ODksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1NmE1OTMyN2MxMjdhNjJlNjcwMWJjY2E1ZmI1MGFhNTQyNjU0MjQ0OThmNGI5ODE5MGRlZWY2YzQ4MDA1MjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY0MGVlYmIwMjIwNzc1MDg3ZWYzMzA1M2FhYmIxNGNjMTU0MmVmYzdlOTdmMGU2ZWRkNjY4YTgzNzI5OGYxZjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlYmFjZThjZjM5YmRhNGNiMzBkNWEwYjMyODVjODkyMjYwMTliNzMxNjA3NGVlNjdmZjI5MjM0MGE4ZTJjM2YifQ"
+        },
+        {
+          "resource": "repo://tests/swift_curate.rs",
+          "version": "repo-file-v1:sha256:d1e7bcc80e8ecbd012dded0594f9e03447c8ec4d58829755e562c9d52d8b7fd8"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

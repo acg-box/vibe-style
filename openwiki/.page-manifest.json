@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "pages": {
+    "/openwiki/agent-context.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:44828cabce27f07e759dd03680f7a300a808b2b124c73721b8d2f24fd76f1eda",
+      "completedBy": "codex",
+      "completedRunId": "b9e3033b-ba87-43f5-83b3-bb3322742cbc"
+    },
+    "/openwiki/architecture/cli.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:e1fbcfc678065b14a6fa5b899b3c293c2189a1bdd781ecf2dc801109ad293689",
+      "completedBy": "codex",
+      "completedRunId": "b9e3033b-ba87-43f5-83b3-bb3322742cbc"
+    },
+    "/openwiki/architecture/engine.md": {
+      "pageVersion": "sha256:dd039252a5dc92c092092756ee49b6f78074213f503ee8cf5ec5b9cdc68a78b9",
+      "completedBy": "codex",
+      "completedRunId": "64ff9532-c482-4346-a912-c4b7de919a81",
+      "gitHead": "f4a5b134b4f95e586b6744f84b79ab9f2745d48d",
+      "sourceFingerprint": "sha256:f7436f462db747dd1d8235f228c0360d0bc0e3482d68567c82d8575002193634"
+    },
+    "/openwiki/architecture/overview.md": {
+      "pageVersion": "sha256:d426170d25cffde818086322eb98b9d2777c6579abf1a52febcb00663651585e",
+      "completedBy": "codex",
+      "completedRunId": "64ff9532-c482-4346-a912-c4b7de919a81",
+      "gitHead": "f4a5b134b4f95e586b6744f84b79ab9f2745d48d",
+      "sourceFingerprint": "sha256:f7436f462db747dd1d8235f228c0360d0bc0e3482d68567c82d8575002193634"
+    },
+    "/openwiki/architecture/rules.md": {
+      "pageVersion": "sha256:b61d723940df058bf2be74211deca98cf612916154730322bb78219ea72ac243",
+      "completedBy": "codex",
+      "completedRunId": "64ff9532-c482-4346-a912-c4b7de919a81",
+      "gitHead": "f4a5b134b4f95e586b6744f84b79ab9f2745d48d",
+      "sourceFingerprint": "sha256:f7436f462db747dd1d8235f228c0360d0bc0e3482d68567c82d8575002193634"
+    },
+    "/openwiki/architecture/semantic-validation.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:4a3e647a86788fcf2b711c83056f2b26e9232bc2cbdb93d7776a66b75b95eae3",
+      "completedBy": "codex",
+      "completedRunId": "27b0ef1d-a361-42b5-9793-885ff4d04c74"
+    },
+    "/openwiki/architecture/swift.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:8a43641d85b10be04383934cb18b507e3b070d7c1caae5e6e0fc4db2d0d2c672",
+      "completedBy": "codex",
+      "completedRunId": "27b0ef1d-a361-42b5-9793-885ff4d04c74"
+    },
+    "/openwiki/architecture/testing-and-automation.md": {
+      "pageVersion": "sha256:e5d50b7c79c2aaf81b272ba50d68ed964066ff2c05a788e104687173d526f94c",
+      "completedBy": "codex",
+      "completedRunId": "64ff9532-c482-4346-a912-c4b7de919a81",
+      "gitHead": "f4a5b134b4f95e586b6744f84b79ab9f2745d48d",
+      "sourceFingerprint": "sha256:f7436f462db747dd1d8235f228c0360d0bc0e3482d68567c82d8575002193634"
+    },
+    "/openwiki/quickstart.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:1c0fe83d4071ab5c628828481022914ff29b7664a79f8a29f3cba8f70e7fa043",
+      "completedBy": "codex",
+      "completedRunId": "27b0ef1d-a361-42b5-9793-885ff4d04c74"
+    },
+    "/openwiki/reference/documentation-map.md": {
+      "pageVersion": "sha256:98a6669b1f472586306e8aa31e109c3f4d3f3c6973b7fe079298bfe780b9b54e",
+      "completedBy": "codex",
+      "completedRunId": "64ff9532-c482-4346-a912-c4b7de919a81",
+      "gitHead": "f4a5b134b4f95e586b6744f84b79ab9f2745d48d",
+      "sourceFingerprint": "sha256:f7436f462db747dd1d8235f228c0360d0bc0e3482d68567c82d8575002193634"
+    },
+    "/openwiki/runbooks/benchmark-tracking.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:03c750b30b6db5d264dc693800afe9450d95d2e3b1ddb1c2fbb72c080c516cd6",
+      "completedBy": "codex",
+      "completedRunId": "27b0ef1d-a361-42b5-9793-885ff4d04c74"
+    },
+    "/openwiki/specifications/style-import-derive-interactions.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:30ed113f733128cd6bfe7b28da568da9a7edd3db92992a1321ba4a7335a7d724",
+      "completedBy": "codex",
+      "completedRunId": "27b0ef1d-a361-42b5-9793-885ff4d04c74"
+    },
+    "/openwiki/specifications/style-rule-backends.md": {
+      "pageVersion": "sha256:dc269f56f32cb9ad1872ce70309685aeec160a245fa3b02c465ffa8da29ba88f",
+      "completedBy": "codex",
+      "completedRunId": "64ff9532-c482-4346-a912-c4b7de919a81",
+      "gitHead": "f4a5b134b4f95e586b6744f84b79ab9f2745d48d",
+      "sourceFingerprint": "sha256:f7436f462db747dd1d8235f228c0360d0bc0e3482d68567c82d8575002193634"
+    },
+    "/openwiki/specifications/swift-style-rule-applicability.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:31aa9412244d8595a55fb2ef674feaf7b3fc1d560182b218ef5b801c2829682d",
+      "completedBy": "codex",
+      "completedRunId": "27b0ef1d-a361-42b5-9793-885ff4d04c74"
+    },
+    "/openwiki/specifications/tune-failure-atomicity.md": {
+      "gitHead": "b9a7ea16b4cd96aad1462c34369c89eae0a6b41b",
+      "sourceFingerprint": "sha256:5a3bf9336f9afba8a4a57526a4cfa110f4b48f7bb48b8cc80eac4a15d79d34b3",
+      "pageVersion": "sha256:40d655be593b91879bf80a61075bcff3d934a7217dc87c6fcdcd41bc0110e3e4",
+      "completedBy": "codex",
+      "completedRunId": "27b0ef1d-a361-42b5-9793-885ff4d04c74"
+    }
+  }
+}

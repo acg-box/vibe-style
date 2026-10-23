@@ -1,16 +1,13 @@
 #![allow(missing_docs, unused_crate_dependencies)]
 
-use std::{
-	env, fs,
-	path::PathBuf,
-	process::Command,
-	time::{SystemTime, UNIX_EPOCH},
-};
+#[path = "support/fixture.rs"] mod fixture;
 
-fn create_temp_crate_root() -> PathBuf {
-	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Clock.").as_nanos();
-	let root = env::temp_dir().join(format!("vstyle-let-mut-{}", stamp));
-	let _ = fs::remove_dir_all(&root);
+use std::{fs, process::Command};
+
+use fixture::Fixture;
+
+fn create_temp_crate_root() -> Fixture {
+	let root = Fixture::new("let-mut-reorder");
 
 	fs::create_dir_all(root.join("src")).expect("Create src.");
 	fs::write(
@@ -37,10 +34,8 @@ fn main() {}
 	root
 }
 
-fn create_atomicity_crate_root() -> PathBuf {
-	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Clock.").as_nanos();
-	let root = env::temp_dir().join(format!("vstyle-tune-atomicity-{stamp}"));
-	let _ = fs::remove_dir_all(&root);
+fn create_atomicity_crate_root() -> Fixture {
+	let root = Fixture::new("tune-atomicity");
 
 	fs::create_dir_all(root.join("src")).expect("Create source directory.");
 	fs::write(
@@ -141,7 +136,7 @@ pub fn closure_carries_binding() {
 }
 
 #[test]
-fn let_mut_reorder_reuses_semantic_output_across_cold_and_warm_runs() {
+fn let_mut_reorder_preserves_results_across_repeated_runs() {
 	let temp_dir = create_temp_crate_root();
 	let safe_source = r#"
 pub fn safe_case() -> usize {
@@ -191,16 +186,7 @@ pub fn closure_carries_binding() {
 
 	assert!(cold.status.success());
 
-	let cold_output = format!(
-		"{}{}",
-		String::from_utf8_lossy(&cold.stdout),
-		String::from_utf8_lossy(&cold.stderr)
-	);
-
-	assert!(
-		cold_output.contains("Semantic cache: 0 hit(s), 2 miss(es)."),
-		"expected cold pre-edit and post-edit semantic misses, output: {cold_output}"
-	);
+	let cold_source = fs::read_to_string(temp_dir.join("src/safe.rs")).expect("Read cold result.");
 
 	fs::write(temp_dir.join("src/safe.rs"), safe_source).expect("restore safe source");
 	fs::write(temp_dir.join("src/unsafe.rs"), unsafe_source).expect("restore unsafe source");
@@ -213,16 +199,9 @@ pub fn closure_carries_binding() {
 
 	assert!(warm.status.success());
 
-	let warm_output = format!(
-		"{}{}",
-		String::from_utf8_lossy(&warm.stdout),
-		String::from_utf8_lossy(&warm.stderr)
-	);
+	let warm_source = fs::read_to_string(temp_dir.join("src/safe.rs")).expect("Read warm result.");
 
-	assert!(
-		warm_output.contains("Semantic cache: 2 hit(s), 0 miss(es)."),
-		"expected warm pre-edit and post-edit semantic hits, output: {warm_output}"
-	);
+	assert_eq!(warm_source, cold_source);
 }
 
 #[test]
@@ -318,8 +297,6 @@ fn main() {
 		String::from_utf8_lossy(&output.stderr)
 	);
 	assert_eq!(repeated, main_after);
-
-	let _ = fs::remove_dir_all(temp_dir);
 }
 
 #[test]
@@ -382,8 +359,6 @@ fn main() {
 	assert_eq!(main_after, main_source);
 	assert_eq!(build_after, build_source);
 	assert!(stderr.contains("semantic validation"), "missing semantic error:\n{stderr}");
-
-	let _ = fs::remove_dir_all(temp_dir);
 }
 
 #[test]
@@ -402,6 +377,7 @@ fn tune_preserves_independent_fixes_after_binding_recovery_fails() {
     let value = 10000;
     let _error = std::io::Error::other(value.to_string());
 }
+
 "#;
 	let build_source = r#"fn main() {
     println!("cargo:rerun-if-changed=src/main.rs");
@@ -433,6 +409,50 @@ fn tune_preserves_independent_fixes_after_binding_recovery_fails() {
 	assert!(after.contains("std::io::Error::other"), "{after}");
 	assert!(after.contains("10_000"), "{after}");
 	assert!(stderr.contains("restoring failed binding rewrites"), "{stderr}");
+}
 
-	fs::remove_dir_all(temp_dir).expect("Remove fixture.");
+#[test]
+fn tune_revalidates_files_without_style_edits_before_writing_fixes() {
+	let temp_dir = create_temp_crate_root();
+	let source = "mod companion;\nfn main() { let value = 10f32; println!(\"{value}\"); }\n";
+	let main = temp_dir.join("src/main.rs");
+	let companion = temp_dir.join("src/companion.rs");
+
+	fs::write(&main, source).expect("Write main source.");
+	fs::write(&companion, "pub fn value() -> u8 { 1 }\n").expect("Write companion source.");
+
+	for (program, args) in [("git", vec!["init"]), ("cargo", vec!["generate-lockfile"])] {
+		let output = Command::new(program)
+			.current_dir(&temp_dir)
+			.args(args)
+			.output()
+			.expect("Prepare fixture.");
+
+		assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+	}
+
+	let first = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--language", "rust"])
+		.output()
+		.expect("Run first tune.");
+
+	assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+
+	fs::write(&main, source).expect("Restore main source.");
+	fs::write(&companion, "pub fn value() -> u8 { \"invalid\" }\n")
+		.expect("Break companion source.");
+
+	let second = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+		.current_dir(&temp_dir)
+		.args(["tune", "--language", "rust"])
+		.output()
+		.expect("Run second tune.");
+
+	assert!(
+		!second.status.success(),
+		"Stale semantic output accepted an invalid crate:\n{}",
+		String::from_utf8_lossy(&second.stderr)
+	);
+	assert_eq!(fs::read_to_string(main).expect("Read main source."), source);
 }

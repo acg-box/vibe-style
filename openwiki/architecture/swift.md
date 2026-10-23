@@ -6,20 +6,31 @@ tags: [swift, source-text, rules]
 openwiki:
   roles: [architecture, domain, testing]
   change_kinds: [language-support, rules]
-  source_paths: [src/style/swift.rs, src/style/shared.rs]
+  source_paths: [src/style/swift.rs, src/style/workspace.rs, src/style/shared.rs]
   symbols: [collect_violations_from_file, collect_violations_from_text, mask_swift_code_lines]
   test_paths: [tests/swift_curate.rs]
   invariants: [The first Swift batch reports violations without automatic fixes; force operators are rejected only in non-test Swift files; comments and strings are masked before token checks.]
   validation_commands: [cargo test --test swift_curate]
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T01:52:10.637Z
+sources:
+  - id: openwiki-source-c03e631bb26c1bde452d6532
+    resource: repo://src/style/swift.rs
+  - id: openwiki-source-60fd4a2aff5978a4368f5dd1
+    resource: repo://src/style/workspace.rs
+  - id: openwiki-source-dcd1f98e518cdb13545960cd
+    resource: repo://tests/swift_curate.rs
+generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
 ---
 
 # Swift Backend
 
 `src/style/swift.rs` reads Swift files as text, masks comments and strings, and runs six conservative checks: `SWIFT-STYLE-FILE-001`, `SWIFT-STYLE-IMPORT-004`, `SWIFT-STYLE-TYPE-001`, `SWIFT-STYLE-RUNTIME-001`, `SWIFT-STYLE-NUM-002`, and `SWIFT-STYLE-READ-002`. The backend does not require SwiftSyntax or Swift compiler output and emits no automatic edits in this batch.
 
-`SWIFT-STYLE-RUNTIME-001` ignores Swift test files, identified by path conventions in `is_swift_test_file`; other checks operate on masked lines. Function length tracks brace depth and reports functions over 120 lines at their starting line. Decimal grouping applies to non-zero integer tokens over three digits without underscores.
+`SWIFT-STYLE-RUNTIME-001` ignores Swift test files, identified by `Tests` or `tests` path components, including root-relative paths, or filenames ending in `Tests.swift` or `Test.swift`; other checks operate on masked lines. Function length tracks brace depth and reports functions over 120 lines at their starting line. Decimal grouping applies to non-zero integer tokens over three digits without underscores.
 
-The shared Rust shell still owns language parsing, workspace selection, diagnostics, coverage, and exit behavior. The complete direct, Swift-shaped, semantic-gated, and Rust-only boundary is normative in [Swift applicability](../specifications/swift-style-rule-applicability.md).
+`workspace.rs` owns discovery. `--workspace` scans Swift under the Cargo workspace root; explicit package flags select package roots. Git-ignore filtering includes untracked visible files and excludes ignored tracked files. The CLI and shared model own language parsing, diagnostics, coverage, and exit behavior. Selecting Swift for `tune` produces no edits because every current Swift violation is manual. The complete direct, Swift-shaped, semantic-gated, and Rust-only boundary is normative in [Swift applicability](../specifications/swift-style-rule-applicability.md).
 
 ## Change navigation
 

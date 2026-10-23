@@ -71,6 +71,4 @@ jobs:
         run: cargo make test-rust
 
       - name: Run Rust style check
-        run: >-
-          cargo run --locked --all-features --bin vstyle --
-          curate --language rust --workspace --all-features
+        run: cargo make check-vstyle

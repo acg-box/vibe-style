@@ -10,6 +10,17 @@ openwiki:
   symbols: [STYLE_RULE_IDS, collect_violations_from_text]
   test_paths: [tests/swift_curate.rs]
   invariants: [The first Swift batch is read-only source-text checking; Swift compiler output is validation evidence rather than a stable primary backend.]
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T01:52:10.637Z
+sources:
+  - id: openwiki-source-05232c26a674118ba025697f
+    resource: repo://src/style/shared.rs
+  - id: openwiki-source-c03e631bb26c1bde452d6532
+    resource: repo://src/style/swift.rs
+  - id: openwiki-source-dcd1f98e518cdb13545960cd
+    resource: repo://tests/swift_curate.rs
+generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
 ---
 
 # Swift Style Rule Applicability
@@ -31,6 +42,8 @@ All six are read-only: `SWIFT-STYLE-FILE-001` rejects `mod.swift`; `SWIFT-STYLE-
 
 ## Complete Rust applicability table
 
+The table covers the 36 active Rust rule IDs. Its classes describe porting intent; they do not imply that a mapped rule is implemented. Only the six Swift IDs in the first batch run today.
+
 | Rust rule | Swift class | Swift disposition |
 | --- | --- | --- |
 | `RUST-STYLE-FILE-001` | Direct | `SWIFT-STYLE-FILE-001` for `mod.swift`. |
@@ -40,7 +53,6 @@ All six are read-only: `SWIFT-STYLE-FILE-001` rejects `mod.swift`; `SWIFT-STYLE-
 | `RUST-STYLE-MOD-004` | Rust-only | Rust `mod` documentation placement. |
 | `RUST-STYLE-MOD-005` | Swift-shaped | Type/`extension` adjacency candidate. |
 | `RUST-STYLE-MOD-007` | Rust-only | `#[cfg(test)] mod tests` keep-alive imports. |
-| `RUST-STYLE-SERDE-001` | Rust-only | Serde attributes. |
 | `RUST-STYLE-IMPORT-001` | Swift-shaped | Needs Swift module classifier. |
 | `RUST-STYLE-IMPORT-002` | Swift-shaped | Blank-line grouping may apply; Rust use-tree normalization cannot. |
 | `RUST-STYLE-IMPORT-003` | Rust-only | Rust `use ... as ...` aliasing. |

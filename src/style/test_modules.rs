@@ -55,19 +55,20 @@ pub(crate) fn check_test_module_super_glob(
 				continue;
 			}
 
-			let start_offset = usize::from(use_item.syntax().text_range().start());
-			let start_line = shared::line_from_offset(&ctx.line_starts, start_offset);
-			let start_idx = start_line.saturating_sub(1);
-			let mut end_idx = start_idx;
+			let range = use_item.syntax().text_range();
+			let Some((start, mut end)) =
+				shared::item_text_range(ctx, usize::from(range.start()), usize::from(range.end()))
+			else {
+				continue;
+			};
 
-			while end_idx + 1 < ctx.lines.len() && ctx.lines[end_idx + 1].trim().is_empty() {
-				end_idx += 1;
+			for line in ctx.text[end..].split_inclusive('\n') {
+				if !line.trim().is_empty() {
+					break;
+				}
+
+				end += line.len();
 			}
-
-			let start =
-				shared::offset_from_line(&ctx.line_starts, start_line).unwrap_or(start_offset);
-			let end =
-				shared::offset_from_line(&ctx.line_starts, end_idx + 2).unwrap_or(ctx.text.len());
 
 			edits.push(Edit { start, end, replacement: String::new(), rule: "RUST-STYLE-MOD-007" });
 		}

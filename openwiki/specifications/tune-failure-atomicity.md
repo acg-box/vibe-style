@@ -6,11 +6,22 @@ tags: [specification, tune, atomicity, rollback, semantic]
 openwiki:
   roles: [domain, architecture, testing]
   change_kinds: [lifecycle, semantic-validation, fixes]
-  source_paths: [src/style.rs, src/style/semantic.rs]
+  source_paths: [src/style/engine.rs, src/style/semantic.rs]
   symbols: [run_fix, run_fix_inner, validate_pre_edit_semantic_baseline, apply_semantic_validation, collect_file_snapshots, restore_file_snapshots, semantic_check_succeeded]
-  test_paths: [tests/let_mut_reorder.rs, src/style.rs]
+  test_paths: [tests/let_mut_reorder.rs, src/style/tests/workflow.rs]
   invariants: [A tune internal error after writes restores every selected source file to its start-of-command contents.]
   validation_commands: [cargo test --test let_mut_reorder tune_rolls_back_the_run_when_semantic_validation_fails]
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T01:52:10.637Z
+sources:
+  - id: openwiki-source-c38906bbfa9e9c69417b11b5
+    resource: repo://src/cli.rs
+  - id: openwiki-source-5a343b6d360ed17beec1a852
+    resource: repo://src/style/engine.rs
+  - id: openwiki-source-51261a6dd57286265897d7e9
+    resource: repo://tests/let_mut_reorder.rs
+generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
 ---
 
 # Tune Failure Atomicity
@@ -29,7 +40,7 @@ openwiki:
 
 Each fix scope validates its pre-edit semantic baseline before writing fixes. The Cargo invocation must provide a successful `build-finished` result; a failed Cargo command without file-scoped compiler diagnostics is still semantic validation failure and no fixes are written for that scope.
 
-After ordinary edits and any semantic import recovery, the scope validates the edited files again. If recovery was needed or the post-edit check failed, a final semantic check must succeed before the scope completes. The [semantic validation boundary](../architecture/semantic-validation.md) owns compiler output parsing and cache behavior.
+After ordinary edits and any semantic import recovery, the scope validates the edited files again. If recovery was needed or the post-edit check failed, a final semantic check must succeed before the scope completes. The [semantic validation boundary](../architecture/semantic-validation.md) owns compiler output parsing and Cargo invocation. Each validation checks current source through Cargo.
 
 Package-scoped rounds may use narrower fallback edits for import shortening, `RUST-STYLE-TYPE-001`, or `RUST-STYLE-LET-001`, but those edits are committed only if final semantic validation succeeds.
 
@@ -63,4 +74,4 @@ A completed `vstyle tune --strict` may return a non-zero exit code when style vi
 
 ## Focused evidence
 
-`tests/let_mut_reorder.rs` covers compiler validation, cache reuse, telemetry, and rollback after semantic validation failure. `src/style.rs` unit tests cover snapshot delta detection and skipping semantic validation when a scope has no changes. Use `cargo test --test let_mut_reorder tune_rolls_back_the_run_when_semantic_validation_fails` for the narrow rollback check; use `cargo test --test let_mut_reorder` for the full semantic fixture lane.
+`tests/let_mut_reorder.rs` covers compiler validation across repeated runs, changed companion sources, progress, and rollback after semantic validation failure. `src/style/tests/workflow.rs` unit tests cover snapshot delta detection and skipping semantic validation when a scope has no changes. Use `cargo test --test let_mut_reorder tune_rolls_back_the_run_when_semantic_validation_fails` for the narrow rollback check; use `cargo test --test let_mut_reorder` for the full semantic fixture lane.

@@ -5,7 +5,10 @@ use ra_ap_syntax::{
 	ast::{MacroCall, Path, Use},
 };
 
-use crate::style::shared::{self, Edit, FileContext, TopItem, TopKind, Violation};
+use crate::style::{
+	shared::{self, Edit, FileContext, TopItem, TopKind, Violation},
+	syntax,
+};
 
 pub(crate) fn check_mod_rs(ctx: &FileContext, violations: &mut Vec<Violation>) {
 	if ctx.path.file_name().is_some_and(|name| name == "mod.rs") {
@@ -41,7 +44,11 @@ pub(crate) fn check_error_rs_no_use(
 		.top_items
 		.iter()
 		.filter_map(|item| item.name.as_deref())
-		.map(|name| normalize_ident(name).to_owned())
+		.map(|name| syntax::normalize_ident(name).to_owned())
+		.chain(
+			syntax::generic_parameter_names(ctx.source_file.syntax())
+				.map(|name| syntax::normalize_ident(&name).to_owned()),
+		)
 		.collect::<HashSet<_>>();
 	let mut symbol_paths: HashMap<String, HashSet<String>> = HashMap::new();
 	let mut symbol_ranges: HashMap<String, Vec<(usize, usize, String)>> = HashMap::new();
@@ -120,182 +127,37 @@ pub(crate) fn check_error_rs_no_use(
 		}
 	}
 	for item in use_items {
-		let Some(start) = shared::offset_from_line(&ctx.line_starts, item.start_line) else {
+		let Some((start, end)) = shared::item_text_range(ctx, item.start_offset, item.end_offset)
+		else {
 			continue;
 		};
-		let end =
-			shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
 
 		edits.push(Edit { start, end, replacement: String::new(), rule: "RUST-STYLE-IMPORT-005" });
 	}
 }
 
-fn normalize_ident(name: &str) -> &str {
-	name.strip_prefix("r#").unwrap_or(name)
-}
-
-fn is_same_ident(lhs: &str, rhs: &str) -> bool {
-	normalize_ident(lhs) == normalize_ident(rhs)
-}
-
 fn extract_use_path(item: &TopItem) -> Option<String> {
-	find_use_path_range(&item.raw)
+	syntax::find_use_path_range(&item.raw)
 		.and_then(|(start, end)| item.raw.get(start..end).map(|s| s.trim().to_owned()))
 }
 
-fn find_use_path_range(text: &str) -> Option<(usize, usize)> {
-	for (idx, _) in text.match_indices("use") {
-		let prev = text[..idx].chars().next_back();
-		let next = text.get(idx + 3..).and_then(|tail| tail.chars().next());
-		let is_prev_boundary = prev.is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'));
-		let is_next_whitespace = next.is_some_and(char::is_whitespace);
-
-		if !is_prev_boundary || !is_next_whitespace {
-			continue;
-		}
-
-		let bytes = text.as_bytes();
-		let mut start = idx + 3;
-
-		while start < bytes.len() && bytes[start].is_ascii_whitespace() {
-			start += 1;
-		}
-
-		let tail = text.get(start..)?;
-		let semi = tail.find(';')?;
-
-		return Some((start, start + semi));
-	}
-
-	None
-}
-
 fn collect_import_bindings_from_use_path(path: &str) -> Option<Vec<(String, String)>> {
-	let mut out = Vec::new();
+	let bindings = syntax::parse_use_bindings(path)?;
 
-	if !collect_import_bindings_from_segment(path.trim(), &mut out) {
+	if bindings.iter().any(|binding| binding.is_glob) {
 		return None;
 	}
 
-	Some(out)
-}
+	Some(
+		bindings
+			.into_iter()
+			.filter_map(|binding| {
+				let symbol = binding.name?;
 
-fn collect_import_bindings_from_segment(segment: &str, out: &mut Vec<(String, String)>) -> bool {
-	let trimmed = segment.trim();
-
-	if trimmed.is_empty() {
-		return true;
-	}
-	if trimmed.ends_with("::*") {
-		return false;
-	}
-
-	let mut brace_start = None;
-	let mut depth = 0_i32;
-	let mut brace_end = None;
-
-	for (idx, ch) in trimmed.char_indices() {
-		if ch == '{' {
-			if brace_start.is_none() {
-				brace_start = Some(idx);
-			}
-
-			depth += 1;
-		} else if ch == '}' {
-			depth -= 1;
-
-			if depth < 0 {
-				return false;
-			}
-			if depth == 0 {
-				brace_end = Some(idx);
-			}
-		}
-	}
-
-	if depth != 0 {
-		return false;
-	}
-
-	if let (Some(open), Some(close)) = (brace_start, brace_end) {
-		let prefix = trimmed[..open].trim();
-		let inner = &trimmed[open + 1..close];
-		let suffix = trimmed[close + 1..].trim();
-
-		if !suffix.is_empty() {
-			return false;
-		}
-		if !prefix.is_empty() && !prefix.ends_with("::") {
-			return false;
-		}
-
-		let prefix = prefix.strip_suffix("::").unwrap_or(prefix).trim();
-
-		for child in split_top_level_csv(inner) {
-			let child = child.trim();
-
-			if child.is_empty() {
-				continue;
-			}
-			if child == "self" {
-				if prefix.is_empty() {
-					return false;
-				}
-
-				let symbol = prefix.rsplit("::").next().unwrap_or(prefix).trim();
-				let symbol = normalize_ident(symbol);
-
-				if symbol.is_empty() {
-					return false;
-				}
-
-				out.push((symbol.to_owned(), prefix.replace(' ', "")));
-
-				continue;
-			}
-
-			let expanded =
-				if prefix.is_empty() { child.to_owned() } else { format!("{prefix}::{child}") };
-
-			if !collect_import_bindings_from_segment(&expanded, out) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	let (base, alias) = if let Some((left, right)) = trimmed.split_once(" as ") {
-		let alias = right.trim();
-
-		if alias.is_empty() {
-			return false;
-		}
-
-		(left.trim(), Some(alias))
-	} else {
-		(trimmed, None)
-	};
-
-	if base.is_empty() || matches!(base, "self" | "super" | "crate" | "*") || base.ends_with("::*")
-	{
-		return false;
-	}
-	if alias == Some("_") {
-		return true;
-	}
-
-	let full_path = base.replace(' ', "");
-	let symbol = alias.unwrap_or_else(|| base.rsplit("::").next().unwrap_or(base)).trim();
-	let symbol = normalize_ident(symbol);
-
-	if symbol.is_empty() || matches!(symbol, "self" | "super" | "crate" | "*") {
-		return false;
-	}
-
-	out.push((symbol.to_owned(), full_path));
-
-	true
+				Some((syntax::normalize_ident(&symbol).to_owned(), binding.path.join("::")))
+			})
+			.collect(),
+	)
 }
 
 fn unqualified_path_rewrites(
@@ -320,7 +182,7 @@ fn unqualified_path_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text(), symbol) {
+		if !syntax::is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -361,7 +223,7 @@ fn unqualified_macro_call_rewrites(
 			continue;
 		};
 
-		if !is_same_ident(name_ref.text(), symbol) {
+		if !syntax::is_same_ident(name_ref.text(), symbol) {
 			continue;
 		}
 
@@ -373,48 +235,4 @@ fn unqualified_macro_call_rewrites(
 	}
 
 	rewrites
-}
-
-fn split_top_level_csv(text: &str) -> Vec<String> {
-	let mut out = Vec::new();
-	let mut start = 0_usize;
-	let mut depth_paren = 0_i32;
-	let mut depth_brace = 0_i32;
-	let mut depth_bracket = 0_i32;
-	let mut in_str = false;
-	let mut escaped = false;
-
-	for (idx, ch) in text.char_indices() {
-		if in_str {
-			if escaped {
-				escaped = false;
-			} else if ch == '\\' {
-				escaped = true;
-			} else if ch == '"' {
-				in_str = false;
-			}
-
-			continue;
-		}
-
-		match ch {
-			'"' => in_str = true,
-			'(' => depth_paren += 1,
-			')' => depth_paren -= 1,
-			'{' => depth_brace += 1,
-			'}' => depth_brace -= 1,
-			'[' => depth_bracket += 1,
-			']' => depth_bracket -= 1,
-			',' if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 => {
-				out.push(text[start..idx].to_owned());
-
-				start = idx + 1;
-			},
-			_ => {},
-		}
-	}
-
-	out.push(text[start..].to_owned());
-
-	out
 }

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:31aa9412244d8595a55fb2ef674feaf7b3fc1d560182b218ef5b801c2829682d",
+  "claims": [
+    {
+      "id": "claim_ff1d6156e6394efdbaf7c60b14af4fb6",
+      "statement": "The current registry has 36 Rust rule IDs and six Swift rule IDs, so applicability classes for other Rust rules describe mapping intent rather than additional implemented Swift checks.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/shared.rs#L15-L58",
+          "version": "repo-lines-v1:sha256:2cb6eeee727ff2cb52fe8cfb308dd6139aa444115ef8ad19b2b50f6a982f890e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1MzAxNTA2MDZjYWRiNWYwNDA4YzRhYzJiMDllNmRiZWI1NTE1NmJhMjUwMGIwMGY0YjVjMGUxZGQ0YzJhZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwMmQyYzBkNmRjNWU3NGQ5MmZhMTRiOTFkYmVhMjY0MDkwYmViMzVmZGI5MTg4ZDliMzQxMTgxZGNlOWY0Y2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2NGFhM2M0ZTJkNzczNGFlMzk2NzdiNzc5ZjU2ODIxMWM5ZTYxZjVmOWRkZWY1NDFkMTFiNTk5YTE0OTAzYjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1ZjlmNmY5MTQxNTdhN2Y1YzE0ZmE0MGNkYjNmYjBmOTM0YjYwOWFiMDlmNTg1N2Y4ZTNmMDM1NGYwM2U4Y2MifQ"
+        },
+        {
+          "resource": "repo://src/style/swift.rs#L61-L204",
+          "version": "repo-lines-v1:sha256:6dab31c1aab54a3adccff3dac1d508e1886e6a1d47a708de59e613ba2c0a32bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3ZTY2MmI0Zjk2Zjg4MmY3NWUwOTVmYTBkOTQ4OWZkOGU4MmYxYTFiM2I0N2YwMjgwOGM5MDFlYzFiNGRkNGFhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlNjgwNmYxNTVjNWFjMWFlMjcyMmNhMDZmMmFjOWNhZGNiODgxYjkxMjNjYjYyNGEzYzEwNDc1YjQ0NDlkYzJlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmMzRlNDNjZTRmNDEzZWJlYWI5OTQ5MzEzNTU1YmVkOGQxZWYyOWFmZDNhMGQ3OTJjNGNhOGExZTg4ZTE0NTUyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI4MjFkYWQxNGYyYzIxMGMxNThiNjNkYjAyY2Q2ZjM0NjE3MjkyNmFkYjU2NmUwNGE0NGVmZWIwNzhmOGM5YjE3In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_1cab18e606e043aa9d9d20bed6053a55",
+      "statement": "The first Swift batch checks file naming, symbol imports, pure type aliases, force operators outside tests, large decimal literals, and long functions without producing fixes.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/swift.rs#L373-L387",
+          "version": "repo-lines-v1:sha256:1a460566ff9388d8cee42c9f492c799426803ae2ab6979d48c5abb1d12e51e3f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY4YjhlMzU0OTQ1YWVjMTg0MjhmZjg1YzFmOGE2ZGFjY2QzZTA4OTg4NTZkMGEwMjgyMmFkZmI0MjU5MTA5YTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjViOTY2MzI1ZjI1ZjU4N2FkMWJlZjRhY2E1MGRkZjE5OTliODk1NzEzZmMxMDVlNDJmOWIzOTAyNGMxMWJkZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
+        },
+        {
+          "resource": "repo://src/style/swift.rs#L61-L204",
+          "version": "repo-lines-v1:sha256:6dab31c1aab54a3adccff3dac1d508e1886e6a1d47a708de59e613ba2c0a32bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3ZTY2MmI0Zjk2Zjg4MmY3NWUwOTVmYTBkOTQ4OWZkOGU4MmYxYTFiM2I0N2YwMjgwOGM5MDFlYzFiNGRkNGFhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlNjgwNmYxNTVjNWFjMWFlMjcyMmNhMDZmMmFjOWNhZGNiODgxYjkxMjNjYjYyNGEzYzEwNDc1YjQ0NDlkYzJlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmMzRlNDNjZTRmNDEzZWJlYWI5OTQ5MzEzNTU1YmVkOGQxZWYyOWFmZDNhMGQ3OTJjNGNhOGExZTg4ZTE0NTUyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI4MjFkYWQxNGYyYzIxMGMxNThiNjNkYjAyY2Q2ZjM0NjE3MjkyNmFkYjU2NmUwNGE0NGVmZWIwNzhmOGM5YjE3In0"
+        },
+        {
+          "resource": "repo://tests/swift_curate.rs",
+          "version": "repo-file-v1:sha256:d1e7bcc80e8ecbd012dded0594f9e03447c8ec4d58829755e562c9d52d8b7fd8"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

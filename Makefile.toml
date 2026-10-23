@@ -48,7 +48,12 @@ args = [
 workspace = false
 command = "cargo"
 args = [
+	"run",
+	"--locked",
+	"--all-features",
+	"--bin",
 	"vstyle",
+	"--",
 	"curate",
 	"--language",
 	"rust",
@@ -149,7 +154,12 @@ args = [
 workspace = false
 command = "cargo"
 args = [
+	"run",
+	"--locked",
+	"--all-features",
+	"--bin",
 	"vstyle",
+	"--",
 	"tune",
 	"--language",
 	"rust",

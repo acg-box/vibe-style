@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:4a3e647a86788fcf2b711c83056f2b26e9232bc2cbdb93d7776a66b75b95eae3",
+  "claims": [
+    {
+      "id": "claim_aaf0e54d6f084d67b37f1e331babd40f",
+      "statement": "Each semantic check starts Cargo with --all-targets and JSON messages, mirrors the selected package and feature options, and rejects output without a build-finished status.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/semantic.rs#L137-L193",
+          "version": "repo-lines-v1:sha256:07df58f15aa769dd925d59237e0b0ab9d0dacb2cbd73979b9261adfe2d252459:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNDQ5OTZhOTZiNzllMjZjM2EyM2U3NGYxNDRlNjUwNzQ2NmRkNzNhMmMyMTY0ZjIwNWNkNjU4Mzk5Njg2OTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkzYzhjODdlNTc4NGY3YmM2ZDRhNTJkNTQ5YTdkZjQ3MGY5MmExNGNiYTdkNzkxNWI5ZWFjZWM5M2Y2NjUxNzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzMDViMDA5YzQ5NWJmOTE4MGQ2YTM5MGI1ZGRhNmE3YzhhZDI4OTVmM2RmY2VjZmJhNDM1YTFmNTcyMjRkOTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d50d0e0f49e84d85bb6d18dd5dcb019d",
+      "statement": "Missing-import suggestion rounds default to two, reject zero or invalid values by falling back to the default, cap configured values at 16, and apply suggestions only to selected files.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/semantic.rs#L15-L64",
+          "version": "repo-lines-v1:sha256:362ddaf0311ee4e9033b857a575a42f3124c8a614b70e1d2ed9038aff83daea7:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliYTc0MjM1MmU5MTEzNjQ4OGM1OTM5NDU1NTE4NTFhOWFmMDVjYjNlYWRjYzUxNDRjNDMyNDE3OWQ1MTJjMWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlmZGJlYTBmYTQzZDEwY2I0Y2VhMmZmMzM4M2M4ZmU2M2JjNTRmYTFlY2QwYWYzNmVlMjIwYzE1ZTBlMzAzNGYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjExMDg2MDIxZmU5NjYzMTgyOTBkN2JhMGM1OWI0NWIwOTJhMzg5NDU2N2E5MmQ1OTFhMmMzYjU0YWEzYjA0ZmQifQ"
+        },
+        {
+          "resource": "repo://src/style/semantic.rs#L99-L135",
+          "version": "repo-lines-v1:sha256:65e0a7141c9f49095048841b1c4d6a9eaf0d27fcd4508e1bbaa79b0fdf65a55d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwODk1ODYwMjFiNDJiNTYyMjc3NDg1ZWE2YmVmYmQ0NDdjMmZhNDU2Mjk1NjZhZTE4MGIwOGZkNzQ3YmMxZWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNiNWQzM2Q0MDhmMmZhZDNhZDFlMzgyNDAwMDkyYjFmMzM1NzAwODU3YmY2MzJjYmE0ZTNmODliM2U3MTMxMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZlNjZkMTA5MGVmODkxYjk5YzI2YmMyOGIzMGFjOGYwOGYzNGMzZGQzMjYzMzQyNDY0OWI0MmJlNGEyYzg1NWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e80227f120d54384a0eeb84c35d78647",
+      "statement": "Repeated tune runs validate current source, including companion files that have no style edits, rather than reusing a persistent vstyle compiler-output cache.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/semantic.rs#L137-L163",
+          "version": "repo-lines-v1:sha256:2223913d8908b0b2b3e405aa5b11b34db59f374380c1ec6504dd2526684dd3c9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNDQ5OTZhOTZiNzllMjZjM2EyM2U3NGYxNDRlNjUwNzQ2NmRkNzNhMmMyMTY0ZjIwNWNkNjU4Mzk5Njg2OTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkzYzhjODdlNTc4NGY3YmM2ZDRhNTJkNTQ5YTdkZjQ3MGY5MmExNGNiYTdkNzkxNWI5ZWFjZWM5M2Y2NjUxNzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkZmMwYWI0MWEzYjdmYzEwYTgyNGE3YmNmNWUyZGJhYzFhYzk4NTk2YmRiZDBjMTc3MTcxMDE2N2QwODJjNGMifQ"
+        },
+        {
+          "resource": "repo://src/style/semantic.rs#L66-L97",
+          "version": "repo-lines-v1:sha256:97dc2414f37f06880029747cfa0f80ebcc5bc85488894f1f2683720d6236eb13:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlYmVhZmY0OGE3OTFmNjUwMDE5YTI1NjA2NGJmODExOTg0NWI2NDFhZWVmMDA2MjE3Y2EzZjhjYjQ2YWU1NDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1OWJjMTI3Mzk5MzExMWVkNTk5NTZmYTE0ZGI2MzNiYTE2ODQwNDQwMjEwMGEyNDExY2E5ZmZlZjc4OWY3ZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU0NWI1YTZkMTFkODBhZjFiOTdmM2YxZTUyMzA1NzczODUzMWNiZWUwOWQ5OGQxMDI3NDI5ODkxYjBjYTEzNDkifQ"
+        },
+        {
+          "resource": "repo://tests/let_mut_reorder.rs",
+          "version": "repo-file-v1:sha256:6ed2fc1c665e9bfbfea10d0f6503a53f074ae13d2be8dd38ed1793a78724dec0"
+        }
+      ]
+    },
+    {
+      "id": "claim_c736be991c4e495697cc3ca7f91399aa",
+      "statement": "The semantic benchmark restores fixture sources between cold and warm runs and executes tune for each, so both timings exercise compiler-backed fixes.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/bench-semantic-vstyle.sh",
+          "version": "repo-file-v1:sha256:970b0cf53a54eebd885913894e1af8f77bfe555ac2323b26bbc7090d6ca618b6"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}
