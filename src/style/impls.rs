@@ -7,7 +7,7 @@ use ra_ap_syntax::{
 use regex::Regex;
 
 use crate::style::{
-	shared::{self, Edit, FileContext, TopItem, TopKind, Violation},
+	shared::{self, Edit, FileContext, TopKind, Violation},
 	syntax,
 	workspace::WORKSPACE_IMPORT_ROOTS,
 };
@@ -324,13 +324,14 @@ fn build_impl_order_rewrite_edit(
 ) -> Option<Edit> {
 	let first_item = &ctx.top_items[*impl_indices.first()?];
 	let last_item = &ctx.top_items[*impl_indices.last()?];
-	let (start, _) = top_item_text_range(ctx, first_item)?;
-	let (_, end) = top_item_text_range(ctx, last_item)?;
+	let (start, _) = shared::item_text_range(ctx, first_item.start_offset, first_item.end_offset)?;
+	let (_, end) = shared::item_text_range(ctx, last_item.start_offset, last_item.end_offset)?;
 	let mut blocks_by_index = HashMap::new();
 
 	for idx in impl_indices {
 		let item = &ctx.top_items[*idx];
-		let (item_start, item_end) = top_item_text_range(ctx, item)?;
+		let (item_start, item_end) =
+			shared::item_text_range(ctx, item.start_offset, item.end_offset)?;
 		let block = ctx.text.get(item_start..item_end)?.trim_end_matches('\n').to_owned();
 
 		if block.is_empty() {
@@ -405,10 +406,14 @@ fn push_impl_relocation_edits(
 	let last_impl_idx = *impl_indices.last().unwrap_or(&first_impl_idx);
 	let first_impl_item = &ctx.top_items[first_impl_idx];
 	let last_impl_item = &ctx.top_items[last_impl_idx];
-	let Some((block_start, _)) = top_item_text_range(ctx, first_impl_item) else {
+	let Some((block_start, _)) =
+		shared::item_text_range(ctx, first_impl_item.start_offset, first_impl_item.end_offset)
+	else {
 		return;
 	};
-	let Some((_, cluster_end)) = top_item_text_range(ctx, last_impl_item) else {
+	let Some((_, cluster_end)) =
+		shared::item_text_range(ctx, last_impl_item.start_offset, last_impl_item.end_offset)
+	else {
 		return;
 	};
 	let insert_start_line = ctx.top_items[type_idx].end_line + 1;
@@ -674,141 +679,10 @@ fn extract_use_path_from_item_text(text: &str) -> Option<String> {
 }
 
 fn imported_symbols_from_use_path(path: &str) -> Vec<String> {
-	fn collect_symbols_from_segment(segment: &str, out: &mut Vec<String>) -> bool {
-		let trimmed = segment.trim();
-
-		if trimmed.is_empty() {
-			return true;
-		}
-
-		let mut brace_start = None;
-		let mut depth = 0_i32;
-		let mut brace_end = None;
-
-		for (idx, ch) in trimmed.char_indices() {
-			if ch == '{' {
-				if brace_start.is_none() {
-					brace_start = Some(idx);
-				}
-
-				depth += 1;
-			} else if ch == '}' {
-				depth -= 1;
-
-				if depth < 0 {
-					return false;
-				}
-				if depth == 0 {
-					brace_end = Some(idx);
-				}
-			}
-		}
-
-		if depth != 0 {
-			return false;
-		}
-
-		if let (Some(open), Some(close)) = (brace_start, brace_end) {
-			let prefix = trimmed[..open].trim();
-			let inner = &trimmed[open + 1..close];
-			let suffix = trimmed[close + 1..].trim();
-
-			if !suffix.is_empty() {
-				return false;
-			}
-			if !prefix.is_empty() && !prefix.ends_with("::") {
-				return false;
-			}
-
-			for child in split_top_level_csv(inner) {
-				let expanded = if prefix.is_empty() { child } else { format!("{prefix}{child}") };
-
-				if !collect_symbols_from_segment(&expanded, out) {
-					return false;
-				}
-			}
-
-			return true;
-		}
-
-		let mut symbol = trimmed.to_owned();
-
-		if let Some((_left, right)) = symbol.split_once(" as ") {
-			if right.trim() == "_" {
-				return true;
-			}
-
-			symbol = right.trim().to_owned();
-		}
-
-		if matches!(symbol.as_str(), "*" | "self" | "super" | "crate") {
-			return true;
-		}
-
-		if let Some((_, right)) = symbol.rsplit_once("::") {
-			symbol = right.to_owned();
-		}
-		if let Some(stripped) = symbol.strip_prefix("r#") {
-			symbol = stripped.to_owned();
-		}
-
-		if matches!(symbol.as_str(), "*" | "self" | "super" | "crate") || symbol.is_empty() {
-			return true;
-		}
-
-		out.push(symbol);
-
-		true
-	}
-
-	let mut out = Vec::new();
-
-	if !collect_symbols_from_segment(path, &mut out) {
-		return Vec::new();
-	}
-
-	out
-}
-
-fn split_top_level_csv(text: &str) -> Vec<String> {
-	let chars = text.char_indices().collect::<Vec<_>>();
-	let mut out = Vec::new();
-	let mut start = 0_usize;
-	let mut depth_brace = 0_i32;
-	let mut depth_angle = 0_i32;
-
-	for (idx, ch) in &chars {
-		match ch {
-			'{' => depth_brace += 1,
-			'}' => depth_brace = (depth_brace - 1).max(0),
-			'<' => depth_angle += 1,
-			'>' => depth_angle = (depth_angle - 1).max(0),
-			',' if depth_brace == 0 && depth_angle == 0 => {
-				let segment = text[start..*idx].trim();
-
-				if !segment.is_empty() {
-					out.push(segment.to_owned());
-				}
-
-				start = *idx + 1;
-			},
-			_ => {},
-		}
-	}
-
-	let tail = text[start..].trim();
-
-	if !tail.is_empty() {
-		out.push(tail.to_owned());
-	}
-
-	out
-}
-
-fn top_item_text_range(ctx: &FileContext, item: &TopItem) -> Option<(usize, usize)> {
-	let start = shared::offset_from_line(&ctx.line_starts, item.start_line)?;
-	let end =
-		shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
-
-	if end < start { None } else { Some((start, end)) }
+	syntax::parse_use_bindings(path)
+		.unwrap_or_default()
+		.into_iter()
+		.filter_map(|binding| binding.name)
+		.map(|name| syntax::normalize_ident(&name).to_owned())
+		.collect()
 }

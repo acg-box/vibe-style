@@ -94,8 +94,16 @@ pub(super) fn apply_import009_non_importable_root_use_rule(
 	}
 
 	let mut rewrites = Vec::new();
+	// Rust rejects `Self` in imports. Parse its legal module equivalent to recover
+	// the tree, then restore the associated-type root at each use site.
+	let parse_path =
+		if root == "Self" { path.replacen("Self", "self", 1) } else { path.to_owned() };
 
-	for full_path in paths::imported_full_paths_from_use_path(path) {
+	for mut full_path in paths::imported_full_paths_from_use_path(&parse_path) {
+		if root == "Self" {
+			full_path = full_path.replacen("self", "Self", 1);
+		}
+
 		let Some(symbol) = paths::symbol_from_full_import_path(&full_path) else {
 			continue;
 		};

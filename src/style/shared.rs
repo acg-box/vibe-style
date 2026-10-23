@@ -255,6 +255,27 @@ pub(crate) fn text_range_to_lines(line_starts: &[usize], range: TextRange) -> (u
 	(start_line, end_line)
 }
 
+pub(crate) fn item_text_range(
+	ctx: &FileContext,
+	start: usize,
+	end: usize,
+) -> Option<(usize, usize)> {
+	ctx.text.get(start..end)?;
+
+	let start_line = line_from_offset(&ctx.line_starts, start);
+	let end_line = line_from_offset(&ctx.line_starts, end.saturating_sub(1));
+	let line_start = offset_from_line(&ctx.line_starts, start_line)?;
+	let line_end = offset_from_line(&ctx.line_starts, end_line + 1).unwrap_or(ctx.text.len());
+	let prefix = ctx.text.get(line_start..start)?;
+	let suffix = ctx.text.get(end..line_end)?;
+
+	if prefix.trim().is_empty() && suffix.trim().is_empty() {
+		Some((line_start, line_end))
+	} else {
+		Some((start, end))
+	}
+}
+
 pub(crate) fn extract_impl_target_name(ty_text: &str) -> Option<String> {
 	let ty_text = ty_text.trim();
 

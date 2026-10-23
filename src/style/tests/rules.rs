@@ -1,5 +1,4 @@
 use std::{
-	collections::BTreeMap,
 	env, fs,
 	path::Path,
 	process,
@@ -404,7 +403,7 @@ type A<'a, T> = B<'a, T>;
 	let matches = violations.iter().filter(|v| v.rule == "RUST-STYLE-TYPE-001").collect::<Vec<_>>();
 
 	assert_eq!(matches.len(), 4);
-	assert!(matches.iter().all(|v| v.fixable));
+	assert!(matches.iter().all(|v| !v.fixable));
 }
 
 #[test]
@@ -468,11 +467,8 @@ pub type Code = i16;
 	assert_eq!(type_fixes.len(), 1);
 
 	let plan = &type_fixes[0];
-	let mut renames = BTreeMap::new();
+	let renames = [plan.clone()];
 	let mut edits = plan.definition_edits.clone();
-
-	renames.insert(plan.alias.clone(), plan.target.clone());
-
 	let skip_ranges = edits.iter().map(|edit| (edit.start, edit.end)).collect::<Vec<_>>();
 	let usage_edits = types::build_type_alias_usage_rename_edits(&ctx, &renames, &skip_ranges);
 
@@ -510,14 +506,10 @@ fn produce() -> Hidden {
 
 	let plan = &type_fixes[0];
 
-	assert_eq!(plan.alias, "Hidden");
 	assert_eq!(plan.target, "i32");
 	assert!(plan.definition_edits.iter().any(|edit| edit.rule == "RUST-STYLE-TYPE-001"));
 
-	let mut renames = BTreeMap::new();
-
-	renames.insert(plan.alias.clone(), plan.target.clone());
-
+	let renames = [plan.clone()];
 	let skip_ranges =
 		plan.definition_edits.iter().map(|edit| (edit.start, edit.end)).collect::<Vec<_>>();
 	let usage_edits = types::build_type_alias_usage_rename_edits(&ctx, &renames, &skip_ranges);

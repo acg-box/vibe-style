@@ -349,52 +349,10 @@ fn import006_path_conflicts_in_target_scope(ctx: &FileContext, path: &str) -> bo
 
 fn import006_delete_local_use_edit(ctx: &FileContext, use_item: &Use) -> Option<Edit> {
 	let range = use_item.syntax().text_range();
-	let item_start = usize::from(range.start());
-	let item_end = usize::from(range.end());
-	let start_line = shared::line_from_offset(&ctx.line_starts, item_start);
-	let end_line = if item_end == 0 {
-		start_line
-	} else {
-		shared::line_from_offset(&ctx.line_starts, item_end.saturating_sub(1))
-	};
+	let (start, end) =
+		shared::item_text_range(ctx, usize::from(range.start()), usize::from(range.end()))?;
 
-	if let Some((line_start, line_end)) =
-		import006_full_line_delete_range(ctx, start_line, end_line, item_start, item_end)
-	{
-		return Some(Edit {
-			start: line_start,
-			end: line_end,
-			replacement: String::new(),
-			rule: "RUST-STYLE-IMPORT-006",
-		});
-	}
-
-	Some(Edit {
-		start: item_start,
-		end: item_end,
-		replacement: String::new(),
-		rule: "RUST-STYLE-IMPORT-006",
-	})
-}
-
-fn import006_full_line_delete_range(
-	ctx: &FileContext,
-	start_line: usize,
-	end_line: usize,
-	item_start: usize,
-	item_end: usize,
-) -> Option<(usize, usize)> {
-	let line_start = shared::offset_from_line(&ctx.line_starts, start_line)?;
-	let line_end =
-		shared::offset_from_line(&ctx.line_starts, end_line + 1).unwrap_or(ctx.text.len());
-	let prefix = ctx.text.get(line_start..item_start)?;
-	let suffix = ctx.text.get(item_end..line_end)?;
-
-	if prefix.trim().is_empty() && suffix.trim().is_empty() {
-		Some((line_start, line_end))
-	} else {
-		None
-	}
+	Some(Edit { start, end, replacement: String::new(), rule: "RUST-STYLE-IMPORT-006" })
 }
 
 fn import006_insert_scope_use_edit(ctx: &FileContext, path: &str) -> Option<Edit> {

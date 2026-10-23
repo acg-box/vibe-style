@@ -7,8 +7,9 @@ use std::{
 };
 
 use crate::style::{
-	engine::{self, CheckState, TypeAliasRenamePlan},
+	engine::{self, CheckState},
 	shared::{self, CargoOptions, StyleLanguage},
+	types::TypeAliasRenamePlan,
 	workspace,
 };
 

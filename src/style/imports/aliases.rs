@@ -8,8 +8,7 @@ use regex::Regex;
 
 use crate::style::{
 	imports::{
-		TraitKeepAliveNormalizationState, UseItemAnalysis, groups, paths, qualification,
-		references, scopes,
+		TraitKeepAliveNormalizationState, UseItemAnalysis, paths, qualification, references, scopes,
 	},
 	shared::{self, Edit, FileContext, TopItem, TopKind, Violation},
 	syntax,
@@ -123,7 +122,7 @@ pub(super) fn apply_import003_trait_keep_alive_rule(
 		return true;
 	}
 
-	if let Some((start, end)) = groups::item_text_range(ctx, item)
+	if let Some((start, end)) = shared::item_text_range(ctx, item.start_offset, item.end_offset)
 		&& let Some(raw) = ctx.text.get(start..end)
 		&& let Some(rewritten) = paths::rewrite_use_item_with_path(raw, &rewritten_use_path)
 	{
@@ -165,6 +164,8 @@ pub(super) fn apply_import003_non_keep_alive_alias_rule(
 	let mut fixable = !aliases.iter().any(|(alias, _)| {
 		scopes::symbol_referenced_by_child_module(ctx, alias)
 			|| references::symbol_has_bare_identifier_pattern(ctx, alias)
+			|| syntax::generic_parameter_names(ctx.source_file.syntax())
+				.any(|name| syntax::is_same_ident(&name, alias))
 	});
 
 	for (alias, qualified_path) in &aliases {

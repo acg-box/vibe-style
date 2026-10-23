@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use ra_ap_syntax::{Edition, SourceFile};
+
 use crate::style::{
 	engine::{self, MAX_FIX_PASSES},
 	fixes, module, rules,
@@ -870,6 +872,22 @@ mod api;
 }
 
 #[test]
+fn mod004_recognizes_unicode_names_and_inline_block_docs() {
+	for source in ["/// API helpers.\nmod 工具 {}", "/** API helpers. */ mod api {}"] {
+		let ctx =
+			shared::read_file_context_from_text(Path::new("module_docs.rs"), source.to_owned())
+				.expect("Read context.")
+				.expect("Parse source.");
+		let (violations, _) = rules::collect_violations(&ctx, false);
+
+		assert!(
+			violations.iter().any(|violation| violation.rule == "RUST-STYLE-MOD-004"),
+			"{source}"
+		);
+	}
+}
+
+#[test]
 fn mod004_allows_inner_doc_comment_inside_module_body() {
 	let text = r#"
 mod api {
@@ -984,4 +1002,27 @@ fn module_layout_preserves_import_group_separators() {
 
 	assert_eq!(rewritten, repeated);
 	assert_eq!(count, 0, "Import grouping and module layout must not oscillate.");
+}
+
+#[test]
+fn reordering_inline_items_preserves_each_item_once() {
+	let source = "fn sample() -> u8 { 7 } pub struct Marker;\n";
+	let (rewritten, _, _, _) = engine::apply_fix_passes(Path::new("inline_items.rs"), source, true)
+		.expect("Reorder inline items.");
+
+	assert_eq!(rewritten.matches("fn sample()").count(), 1, "{rewritten}");
+	assert_eq!(rewritten.matches("pub struct Marker;").count(), 1, "{rewritten}");
+	assert!(rewritten.find("struct Marker").unwrap() < rewritten.find("fn sample").unwrap());
+}
+
+#[test]
+fn inline_test_module_edits_preserve_balanced_braces() {
+	let source = "#[cfg(test)] mod tests { use super::*; #[test] fn keeps_test() { assert_eq!(2 + 2, 4); } }\n";
+	let (rewritten, _, _, _) = engine::apply_fix_passes(Path::new("inline_tests.rs"), source, true)
+		.expect("Tune inline test module.");
+	let parsed = SourceFile::parse(&rewritten, Edition::CURRENT);
+
+	assert!(parsed.errors().is_empty(), "{:?}\n{rewritten}", parsed.errors());
+	assert!(rewritten.contains("fn keeps_test"), "{rewritten}");
+	assert!(!rewritten.contains("super::*"), "{rewritten}");
 }

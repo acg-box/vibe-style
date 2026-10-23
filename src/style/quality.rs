@@ -10,7 +10,7 @@ use ra_ap_syntax::{
 use regex::Regex;
 
 use crate::style::{
-	imports,
+	module_tree,
 	shared::{self, Edit, FileContext, SNAKE_CASE_RE, Violation},
 };
 
@@ -127,7 +127,8 @@ pub(crate) fn check_expect_unwrap(
 		if method_call_in_test_context(&method_call) {
 			continue;
 		}
-		if *external_test_only.get_or_insert_with(|| imports::declared_file_is_test_only(&ctx.path))
+		if *external_test_only
+			.get_or_insert_with(|| module_tree::declared_file_is_test_only(&ctx.path))
 		{
 			return;
 		}

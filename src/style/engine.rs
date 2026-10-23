@@ -10,7 +10,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::style::{
 	fixes, rules, semantic,
-	shared::{self, CargoOptions, Edit, RunSummary, Violation},
+	shared::{self, CargoOptions, RunSummary, Violation},
 	swift, types, workspace,
 };
 
@@ -74,12 +74,6 @@ impl CheckState {
 				.saturating_add(counts.unfixable_count);
 		}
 	}
-}
-
-#[derive(Debug, Default)]
-struct TypeAliasRenamePlan {
-	renames: BTreeMap<String, String>,
-	definition_edits: BTreeMap<PathBuf, Vec<Edit>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -677,7 +671,7 @@ fn collect_file_fixes(
 	progress: bool,
 ) -> Result<CollectedFileFixes> {
 	let collect_started = Instant::now();
-	let type_alias_plan = collect_type_alias_rename_plan(files)?;
+	let type_alias_plan = types::TypeAliasRenamePlan::collect(files)?;
 	let outcomes_all = collect_fix_outcomes(files, &type_alias_plan, scope_label, progress)?;
 	let changed_files = changed_file_paths(&outcomes_all);
 	let total_applied = outcomes_all.iter().map(|outcome| outcome.applied_count).sum::<usize>();
@@ -961,64 +955,9 @@ fn handle_semantic_validation_fallbacks(ctx: SemanticValidationFallbacks<'_>) ->
 	Ok(())
 }
 
-fn collect_type_alias_rename_plan(files: &[PathBuf]) -> Result<TypeAliasRenamePlan> {
-	let mut plan = TypeAliasRenamePlan::default();
-
-	for file in files {
-		let Some(ctx) = shared::read_file_context(file)? else {
-			continue;
-		};
-		let fixes = types::collect_type_alias_rename_fixes(&ctx);
-
-		for fix in fixes {
-			if let Some(existing) = plan.renames.get(&fix.alias) {
-				if existing != &fix.target {
-					continue;
-				}
-			} else {
-				plan.renames.insert(fix.alias.clone(), fix.target);
-			}
-
-			plan.definition_edits.entry(file.clone()).or_default().extend(fix.definition_edits);
-		}
-	}
-
-	Ok(plan)
-}
-
-fn apply_type_alias_rename_plan(
-	path: &Path,
-	initial_text: &str,
-	plan: &TypeAliasRenamePlan,
-) -> Result<(String, usize, bool)> {
-	if plan.renames.is_empty() && plan.definition_edits.is_empty() {
-		return Ok((initial_text.to_owned(), 0, false));
-	}
-
-	let mut text = initial_text.to_owned();
-	let Some(ctx) = shared::read_file_context_from_text(path, mem::take(&mut text))? else {
-		return Ok((text, 0, false));
-	};
-	let mut edits = Vec::<Edit>::new();
-
-	if let Some(def_edits) = plan.definition_edits.get(path) {
-		edits.extend(def_edits.iter().cloned());
-	}
-
-	let skip_ranges = edits.iter().map(|edit| (edit.start, edit.end)).collect::<Vec<_>>();
-	let usage_edits = types::build_type_alias_usage_rename_edits(&ctx, &plan.renames, &skip_ranges);
-
-	edits.extend(usage_edits);
-
-	let mut text = ctx.text;
-	let applied = fixes::apply_edits(&mut text, edits)?;
-
-	Ok((text, applied, applied > 0))
-}
-
 fn collect_fix_outcomes(
 	files: &[PathBuf],
-	type_alias_plan: &TypeAliasRenamePlan,
+	type_alias_plan: &types::TypeAliasRenamePlan,
 	scope_label: &str,
 	progress: bool,
 ) -> Result<Vec<FileFixOutcome>> {
@@ -1046,7 +985,7 @@ fn collect_fix_outcomes(
 					},
 				};
 				let (base_text, type_alias_applied, had_type_alias_rename_edits) =
-					apply_type_alias_rename_plan(file, &original_text, type_alias_plan)?;
+					type_alias_plan.apply(file, &original_text)?;
 				let (text, pass_applied, had_import_shortening_edits, had_let_mut_reorder_edits) =
 					apply_fix_passes(file, &base_text, true)?;
 				let did_change = text != original_text;

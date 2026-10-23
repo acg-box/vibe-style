@@ -11,6 +11,44 @@ use crate::style::{
 };
 
 #[test]
+fn edit_guards_protect_complete_literals_without_masking_unicode_lifetimes() {
+	for literal in ["b'x'", "c\"hello\"", "cr#\"hello\"#", "r##\"hello\"##", "'中'"] {
+		let mut text = format!("fn sample() {{ let value = {literal}; }}");
+		let original = text.clone();
+		let start = text.find(literal).expect("Find literal.");
+		let applied = fixes::apply_edits(
+			&mut text,
+			vec![Edit {
+				start,
+				end: start + 1,
+				replacement: "x".to_owned(),
+				rule: "RUST-STYLE-SPACE-001",
+			}],
+		)
+		.expect("Apply edits.");
+
+		assert_eq!(applied, 0, "{literal}");
+		assert_eq!(text, original);
+	}
+
+	let mut text = "fn sample<'中>(value: &'中 str) {}".to_owned();
+	let start = text.find("value").expect("Find binding.");
+	let applied = fixes::apply_edits(
+		&mut text,
+		vec![Edit {
+			start,
+			end: start + 5,
+			replacement: "input".to_owned(),
+			rule: "RUST-STYLE-SPACE-001",
+		}],
+	)
+	.expect("Apply edits.");
+
+	assert_eq!(applied, 1);
+	assert!(text.contains("(input:"));
+}
+
+#[test]
 fn import005_fix_rewrites_error_rs_to_fully_qualified_paths() {
 	let original = r#"
 use std::fmt::{Display, Formatter};
@@ -855,4 +893,19 @@ mod tests {
 
 	assert!(!violations.iter().any(|v| v.rule == "RUST-STYLE-IMPORT-004"));
 	assert!(!edits.iter().any(|e| e.rule == "RUST-STYLE-IMPORT-004"));
+}
+
+#[test]
+fn removing_error_imports_preserves_neighboring_items_on_the_same_line() {
+	let source = "use std::io::Error; pub const KEEP: u8 = 7;\n";
+	let ctx = shared::read_file_context_from_text(Path::new("error.rs"), source.to_owned())
+		.expect("Read source.")
+		.expect("Get context.");
+	let (_, edits) = rules::collect_violations(&ctx, true);
+	let edits = edits.into_iter().filter(|edit| edit.rule == "RUST-STYLE-IMPORT-005").collect();
+	let mut rewritten = source.to_owned();
+
+	assert!(fixes::apply_edits(&mut rewritten, edits).expect("Apply import removal.") > 0);
+	assert!(rewritten.contains("pub const KEEP: u8 = 7;"), "Item was deleted:\n{rewritten}");
+	assert!(!rewritten.contains("use std::io::Error;"));
 }

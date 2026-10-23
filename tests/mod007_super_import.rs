@@ -116,3 +116,44 @@ mod tests {
 		"expected helper to be reached through an explicit module import after tune"
 	);
 }
+
+#[test]
+fn removing_unused_globs_preserves_inline_and_multiline_test_items() {
+	for source in [
+		"#[cfg(test)] mod tests { use super::*; #[test] fn keeps_test() { assert_eq!(2 + 2, 4); } }\n",
+		"#[cfg(test)] mod tests {\n use super::*; #[test] fn keeps_test() { assert_eq!(2 + 2, 4); }\n}\n",
+		"#[cfg(test)] mod tests {\n use\n super::*;\n #[test] fn keeps_test() { assert_eq!(2 + 2, 4); }\n}\n",
+	] {
+		let root = create_temp_crate_root();
+
+		fs::write(root.join("src/lib.rs"), source).expect("Write test module.");
+
+		let initialized = Command::new("git")
+			.current_dir(&root)
+			.args(["init", "--quiet"])
+			.output()
+			.expect("Initialize fixture.");
+
+		assert!(initialized.status.success());
+
+		let tuned = Command::new(env!("CARGO_BIN_EXE_vstyle"))
+			.current_dir(&root)
+			.args(["tune", "--language", "rust"])
+			.output()
+			.expect("Tune test module.");
+		let rewritten = fs::read_to_string(root.join("src/lib.rs")).expect("Read test module.");
+
+		assert!(tuned.status.success(), "{}\n{rewritten}", String::from_utf8_lossy(&tuned.stderr));
+		assert!(rewritten.contains("fn keeps_test"), "Test code was deleted:\n{rewritten}");
+		assert!(!rewritten.contains("super::*"), "Unused import remains:\n{rewritten}");
+
+		let listed = Command::new("cargo")
+			.current_dir(&root)
+			.args(["test", "--quiet", "--", "--list"])
+			.output()
+			.expect("List retained tests.");
+
+		assert!(listed.status.success(), "{}", String::from_utf8_lossy(&listed.stderr));
+		assert!(String::from_utf8_lossy(&listed.stdout).contains("tests::keeps_test: test"));
+	}
+}

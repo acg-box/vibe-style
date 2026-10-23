@@ -10,7 +10,7 @@ mod references;
 mod scopes;
 mod shortening;
 
-pub(crate) use scopes::{declared_file_is_test_only, exported_symbols_from_super_scope};
+pub(crate) use scopes::exported_symbols_from_super_scope;
 
 use std::collections::{HashMap, HashSet};
 

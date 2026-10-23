@@ -6,6 +6,7 @@ mod generics;
 mod impls;
 mod imports;
 mod module;
+mod module_tree;
 mod quality;
 mod rules;
 mod semantic;

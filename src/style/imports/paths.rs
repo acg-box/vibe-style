@@ -25,80 +25,13 @@ pub(super) fn collect_alias_bindings_from_use_segment(
 	segment: &str,
 	out: &mut Vec<(String, String)>,
 ) -> bool {
-	let trimmed = segment.trim();
-
-	if trimmed.is_empty() {
-		return true;
-	}
-
-	let mut brace_start = None;
-	let mut depth = 0_i32;
-	let mut brace_end = None;
-
-	for (idx, ch) in trimmed.char_indices() {
-		if ch == '{' {
-			if brace_start.is_none() {
-				brace_start = Some(idx);
-			}
-
-			depth += 1;
-		} else if ch == '}' {
-			depth -= 1;
-
-			if depth < 0 {
-				return false;
-			}
-			if depth == 0 {
-				brace_end = Some(idx);
-			}
-		}
-	}
-
-	if depth != 0 {
+	let Some(bindings) = syntax::parse_use_bindings(segment) else {
 		return false;
-	}
+	};
 
-	if let (Some(open), Some(close)) = (brace_start, brace_end) {
-		let prefix = trimmed[..open].trim();
-		let inner = &trimmed[open + 1..close];
-		let suffix = trimmed[close + 1..].trim();
-
-		if !suffix.is_empty() {
-			return false;
-		}
-		if !prefix.is_empty() && !prefix.ends_with("::") {
-			return false;
-		}
-
-		let prefix = prefix.strip_suffix("::").unwrap_or(prefix).trim();
-
-		for child in split_top_level_csv(inner) {
-			let child = child.trim();
-
-			if child.is_empty() {
-				continue;
-			}
-
-			let expanded =
-				if prefix.is_empty() { child.to_owned() } else { format!("{prefix}::{child}") };
-
-			if !collect_alias_bindings_from_use_segment(expanded.as_str(), out) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-	if let Some((base, alias)) = trimmed.rsplit_once(" as ") {
-		let base = base.trim();
-		let alias = alias.trim();
-
-		if base.is_empty() || alias.is_empty() {
-			return false;
-		}
-
-		out.push((alias.to_owned(), base.to_owned()));
-	}
+	out.extend(
+		bindings.into_iter().filter_map(|binding| Some((binding.alias?, binding.path.join("::")))),
+	);
 
 	true
 }
@@ -176,13 +109,10 @@ pub(super) fn build_use_item_rewrite_edit(
 
 		return None;
 	}
-	if let Some((line_start, line_end)) =
-		full_line_item_delete_range(ctx, item, item_start, item_end)
-	{
-		return Some(Edit { start: line_start, end: line_end, replacement: String::new(), rule });
-	}
 
-	Some(Edit { start: item_start, end: item_end, replacement: String::new(), rule })
+	let (start, end) = shared::item_text_range(ctx, item_start, item_end)?;
+
+	Some(Edit { start, end, replacement: String::new(), rule })
 }
 
 pub(super) fn use_item_lock_key(item: &TopItem) -> (usize, usize) {
@@ -295,23 +225,28 @@ pub(super) fn imported_full_paths_from_use_path(path: &str) -> Vec<String> {
 }
 
 pub(super) fn imported_reference_paths_from_use_path(path: &str) -> Vec<String> {
-	let mut paths = Vec::new();
+	syntax::parse_use_bindings(path)
+		.unwrap_or_default()
+		.into_iter()
+		.map(|binding| {
+			let mut path = binding.path.join("::");
 
-	if !collect_full_paths_from_use_segment(path.trim(), &mut paths) {
-		return Vec::new();
-	}
+			if binding.is_glob {
+				path.push_str("::*");
+			}
 
-	paths.into_iter().map(|path| path.replace(' ', "")).filter(|path| !path.is_empty()).collect()
+			path
+		})
+		.collect()
 }
 
 pub(super) fn imported_self_full_paths_from_use_path(path: &str) -> HashSet<String> {
-	let mut paths = HashSet::new();
-
-	if !collect_self_full_paths_from_use_segment(path.trim(), &mut paths) {
-		return HashSet::new();
-	}
-
-	paths.into_iter().map(|path| path.replace(' ', "")).collect()
+	syntax::parse_use_bindings(path)
+		.unwrap_or_default()
+		.into_iter()
+		.filter(|binding| binding.imports_self)
+		.map(|binding| binding.path.join("::"))
+		.collect()
 }
 
 pub(super) fn syntax_is_inside_cfg_test_module(syntax: &SyntaxNode) -> bool {
@@ -371,122 +306,12 @@ pub(super) fn extract_use_path(ctx: &FileContext, item: &TopItem) -> Option<Stri
 }
 
 pub(super) fn imported_symbols_from_use_path(path: &str) -> Vec<String> {
-	let compact = path.replace(' ', "");
-
-	if compact.ends_with("::*") {
-		return Vec::new();
-	}
-
-	fn normalize_symbol(segment: &str) -> Option<String> {
-		let mut symbol = segment.trim().to_owned();
-
-		if symbol.is_empty() {
-			return None;
-		}
-
-		if let Some((_left, right)) = symbol.split_once(" as ") {
-			if right.trim() == "_" {
-				return None;
-			}
-
-			symbol = right.trim().to_owned();
-		}
-
-		if matches!(symbol.as_str(), "*" | "self" | "super" | "crate") {
-			return None;
-		}
-
-		if let Some(parent) = symbol.strip_suffix("::self") {
-			symbol = parent.to_owned();
-		}
-		if let Some((_, right)) = symbol.rsplit_once("::") {
-			symbol = right.to_owned();
-		}
-		if let Some(stripped) = symbol.strip_prefix("r#") {
-			symbol = stripped.to_owned();
-		}
-
-		if matches!(symbol.as_str(), "*" | "self" | "super" | "crate") {
-			return None;
-		}
-
-		if symbol.is_empty() { None } else { Some(symbol) }
-	}
-
-	fn collect_symbols_from_segment(
-		segment: &str,
-		out: &mut Vec<String>,
-		normalize_symbol: &impl Fn(&str) -> Option<String>,
-	) -> bool {
-		let trimmed = segment.trim();
-
-		if trimmed.is_empty() {
-			return true;
-		}
-
-		let mut brace_start = None;
-		let mut depth = 0_i32;
-		let mut brace_end = None;
-
-		for (idx, ch) in trimmed.char_indices() {
-			if ch == '{' {
-				if brace_start.is_none() {
-					brace_start = Some(idx);
-				}
-
-				depth += 1;
-			} else if ch == '}' {
-				depth -= 1;
-
-				if depth < 0 {
-					return false;
-				}
-				if depth == 0 {
-					brace_end = Some(idx);
-				}
-			}
-		}
-
-		if depth != 0 {
-			return false;
-		}
-
-		if let (Some(open), Some(close)) = (brace_start, brace_end) {
-			let prefix = trimmed[..open].trim();
-			let inner = &trimmed[open + 1..close];
-			let suffix = trimmed[close + 1..].trim();
-
-			if !suffix.is_empty() {
-				return false;
-			}
-			if !prefix.is_empty() && !prefix.ends_with("::") {
-				return false;
-			}
-
-			for child in split_top_level_csv(inner) {
-				let expanded = if prefix.is_empty() { child } else { format!("{prefix}{child}") };
-
-				if !collect_symbols_from_segment(&expanded, out, normalize_symbol) {
-					return false;
-				}
-			}
-
-			return true;
-		}
-		if let Some(symbol) = normalize_symbol(trimmed) {
-			out.push(symbol);
-		}
-
-		true
-	}
-
-	let mut out = Vec::new();
-
-	if !collect_symbols_from_segment(path, &mut out, &normalize_symbol) {
-		return Vec::new();
-	}
-
-	out
+	syntax::parse_use_bindings(path)
+		.unwrap_or_default()
+		.into_iter()
+		.filter_map(|binding| binding.name)
+		.map(|name| syntax::normalize_ident(&name).to_owned())
+		.collect()
 }
 
 pub(super) fn is_non_importable_root(root: &str) -> bool {
@@ -700,191 +525,6 @@ pub(super) fn parse_single_level_nested_use_segment(segment: &str) -> Option<(&s
 	}
 
 	Some((head.trim(), inner))
-}
-
-fn full_line_item_delete_range(
-	ctx: &FileContext,
-	item: &TopItem,
-	item_start: usize,
-	item_end: usize,
-) -> Option<(usize, usize)> {
-	let line_start = shared::offset_from_line(&ctx.line_starts, item.start_line)?;
-	let line_end =
-		shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
-	let prefix = ctx.text.get(line_start..item_start)?;
-	let suffix = ctx.text.get(item_end..line_end)?;
-
-	if prefix.trim().is_empty() && suffix.trim().is_empty() {
-		Some((line_start, line_end))
-	} else {
-		None
-	}
-}
-
-fn collect_self_full_paths_from_use_segment(segment: &str, out: &mut HashSet<String>) -> bool {
-	let trimmed = segment.trim();
-
-	if trimmed.is_empty() {
-		return true;
-	}
-	if trimmed.ends_with("::*") {
-		return true;
-	}
-
-	let mut brace_start = None;
-	let mut depth = 0_i32;
-	let mut brace_end = None;
-
-	for (idx, ch) in trimmed.char_indices() {
-		if ch == '{' {
-			if brace_start.is_none() {
-				brace_start = Some(idx);
-			}
-
-			depth += 1;
-		} else if ch == '}' {
-			depth -= 1;
-
-			if depth < 0 {
-				return false;
-			}
-			if depth == 0 {
-				brace_end = Some(idx);
-			}
-		}
-	}
-
-	if depth != 0 {
-		return false;
-	}
-
-	if let (Some(open), Some(close)) = (brace_start, brace_end) {
-		let prefix = trimmed[..open].trim();
-		let inner = &trimmed[open + 1..close];
-		let suffix = trimmed[close + 1..].trim();
-
-		if !suffix.is_empty() {
-			return false;
-		}
-		if !prefix.is_empty() && !prefix.ends_with("::") {
-			return false;
-		}
-
-		let prefix = prefix.strip_suffix("::").unwrap_or(prefix).trim();
-
-		for child in split_top_level_csv(inner) {
-			let child = child.trim();
-
-			if child.is_empty() {
-				continue;
-			}
-			if child == "self" {
-				if !prefix.is_empty() {
-					out.insert(prefix.to_owned());
-				}
-
-				continue;
-			}
-
-			let expanded =
-				if prefix.is_empty() { child.to_owned() } else { format!("{prefix}::{child}") };
-
-			if !collect_self_full_paths_from_use_segment(&expanded, out) {
-				return false;
-			}
-		}
-	}
-
-	true
-}
-
-fn collect_full_paths_from_use_segment(segment: &str, out: &mut Vec<String>) -> bool {
-	let trimmed = segment.trim();
-
-	if trimmed.is_empty() {
-		return true;
-	}
-	if trimmed.ends_with("::*") {
-		out.push(trimmed.to_owned());
-
-		return true;
-	}
-
-	let mut brace_start = None;
-	let mut depth = 0_i32;
-	let mut brace_end = None;
-
-	for (idx, ch) in trimmed.char_indices() {
-		if ch == '{' {
-			if brace_start.is_none() {
-				brace_start = Some(idx);
-			}
-
-			depth += 1;
-		} else if ch == '}' {
-			depth -= 1;
-
-			if depth < 0 {
-				return false;
-			}
-			if depth == 0 {
-				brace_end = Some(idx);
-			}
-		}
-	}
-
-	if depth != 0 {
-		return false;
-	}
-
-	if let (Some(open), Some(close)) = (brace_start, brace_end) {
-		let prefix = trimmed[..open].trim();
-		let inner = &trimmed[open + 1..close];
-		let suffix = trimmed[close + 1..].trim();
-
-		if !suffix.is_empty() {
-			return false;
-		}
-		if !prefix.is_empty() && !prefix.ends_with("::") {
-			return false;
-		}
-
-		let prefix = prefix.strip_suffix("::").unwrap_or(prefix).trim();
-
-		for child in split_top_level_csv(inner) {
-			let child = child.trim();
-
-			if child.is_empty() {
-				continue;
-			}
-			if child == "self" {
-				if !prefix.is_empty() {
-					out.push(prefix.to_owned());
-				}
-
-				continue;
-			}
-
-			let expanded =
-				if prefix.is_empty() { child.to_owned() } else { format!("{prefix}::{child}") };
-
-			if !collect_full_paths_from_use_segment(&expanded, out) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	let base = trimmed.split(" as ").next().unwrap_or(trimmed).trim();
-
-	if base.is_empty() || base == "self" || base == "super" || base == "crate" || base == "*" {
-		return true;
-	}
-
-	out.push(base.to_owned());
-
-	true
 }
 
 fn top_level_brace_range(text: &str) -> Option<(usize, usize)> {

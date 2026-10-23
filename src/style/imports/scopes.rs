@@ -5,27 +5,23 @@ use std::{
 };
 
 use ra_ap_syntax::{
-	AstNode as _, AstToken as _, Edition, SyntaxKind, SyntaxNode,
+	AstNode as _, Edition, SyntaxKind, SyntaxNode,
 	ast::{
-		self, Attr, HasAttrs as _, HasName as _, HasVisibility as _, Item, MacroCall, Meta, Module,
-		NameRef, TokenTree, Use, UseTree,
+		self, Attr, HasName as _, HasVisibility as _, Item, MacroCall, Meta, Module, NameRef,
+		TokenTree, Use, UseTree,
 	},
 };
 use regex::Regex;
 
 use crate::style::{
 	imports::paths,
+	module_tree,
 	shared::{self, Edit, FileContext, TopItem, Violation},
 	syntax, workspace,
 };
 
 pub(crate) fn exported_symbols_from_super_scope(use_item: &Use) -> Option<BTreeSet<String>> {
 	exported_symbols_from_super_scope_impl(use_item)
-}
-
-pub(crate) fn declared_file_is_test_only(path: &Path) -> bool {
-	declared_file_module_contexts(path)
-		.is_some_and(|contexts| !contexts.is_empty() && contexts.iter().all(|(_, test)| *test))
 }
 
 pub(super) fn apply_import010_no_super_use_rule(
@@ -213,7 +209,7 @@ pub(super) fn resolve_crate_module_scope(
 	ctx: &FileContext,
 	segments: &[String],
 ) -> Option<(PathBuf, SyntaxNode)> {
-	let crate_dir = find_crate_dir(&ctx.path)?;
+	let crate_dir = module_tree::find_crate_dir(&ctx.path)?;
 	let roots = workspace::package_target_roots(&crate_dir)
 		.ok()
 		.flatten()
@@ -254,8 +250,10 @@ pub(super) fn crate_absolute_use_path(parent_segments: &[String], tail: &str) ->
 }
 
 pub(super) fn symbol_referenced_by_child_module(ctx: &FileContext, symbol: &str) -> bool {
-	let Some(owner) =
-		ctx.declared_module_path.get_or_init(|| declared_file_module_path(&ctx.path)).as_ref()
+	let Some(owner) = ctx
+		.declared_module_path
+		.get_or_init(|| module_tree::declared_file_module_path(&ctx.path))
+		.as_ref()
 	else {
 		return true;
 	};
@@ -723,7 +721,7 @@ fn resolve_inline_module_scope(
 
 		resolve_inline_module_scope(file, items.syntax(), &nested, &nested, rest)
 	} else {
-		let child = declared_child_file(&module, path_directory, directory, name);
+		let child = module_tree::declared_child_file(&module, path_directory, directory, name);
 
 		resolve_file_module_scope(&child, rest)
 	}
@@ -833,7 +831,7 @@ fn exported_symbols_for_glob_prefix(
 }
 
 fn exported_symbols_from_crate_prelude(ctx: &FileContext) -> Option<BTreeSet<String>> {
-	let crate_dir = find_crate_dir(&ctx.path)?;
+	let crate_dir = module_tree::find_crate_dir(&ctx.path)?;
 	let src_dir = crate_dir.join("src");
 	let root_candidates = [src_dir.join("lib.rs"), src_dir.join("main.rs")];
 
@@ -1008,24 +1006,11 @@ fn exported_symbols_from_macro_call_text(text: &str) -> BTreeSet<String> {
 	symbols
 }
 
-fn find_crate_dir(path: &Path) -> Option<PathBuf> {
-	let mut dir = path.parent()?.to_path_buf();
-
-	loop {
-		if dir.join("Cargo.toml").is_file() {
-			return Some(dir);
-		}
-		if !dir.pop() {
-			break;
-		}
-	}
-
-	None
-}
-
 fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Option<Vec<String>> {
-	let mut module_path =
-		ctx.declared_module_path.get_or_init(|| declared_file_module_path(&ctx.path)).clone()?;
+	let mut module_path = ctx
+		.declared_module_path
+		.get_or_init(|| module_tree::declared_file_module_path(&ctx.path))
+		.clone()?;
 	let mut inline_ancestors = use_item
 		.syntax()
 		.ancestors()
@@ -1037,188 +1022,6 @@ fn current_module_path_segments(ctx: &FileContext, use_item: &Use) -> Option<Vec
 	module_path.extend(inline_ancestors);
 
 	Some(module_path)
-}
-
-fn declared_file_module_path(path: &Path) -> Option<Vec<String>> {
-	let Some(contexts) = declared_file_module_contexts(path) else {
-		return Some(file_module_path_segments(path));
-	};
-	let matches = contexts.into_iter().map(|(owner, _)| owner).collect::<BTreeSet<_>>();
-
-	match matches.len() {
-		0 => Some(file_module_path_segments(path)),
-		1 => matches.into_iter().next(),
-		_ => None,
-	}
-}
-
-fn declared_file_module_contexts(path: &Path) -> Option<BTreeSet<(Vec<String>, bool)>> {
-	let crate_dir = find_crate_dir(path)?;
-	let target = path.canonicalize().ok()?;
-	let roots = workspace::package_target_roots(&crate_dir)
-		.ok()
-		.flatten()
-		.unwrap_or_else(|| vec![crate_dir.join("src/lib.rs"), crate_dir.join("src/main.rs")]);
-	let mut matches = BTreeSet::new();
-	let mut stack = HashSet::new();
-
-	for root in roots {
-		collect_declared_module_paths(
-			&root,
-			&(Vec::new(), false),
-			&target,
-			&mut stack,
-			&mut matches,
-		);
-	}
-
-	Some(matches)
-}
-
-fn collect_declared_module_paths(
-	file: &Path,
-	context: &(Vec<String>, bool),
-	target: &Path,
-	stack: &mut HashSet<PathBuf>,
-	matches: &mut BTreeSet<(Vec<String>, bool)>,
-) {
-	let Ok(file) = file.canonicalize() else {
-		return;
-	};
-
-	if !stack.insert(file.clone()) {
-		return;
-	}
-	if file == target {
-		matches.insert(context.clone());
-	}
-
-	if let Ok(text) = fs::read_to_string(&file) {
-		let parsed = ra_ap_syntax::SourceFile::parse(&text, Edition::CURRENT);
-		let parent = file.parent().unwrap_or(&file);
-		let directory = if matches!(
-			file.file_name().and_then(|name| name.to_str()),
-			Some("lib.rs" | "main.rs" | "mod.rs")
-		) {
-			parent.to_path_buf()
-		} else {
-			parent.join(file.file_stem().unwrap_or_default())
-		};
-
-		collect_module_declarations(
-			parsed.tree().syntax(),
-			parent,
-			&directory,
-			context,
-			target,
-			stack,
-			matches,
-		);
-	}
-
-	stack.remove(&file);
-}
-
-fn collect_module_declarations(
-	syntax: &SyntaxNode,
-	path_directory: &Path,
-	directory: &Path,
-	owner: &(Vec<String>, bool),
-	target: &Path,
-	stack: &mut HashSet<PathBuf>,
-	matches: &mut BTreeSet<(Vec<String>, bool)>,
-) {
-	for module in syntax.children().filter_map(Module::cast) {
-		let Some(name) = module.name().map(|name| name.text().to_string()) else {
-			continue;
-		};
-		let test_only = owner.1
-			|| module.attrs().any(|attr| {
-				attr.syntax().text().to_string().split_whitespace().collect::<String>()
-					== "#[cfg(test)]"
-			});
-		let mut module_path = owner.0.clone();
-
-		module_path.push(name.clone());
-
-		let context = (module_path, test_only);
-
-		if let Some(items) = module.item_list() {
-			let nested = directory.join(&name);
-
-			collect_module_declarations(
-				items.syntax(),
-				&nested,
-				&nested,
-				&context,
-				target,
-				stack,
-				matches,
-			);
-
-			continue;
-		}
-
-		let file = declared_child_file(&module, path_directory, directory, &name);
-
-		collect_declared_module_paths(&file, &context, target, stack, matches);
-	}
-}
-
-fn declared_child_file(
-	module: &Module,
-	path_directory: &Path,
-	directory: &Path,
-	name: &str,
-) -> PathBuf {
-	let explicit = module.attrs().find_map(|attr| {
-		if attr.path()?.syntax().text() != "path" {
-			return None;
-		}
-
-		let token = attr
-			.syntax()
-			.descendants_with_tokens()
-			.filter_map(|part| part.into_token())
-			.find_map(ast::String::cast)?;
-
-		token.value().ok().map(|value| path_directory.join(value.as_ref()))
-	});
-
-	explicit.unwrap_or_else(|| {
-		let flat = directory.join(format!("{name}.rs"));
-
-		if flat.is_file() { flat } else { directory.join(name).join("mod.rs") }
-	})
-}
-
-fn file_module_path_segments(path: &Path) -> Vec<String> {
-	let Some(crate_dir) = find_crate_dir(path) else {
-		return Vec::new();
-	};
-	let src_dir = crate_dir.join("src");
-	let Ok(relative) = path.strip_prefix(src_dir) else {
-		return Vec::new();
-	};
-	let mut components = relative
-		.iter()
-		.map(|component| component.to_string_lossy().to_string())
-		.collect::<Vec<_>>();
-	let Some(file_name) = components.pop() else {
-		return Vec::new();
-	};
-
-	match file_name.as_str() {
-		"lib.rs" | "main.rs" => Vec::new(),
-		"mod.rs" => components,
-		_ => {
-			let stem = file_name.strip_suffix(".rs").unwrap_or(file_name.as_str());
-
-			components.push(stem.to_owned());
-
-			components
-		},
-	}
 }
 
 fn leading_super_depth_and_tail(path: &str) -> Option<(usize, &str)> {
@@ -1430,8 +1233,9 @@ fn collect_external_module_references(
 			continue;
 		}
 
-		let file =
-			declared_child_file(&module, path_directory, directory, &name).canonicalize().ok()?;
+		let file = module_tree::declared_child_file(&module, path_directory, directory, &name)
+			.canonicalize()
+			.ok()?;
 
 		if !stack.insert(file.clone()) {
 			return None;
@@ -1617,8 +1421,10 @@ fn symbol_referenced_by_descendant(
 		return false;
 	}
 
-	let Some(file_owner) =
-		ctx.declared_module_path.get_or_init(|| declared_file_module_path(&ctx.path)).as_ref()
+	let Some(file_owner) = ctx
+		.declared_module_path
+		.get_or_init(|| module_tree::declared_file_module_path(&ctx.path))
+		.as_ref()
 	else {
 		return true;
 	};

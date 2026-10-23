@@ -118,6 +118,11 @@ pub(super) fn collect_local_defined_symbols(ctx: &FileContext) -> HashSet<String
 		out.insert(syntax::normalize_ident(name).to_owned());
 	}
 
+	out.extend(
+		syntax::generic_parameter_names(ctx.source_file.syntax())
+			.map(|name| syntax::normalize_ident(&name).to_owned()),
+	);
+
 	out
 }
 

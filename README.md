@@ -112,6 +112,11 @@ Rule behavior is defined by the checker source and its tests. Run `vstyle covera
 for the active rule list. Serde default attributes are preserved, including defaults
 on `Option<T>` fields.
 
+Type-alias fixes follow module-qualified type bindings and preserve private target
+paths. Ambiguous bindings need manual changes. Cargo validation checks the selected
+build configuration. Use runtime tests and additional feature configurations for
+behavior that depends on them.
+
 ## Workspace Posture
 
 - The root `Cargo.toml` owns the `vibe-style` package, dependencies, and release profiles.

@@ -4,7 +4,6 @@ use ra_ap_syntax::{
 	AstNode,
 	ast::{HasAttrs, HasName, Item, ItemList, MacroCall, Module},
 };
-use regex::Regex;
 
 use crate::style::{
 	shared::{self, Edit, FileContext, TopItem, TopKind, Violation},
@@ -96,49 +95,9 @@ fn check_module_doc_comments(ctx: &FileContext, violations: &mut Vec<Violation>)
 }
 
 fn module_doc_attr_line(ctx: &FileContext, item: &Item) -> Option<usize> {
-	let raw = item.syntax().text().to_string();
-	let start_line =
-		shared::line_from_offset(&ctx.line_starts, usize::from(item.syntax().text_range().start()));
-	let lines = raw.lines().collect::<Vec<_>>();
-	let mod_line_idx =
-		lines.iter().position(|line| is_module_declaration_line(line.trim_start()))?;
-	let mut in_block_doc = false;
+	let token = item.doc_comments().find_map(|comment| comment.outer_doc_comment_token())?;
 
-	for idx in (0..mod_line_idx).rev() {
-		let trimmed = lines[idx].trim();
-
-		if trimmed.is_empty() {
-			continue;
-		}
-		if in_block_doc {
-			if trimmed.starts_with("/**") {
-				return Some(start_line + idx);
-			}
-
-			continue;
-		}
-		if trimmed.starts_with("*/") || trimmed.starts_with('*') {
-			in_block_doc = true;
-
-			continue;
-		}
-		if trimmed.starts_with("///") {
-			return Some(start_line + idx);
-		}
-		if trimmed.starts_with("#[") {
-			continue;
-		}
-
-		break;
-	}
-
-	None
-}
-
-fn is_module_declaration_line(trimmed: &str) -> bool {
-	Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\b")
-		.expect("Compile module declaration regex.")
-		.is_match(trimmed)
+	Some(shared::line_from_offset(&ctx.line_starts, usize::from(token.text_range().start())))
 }
 
 fn collect_non_cfg_test_top_items(ctx: &FileContext) -> Vec<&TopItem> {
@@ -316,14 +275,6 @@ fn separator_blank_only(ctx: &FileContext, prev: &TopItem, next: &TopItem) -> bo
 	ctx.lines[prev.end_line..next.start_line.saturating_sub(1)]
 		.iter()
 		.all(|line| line.trim().is_empty())
-}
-
-fn item_text_range(ctx: &FileContext, item: &TopItem) -> Option<(usize, usize)> {
-	let start = shared::offset_from_line(&ctx.line_starts, item.start_line)?;
-	let end =
-		shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
-
-	if end < start { None } else { Some((start, end)) }
 }
 
 fn is_reorderable_kind(kind: TopKind) -> bool {
@@ -640,8 +591,11 @@ fn collect_scope_top_items(ctx: &FileContext, item_list: &ItemList) -> Vec<Scope
 		let text_range = item.syntax().text_range();
 		let syntax_start = usize::from(text_range.start());
 		let line = shared::line_from_offset(&ctx.line_starts, syntax_start);
-		let start_offset = shared::offset_from_line(&ctx.line_starts, line).unwrap_or(syntax_start);
-		let end_offset = usize::from(text_range.end());
+		let Some((start_offset, end_offset)) =
+			shared::item_text_range(ctx, syntax_start, usize::from(text_range.end()))
+		else {
+			continue;
+		};
 		let visibility = shared::item_visibility_key(&item);
 		let attrs = item.attrs().map(|attr| attr.syntax().text().to_string()).collect::<Vec<_>>();
 		let hoist_for_macro_scope = scope_item_should_hoist_for_macro_scope(item_list, &item);
@@ -674,18 +628,11 @@ fn scope_item_should_hoist_for_macro_scope(item_list: &ItemList, item: &Item) ->
 	let Item::MacroRules(macro_rules) = item else {
 		return false;
 	};
-	let Some(name) = macro_rules_name_text(macro_rules.syntax().text().to_string().as_str()) else {
+	let Some(name) = macro_rules.name().map(|name| name.text().to_string()) else {
 		return false;
 	};
 
 	scope_has_macro_call(item_list, name.as_str())
-}
-
-fn macro_rules_name_text(text: &str) -> Option<String> {
-	let re = Regex::new(r"^\s*macro_rules!\s*([A-Za-z_][A-Za-z0-9_]*)\b")
-		.expect("Compile macro_rules name regex.");
-
-	re.captures(text).and_then(|captures| captures.get(1).map(|name| name.as_str().to_owned()))
 }
 
 fn scope_has_macro_call(item_list: &ItemList, macro_name: &str) -> bool {
@@ -964,10 +911,14 @@ fn build_module_reorder_run_edit(
 		return None;
 	}
 
-	let (run_start, _) = item_text_range(ctx, &run[0])?;
-	let run_end = item_text_range(ctx, &run[run.len() - 1])
-		.map(|(_, end_offset)| end_offset)
-		.unwrap_or(run_start);
+	let (run_start, _) = shared::item_text_range(ctx, run[0].start_offset, run[0].end_offset)?;
+	let run_end = shared::item_text_range(
+		ctx,
+		run[run.len() - 1].start_offset,
+		run[run.len() - 1].end_offset,
+	)
+	.map(|(_, end_offset)| end_offset)
+	.unwrap_or(run_start);
 	let original = ctx.text.get(run_start..run_end).unwrap_or_default();
 	let replacement = build_module_reorder_replacement(original, &ordered);
 	let rule = select_module_reorder_rule(&run_lines);
@@ -982,7 +933,7 @@ fn collect_module_reorder_entries(
 	let mut entries = Vec::with_capacity(run.len());
 
 	for (offset, item) in run.iter().enumerate() {
-		let (start, end_offset) = item_text_range(ctx, item)?;
+		let (start, end_offset) = shared::item_text_range(ctx, item.start_offset, item.end_offset)?;
 		let slice = ctx.text.get(start..end_offset)?;
 
 		entries.push(ModuleReorderEntry {

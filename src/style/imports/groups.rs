@@ -259,10 +259,14 @@ pub(super) fn apply_pub_use_group_rules(
 				continue;
 			}
 
-			let Some((prev_start, prev_end)) = item_text_range(ctx, prev) else {
+			let Some((prev_start, prev_end)) =
+				shared::item_text_range(ctx, prev.start_offset, prev.end_offset)
+			else {
 				continue;
 			};
-			let Some((curr_start, _curr_end)) = item_text_range(ctx, curr) else {
+			let Some((curr_start, _curr_end)) =
+				shared::item_text_range(ctx, curr.start_offset, curr.end_offset)
+			else {
 				continue;
 			};
 
@@ -282,24 +286,12 @@ pub(super) fn apply_pub_use_group_rules(
 	}
 }
 
-pub(super) fn item_text_range(ctx: &FileContext, item: &TopItem) -> Option<(usize, usize)> {
-	let start = shared::offset_from_line(&ctx.line_starts, item.start_line)?;
-	let end =
-		shared::offset_from_line(&ctx.line_starts, item.end_line + 1).unwrap_or(ctx.text.len());
-
-	if end < start { None } else { Some((start, end)) }
-}
-
 pub(super) fn run_text_range(
 	ctx: &FileContext,
 	first: &TopItem,
 	last: &TopItem,
 ) -> Option<(usize, usize)> {
-	let start = shared::offset_from_line(&ctx.line_starts, first.start_line)?;
-	let end =
-		shared::offset_from_line(&ctx.line_starts, last.end_line + 1).unwrap_or(ctx.text.len());
-
-	if end < start { None } else { Some((start, end)) }
+	shared::item_text_range(ctx, first.start_offset, last.end_offset)
 }
 
 pub(super) fn build_import_group_fix_plans(
@@ -895,7 +887,7 @@ fn collect_use_run_entries<'a>(
 
 	for (order, item) in run.iter().enumerate() {
 		let use_item_analysis = analysis.use_item_analysis(item)?;
-		let (start, end) = item_text_range(ctx, item)?;
+		let (start, end) = shared::item_text_range(ctx, item.start_offset, item.end_offset)?;
 		let block = ctx.text.get(start..end)?;
 		let normalized_block = normalize_use_item_block(block)?;
 
