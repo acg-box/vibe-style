@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:15028c841da5f20d12b083b4ec6090268d7249bb5d6932dad2bde9136780cb1f",
+  "claims": [
+    {
+      "id": "claim_b1e68b65e90349d3b18c08d27f27116e",
+      "statement": "The package has two executable targets sharing main.rs and exposes style operations through a private style facade rather than a separate public library.",
+      "evidence": [
+        {
+          "resource": "repo://Cargo.toml#L1-L23",
+          "version": "repo-lines-v1:sha256:3dbfc2b85ed834f5d3348251b9cbf2e96d674237f24c807f3e1d11deb78b29ec:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhM2NkNWE4MWIzZjlhNjIxYWE0OTNkOTBjNDVmNDJhYjU3MWQ0ZTQyYjhhZTVhZmYzNTFjYjBhMDJkMDZkODIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkYWJiMmJhNWU2ZmI5MTQwMGQwNTdlOTMxY2U5MTk5OGI2ZjcwZmM1OGI3MzMwNTIxMzI2YTRlYzVlNWI2YzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyZGIzNDgyYWNjM2JhMzUyMzg1Mzg3MjhjMDRhNTg2YmRhMzMwMDc5ZWMxZDkwZWY0ZDEwOWExZDVmZGVkMTcifQ"
+        },
+        {
+          "resource": "repo://src/style.rs",
+          "version": "repo-file-v1:sha256:f579b1d6cf1ecca0f5be5579e105c2bf57ba2630840dfee0ea8224cbce3766a9"
+        }
+      ]
+    },
+    {
+      "id": "claim_18d69d6de3534020aa5b9f9b83673c8d",
+      "statement": "The engine owns check and fix orchestration, workspace discovery is separate, and file outcomes dispatch Swift text checks separately from Rust rule collectors.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L1205-L1233",
+          "version": "repo-lines-v1:sha256:3c0e75c78b0ae37ce1ccc402bcb8a62e7f4699ece2ca07812f71c082f8714dc5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxY2ZhMGIxZWM5OTUwOWM5MjM1M2MyODMxNTBlNzEyNGQ5YjcxYWY0YWIzZTBlNjg5YWVlMmRhNmJlNTZmZWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZjOWMyMTY0NzMyMGQ3N2U4YWQxYTQ0YjJmYzkwYWQyMTcyMzk3MWExMTA2Y2Q2NTA5NzgwN2Y1OGM0ZTRjNWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRlY2EwNWQ4M2ZmYTBjYWQ0NWI2YmFjOWQ0OGFmNGZkNzI0MjM4YzY4YzRhMWNiODI4NTY3MmVkMTE5MGUyZjEifQ"
+        },
+        {
+          "resource": "repo://src/style/engine.rs#L122-L178",
+          "version": "repo-lines-v1:sha256:f868d9166e7c0116087b67a1d69279119a6cc965bba37bfa0acc6a2dff089ca6:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1ZmNiMDBjNTczOWFkOGJmODNmZDlmNGU0NTQ1MzZhZGYzOWVjNzk4OGU4YWRkZGU4OTU3ZTFjYTFhN2NiNmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0MjQ1M2M1ZDBjNDE4MzFkYTdiY2I0YTkxY2E2ZTZlY2U1OTJmMzcwMTJhZDQ4ZDYwYjdjY2YxMGU5NjNjOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBiOTQwYzIxNjAxZGJkZTZlMmQ2ZGIwZmVmNjBlMjQ2ZmY3MWY2MjE5YzkyM2FjYTM4YWQ3ZmE0M2JjMzM2OWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNTM5ZTIxYzcyNzYyOTVmYWZmNjQ5NTI5ODAxOGM5OWUwM2MwZDFhYWI1MTFmNmY3YmUxNDRlNDE5MTZkMjAifQ"
+        },
+        {
+          "resource": "repo://src/style/rules.rs",
+          "version": "repo-file-v1:sha256:f635dc2b8fa725eaad433b18598135f4e4df9fc96252e4f5692512961f9b4861"
+        },
+        {
+          "resource": "repo://src/style/workspace.rs#L71-L159",
+          "version": "repo-lines-v1:sha256:9ed60d1b48b0b4393f0a61b23518808484eb0fd0f2e63f90a6ee34d35685ab78:eyJzZWxlY3RlZExpbmVDb3VudCI6ODksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1NmE1OTMyN2MxMjdhNjJlNjcwMWJjY2E1ZmI1MGFhNTQyNjU0MjQ0OThmNGI5ODE5MGRlZWY2YzQ4MDA1MjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY0MGVlYmIwMjIwNzc1MDg3ZWYzMzA1M2FhYmIxNGNjMTU0MmVmYzdlOTdmMGU2ZWRkNjY4YTgzNzI5OGYxZjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlYmFjZThjZjM5YmRhNGNiMzBkNWEwYjMyODVjODkyMjYwMTliNzMxNjA3NGVlNjdmZjI5MjM0MGE4ZTJjM2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_647cdacbf44d4e2e96c9325b1c72b37c",
+      "statement": "The import coordinator retains shared plan records while a common per-use planner sequences qualification and alias policies for top-level and local consumers.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/imports.rs",
+          "version": "repo-file-v1:sha256:9a0434d41e1d9e941805ebe2edc243d30f6d36c53e557cbea70d3117dec7bde7"
+        },
+        {
+          "resource": "repo://src/style/imports/local.rs",
+          "version": "repo-file-v1:sha256:b280d3229f55386da65e35f38ee7c0ad2cd8a185fc06fabb43bf33ed3cb88733"
+        },
+        {
+          "resource": "repo://src/style/imports/planning.rs",
+          "version": "repo-file-v1:sha256:a8de18d0f94f21aa24c4766d0fb03f71c826d4c6c08aa9255bf2b537669cd691"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

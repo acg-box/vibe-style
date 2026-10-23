@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:44828cabce27f07e759dd03680f7a300a808b2b124c73721b8d2f24fd76f1eda",
+  "claims": [
+    {
+      "id": "claim_715984981fe148d18a4b34df4f1845fc",
+      "statement": "Repository agent guidance treats source and tests as authoritative and uses OpenWiki as optional just-in-time evidence; the Claude setup delegates to AGENTS.md.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L3-L14",
+          "version": "repo-lines-v1:sha256:074524ea157a9d9c948e8d2d6f957709a896968012729b0841b5f5e1a47a0e2c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0ODM2ZWQ3ZTAwNTM3NzVhMGE5NjZjZTg2MTM0YjIzNDdkODUxYTdiMDJmNDgxMmJlYjJjNTlkMWM2OGQ1MjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNTM5NTNiZmI3MmMxMjYyYmJhZTJlYWNhNzJjYWJmMWFmNDk5MjdhMGJiYTExNTdiMmQ1YmRiMjg1YzRiZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoyLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRiODU5ZTU1ZTRiMmQyNjJiNTQ2NGJlOTdkZWMyMTNhYWViMWU1Y2NkMDBkNDEwMjBkZGFkNDEzZWRiNzc2ZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwODlkZjkzZjhiYTU3YTRkZGJmZDhmMDEzOTYyYzM5NzhjZTRkYjY4MTk5YzRkYTY2NjY0OWIwOTk2Y2VkYTkifQ"
+        },
+        {
+          "resource": "repo://CLAUDE.md#L3-L5",
+          "version": "repo-lines-v1:sha256:4cbf90cd206e0fb6e01d3f541e17b62d1d8690e1b749b11281ba2160a55c77b0:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjQ4MzZlZDdlMDA1Mzc3NWEwYTk2NmNlODYxMzRiMjM0N2Q4NTFhN2IwMmY0ODEyYmViMmM1OWQxYzY4ZDUyNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzM2Y2M0ZmJmMTliZWFhZGE3Y2NmOTk4NjQxNGZhOTE4NTFhOGQ3YTA3ZGZiM2NjYmU4MDBhNjllZWQwYWI0OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjIsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGI4NTllNTVlNGIyZDI2MmI1NDY0YmU5N2RlYzIxM2FhZWIxZTVjY2QwMGQ0MTAyMGRkYWQ0MTNlZGI3NzZlYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjIsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzA4OWRmOTNmOGJhNTdhNGRkYmZkOGYwMTM5NjJjMzk3OGNlNGRiNjgxOTljNGRhNjY2NjQ5YjA5OTZjZWRhOSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_26f34284da14402fa235310e70ddadc7",
+      "statement": "The OpenWiki workflow runs an update against full checkout history and creates a PR containing generated documentation and managed setup files.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/openwiki-update.yml",
+          "version": "repo-file-v1:sha256:999048ae39b8bd7bb08bc3f1242dd449534aeb067266b0290eb9fc82e81f9228"
+        }
+      ]
+    },
+    {
+      "id": "claim_abd9c7b439e246f596706023a7faf79d",
+      "statement": "The repository style-check task builds and runs the current vstyle source through cargo run --locked rather than requiring an installed binary.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile.toml#L47-L62",
+          "version": "repo-lines-v1:sha256:62714d28fb980063e0be8984118948d35a75f2d2450347793531b01801663896:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExNTJiN2UzMjQwZDM3NTk4MDVkNTViNzhhYTllZmFlZjNkMzg0MDFiNDZlM2ZhZTE5ZTUzMDNjYzk3ZDJiYjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5NDE2ZTA5Zjc4YmEzMTZjMDMyNTY4MjEzYjg1NWVlNzU2ZTQxNTY1ZDkxOGYwOTUxOWM4MWZkNjIwZjQwNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ5MTQ1NTQyOTZmYzQ5ZjI2MTVhY2E4ODg0OWJjYmM3OTg4ZjBkN2UxZWI4ODhkMWJhZGNjMmQzMGFhYjIwNTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwODg4YWNmZWI0ZWJlMGY3ZjBmZTY3NmM1ZDQyZjYzMjMyMWQwYmE5OWVkYjY5YTZlNjQ3ZDAyZDc5ZjEzNjYifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:59:51.049Z"
+  }
+}

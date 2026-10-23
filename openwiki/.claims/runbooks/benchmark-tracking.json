@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:03c750b30b6db5d264dc693800afe9450d95d2e3b1ddb1c2fbb72c080c516cd6",
+  "claims": [
+    {
+      "id": "claim_a53355b59aac471e86c82a6e8ad1a96f",
+      "statement": "Both benchmark entrypoints share profile selection, locked binary builds, commit/version metadata, timing, and nonzero status propagation through benchmark-common.bash.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/bench-release-vstyle.sh#L1-L6",
+          "version": "repo-lines-v1:sha256:e82db838a5990e4f8a7a0842edcbc51af3d2fc0869ffdabca717dde33db0dfcf:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWQ5NWZjMDRhODBjOTUyZjQ5Y2U0MTg4NjI3YzUzYjBmYmU4YzQ0MDQxYjk1MmQ1OTJhY2QxZGU5OTg2MTQ2NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGZiMDI3YjIxYjQ5MTI0NDY1YmUyZmZkNTBjZDE2NWJjZWRmNTlkYTUxNGVjMWUxN2Y4NTE1Nzc5OTlhMDExZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjIwY2ZlYzUwN2M1NjdkOWIxMjFiZjg4NjIwOGU5MDkzNWRhZDI5ZWFjNzViM2JkZDFkODM2OGY5NGQxZjk0NSJ9"
+        },
+        {
+          "resource": "repo://scripts/bench-semantic-vstyle.sh#L1-L6",
+          "version": "repo-lines-v1:sha256:34ef512eb8fdbeeea4b82927acb0c6321161e122be485c0b6112971d3ac0db63:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWQ5NWZjMDRhODBjOTUyZjQ5Y2U0MTg4NjI3YzUzYjBmYmU4YzQ0MDQxYjk1MmQ1OTJhY2QxZGU5OTg2MTQ2NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODJmMWJjYTc1NmVkYTM1MzkxMWIzZDhkNjc4YjgxNmI5NDU2NDg0NDc5OTE2ZWVhYTQxMzhhYjNjYTkzZWNiYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWNmN2RhZWQ5NWRmM2VkMDk3OThjZWY2MTNhNmYwYmU1NWMxZDhkOTI4YWQwNDYyNDg4ZjE2MGZiMTQ3ZWExMyJ9"
+        },
+        {
+          "resource": "repo://scripts/benchmark-common.bash",
+          "version": "repo-file-v1:sha256:6795dc32231b5e0bcccaaed69a496933e85bc2e49e83f47b5b30d6ae37829273"
+        }
+      ]
+    },
+    {
+      "id": "claim_157c0509e7ef437e83f296215ee2f176",
+      "statement": "The release scenario runs curate and tune on an owned temporary git archive snapshot of HEAD, while the binary is built locally; uncommitted source changes are absent from the scenario snapshot.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/bench-release-vstyle.sh",
+          "version": "repo-file-v1:sha256:a66ae2780e306a009b26adad6205326232a36d1eb90491afdf3d4d632e283747"
+        }
+      ]
+    },
+    {
+      "id": "claim_bf6992c99ff54110815043d4461afccd",
+      "statement": "The semantic scenario restores its fixture sources between cold and warm tune runs, retains Cargo build state for the warm run, and removes the temporary fixture on exit.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/bench-semantic-vstyle.sh",
+          "version": "repo-file-v1:sha256:970b0cf53a54eebd885913894e1af8f77bfe555ac2323b26bbc7090d6ca618b6"
+        }
+      ]
+    },
+    {
+      "id": "claim_dd66d9845511456c835ef04a3d32c49d",
+      "statement": "The Benchmarks workflow is scheduled, manually dispatchable, and triggered by selected main changes; it runs both scenarios in one job, retains successful artifacts for 14 days, and fails if either scenario fails.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/benchmark.yml",
+          "version": "repo-file-v1:sha256:05757bdec4c8c50bf82ce76bf8564ef19df285e0b2050985f5f1acba96425558"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

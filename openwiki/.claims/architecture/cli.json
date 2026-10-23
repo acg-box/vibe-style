@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e1fbcfc678065b14a6fa5b899b3c293c2189a1bdd781ecf2dc801109ad293689",
+  "claims": [
+    {
+      "id": "claim_5062079decff4b1887d8c5b0c830644b",
+      "statement": "Curate fails when violations exist; tune succeeds with remaining violations unless --strict is set, and progress is enabled for CLI tune runs independently of --verbose.",
+      "evidence": [
+        {
+          "resource": "repo://src/cli.rs#L34-L86",
+          "version": "repo-lines-v1:sha256:815d89d1ae828fc96fb622c66e4eaa99e0154344e49513fea413dd5ca6925682:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzOTc4ZWU2OGVkMTdjMmU4ZDE5MjY1NWJiYjJmN2ZkNDgwZmQ2NjdkZjRjY2Y0NjhhOWU2M2VlOTA1NjZiZjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZlY2FlN2RiOTJkZjRlOWQyOGUwOWI5MDFiN2I0MWQxMGFmMGFlNWY5NmRlMDExMWYxZjUxODI0NDUwNmU4M2YiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVlNDE5OTZmOGRmZTgxNmU2YjEzMjRmYTE3MWM3OGYxMDkyY2RhYjJmMGY1Mzc2ZDIxMWM1NDUwNzUxMTM2NjYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ffb24c6b85e742a1aefe8b4fe9185bd6",
+      "statement": "Both binaries use the same main entrypoint, which removes the extra vstyle argument used by Cargo subcommand invocation before parsing.",
+      "evidence": [
+        {
+          "resource": "repo://Cargo.toml#L17-L23",
+          "version": "repo-lines-v1:sha256:f162791d757131bf35ff72862cd8412aa85249473d03366bf01d6c56848b694c:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzcyMTFiNzhlMWFkOWJlNzE0MzEyYmQ4OTJlMGJiOWNjYjJkMTI1MzE2NTgxMmZlOTZkMzMwZTk1YWI1MmJmMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWRhYmIyYmE1ZTZmYjkxNDAwZDA1N2U5MzFjZTkxOTk4YjZmNzBmYzU4YjczMzA1MjEzMjZhNGVjNWU1YjZjNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGRmOGZhM2RmZTliZjk1MmU3NzE1NjBhMDU2Yjc0ZDcxOWFlNzdiMjE0MzhlNDljMDdmMTVhMjVkZmY4ZWQyYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzJkYjM0ODJhY2MzYmEzNTIzODUzODcyOGMwNGE1ODZiZGEzMzAwNzllYzFkOTBlZjRkMTA5YTFkNWZkZWQxNyJ9"
+        },
+        {
+          "resource": "repo://src/main.rs#L12-L38",
+          "version": "repo-lines-v1:sha256:a9d0f7290365a7ce797fe046221116b371296551ba88e2e53b362e8a1bd72966:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE3OGM2NzRhYzVhY2ZkOGZiZjYzYTk3YWM4OTIwMTUwOTIyOTI5MGU4ZDA3ZTM0ZmU4NzBjMTFhZjU4NzhkMzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3Y2RhODJkYTYwNjIzOGUwNWU2MjM5OTU2OWM1ZWUwMzk5MzQxOTY0OGFlNWQ0M2EyYmY4Y2Q2MzQ3ZjgyNjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNiZmNhZWFlMDlhY2Q2ZjNiY2QzODQ0ZjZjNDY2MmJhYmQ5OGFmMWIyODliM2E0MGY4ZTkzYWQ1ZDEwZDZiM2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1MjE2MDRiMzVmYzQwYWYwMGNiYTRlZWEyZmQ1ZTJjM2FmMTg2M2IzOTExODVkN2JmNGJiMDllNzJkMGM4YjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_844dbfc902fb41f190720ca7652b1715",
+      "statement": "The CLI requires an explicit language for curate and tune and maps workspace, package, and feature options to CargoOptions.",
+      "evidence": [
+        {
+          "resource": "repo://src/cli.rs#L101-L151",
+          "version": "repo-lines-v1:sha256:7b84bb07aafc88f6d9ee95637d1d2dd272e72b25e0076884ad730d47c58c2d47:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlODRhODdmYjRlZDRmOGUyMThiYjJkMTdhYWI3N2M1M2JmYThlYmIxMmNhNWE4NDg0YTUwYTc1OWEyYWQ2YWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQyMjBlMjA3OWZiMTgyMzcxZTBhMWJlN2JkOTYzYjA1YjdjYTcyMjkyNzdlZTVmOTA1MzQ3YzAyZDJjM2JiMzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlmNzNiZWUzNDkzYjY5MTk0NjFhZWQyYzEzNWMyN2I2NTFhMzk5OGUyMjViNDU2OTFhYTk5YmZkYjY4MTYxOTkifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:59:51.049Z"
+  }
+}

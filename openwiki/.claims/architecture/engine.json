@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:9bba5d7f2f3f8125faf5cd6bb26d75aa9076abad2e9e8d9f36a9f03ea5fcd561",
+  "claims": [
+    {
+      "id": "claim_e9087fe3a9f443399b5b99723988c1bc",
+      "statement": "The engine snapshots selected source files before tuning and restores the command-start snapshot after a failed run that changed files; rollback failure is reported with the original failure.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L128-L160",
+          "version": "repo-lines-v1:sha256:f8f3824989f3fed6d192a0e681766d1daf3d6c5a36a14abc50c428993a7ea80d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzMmRhN2U3MTdhYzQ2NmNhMjg0N2FiZjAyNzA2NDZlMWM1ODBiYjk2MzhlMjQzY2I2NDUxY2RjODZhZjNmMjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmNjlhNGM2ZWU3NzRhOGY4ODE4NGFlM2Q5NmIzMjE0YmZjZjk3OGM1YTU1MWNmOGE4MTQ1OGFlMWNmYTc5ZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiMzQwYTkwMjlkY2IyOWM1YTRhYzU0NzE2YWU4ZWRmYTU0NjQ4YzU1NmFlYjM3ZjZlNmQ0MTA5ODMwOGU5ODUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5a556de1f50140b29d27c5a741e48df8",
+      "statement": "Tuning has four outer rounds and eight per-file passes, skips fix rounds when no fixable violations exist, and refreshes changed-file state before deciding whether to continue.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L162-L251",
+          "version": "repo-lines-v1:sha256:f9e78578bea0542d19941c45bf814e6637a331e8939abbd32535b7a95a35fa00:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzNGFiOTU0ZDQxZjU1OWZmOThhN2QwMjNkY2M1MTNhNmMwNTgwMTRhODJhOWRlZTU4OWVhYWI5YjBkMWUwYjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyOTY0MDc5YzNjNWM4MTUyMGVmMzNhMmI5ZDJlMTVhMWI4NGQ3MjgwZGI4NTkwZGNkNjU3NDdlM2UwMTJhNDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVlYjk5YmVjMGQ4NjJhMjcwNzNkYTAzODU4ZmY3ZTk4YzhkYjY4YWFkY2ZlOGNmMTA0ZGY2NTY4MDU1NzhjYmUifQ"
+        },
+        {
+          "resource": "repo://src/style/engine.rs#L19-L21",
+          "version": "repo-lines-v1:sha256:4f0b02598b152f6969ebd4ab75df27142c8638df06aacaafceeb3609901f133b:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGE1YzMyN2YxM2UyNDM5YjUxOTYyYzNkNmQ2MTc2NTQ0NTBlOTRkY2I2ZmNlMmRjYjc5MWQzZjBlMzUwYzU1ZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzQ0NjVkMjA0ZjUxNTQ4Y2YzOTJiY2U4NzM1Y2YzMDc4ZTQ3OTI5ZTQxZTU1Y2IwYTZiMjc2M2JmOTc4NmQ1MiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmI4MTliMzU1ZWU5NzI1ZjdmZWY0OGJiMjcyNDgxYWRhOGFjMDBlZWYwNmU2OTg4Nzc2OTAyYTU3ZDMwMTQ1YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDRhZTg1MzQ0ZDk5NTNmODc0NjBlNWRkNWM1ZjczMzM0MGM5ZGFmYmI0MWQ2NTU1YzQwODdhYzI5N2I2YmJjYSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_6a9abdc333cf40f6bd31c62cfa5031f2",
+      "statement": "Workspace tuning can split into package scopes; fix scopes run in parallel only when multiple scopes have disjoint selected file sets.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L382-L461",
+          "version": "repo-lines-v1:sha256:1ab9ad23026d53df086c3379e4ab49912f8a7b36a96b5959908ce77d970c45a6:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU3NzkzYzE0NGE5NmI0ZDI0NzM0MGExOThhZTk0MGRhYzY0NjM3Yzg3M2JlYjVmMDIwZjMzNzExMjVjMjQ3N2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1YmQ4ZGRjNjc5YmFlYTNkZTE4YzA1NTEzOGIxMGVmZGI5Y2Q1MWEwZmZkNjE1MWJlNDg2NmQ1YzNjNWE3NWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bdc65f220e02481ca1e60ac3c840f94b",
+      "statement": "Engine regression files are private test modules under the engine, while integration targets share owned temporary directories with Drop cleanup.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L1279-L1312",
+          "version": "repo-lines-v1:sha256:8e981a4cde531394e455015ae88c9c1ea71116f33b1066ad7596c49677264008:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0YzIzOGUzZmYzNWE4MTYxZDE4Y2VmMDhmNzU0MWFmZTIyYjRlMmY4MzFlNTM2YTMyMTA3MTJkOTAyMDNlYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQyYjI1YjhiMjdhNTQzOTBlMDk1ODI1ZGU5MmMwOWQ3MGRiOWI4NWQwODJlZDBkZjdmZDIxNGMzNDc2ZWZlZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/support/fixture.rs",
+          "version": "repo-file-v1:sha256:d3b7a4585b98838a7dc8c1bb7465c3c6bd67486ea01ead4696fcf1ab3ed5b049"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:59:51.049Z"
+  }
+}

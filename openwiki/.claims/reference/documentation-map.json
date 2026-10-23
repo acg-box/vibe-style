@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:356b8e39c5ba1e69fed78b447ffc030e6748b12e476d8da6b83ce5a5466d5b1b",
+  "claims": [
+    {
+      "id": "claim_98e02a371a2e4f15899fe8ae25c58bcc",
+      "statement": "Repository agent guidance treats source and tests as behavioral authority and delegates generated documentation updates to OpenWiki.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L11-L14",
+          "version": "repo-lines-v1:sha256:9eb409c08e8de7aa64760c896b4418feccc8ecb3129b33d529cbdcf4c07d2d1a:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMmNiM2Q0YTQ2NjliZGM3YTQwZDk4MDc3MzVkZjYwOGJmZTMxZDM4NjA2N2M5OTliNzUwYWFjNjMyYzFiNmQzMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWI1Mzk1M2JmYjcyYzEyNjJiYmFlMmVhY2E3MmNhYmYxYWY0OTkyN2EwYmJhMTE1N2IyZDViZGIyODVjNGJkMiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOWM5MGE3YjU5ZmEwNjFhOTU2YzE5MTIxOTkyYWQ4ZDFmOTk2ZGMwOGE3YjQ1ODhlYjJjYjk4MzU0YjdmMTU0ZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjIsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzA4OWRmOTNmOGJhNTdhNGRkYmZkOGYwMTM5NjJjMzk3OGNlNGRiNjgxOTljNGRhNjY2NjQ5YjA5OTZjZWRhOSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_39365e7f715647f6a524b271c2f214c7",
+      "statement": "The documentation classification must track the current 42-entry Rust and Swift registry, which contains no Serde-specific rule.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/shared.rs#L15-L58",
+          "version": "repo-lines-v1:sha256:2cb6eeee727ff2cb52fe8cfb308dd6139aa444115ef8ad19b2b50f6a982f890e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1MzAxNTA2MDZjYWRiNWYwNDA4YzRhYzJiMDllNmRiZWI1NTE1NmJhMjUwMGIwMGY0YjVjMGUxZGQ0YzJhZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwMmQyYzBkNmRjNWU3NGQ5MmZhMTRiOTFkYmVhMjY0MDkwYmViMzVmZGI5MTg4ZDliMzQxMTgxZGNlOWY0Y2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2NGFhM2M0ZTJkNzczNGFlMzk2NzdiNzc5ZjU2ODIxMWM5ZTYxZjVmOWRkZWY1NDFkMTFiNTk5YTE0OTAzYjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1ZjlmNmY5MTQxNTdhN2Y1YzE0ZmE0MGNkYjNmYjBmOTM0YjYwOWFiMDlmNTg1N2Y4ZTNmMDM1NGYwM2U4Y2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7cb8429a635d49848e48674dfd9ba87c",
+      "statement": "The code exposes engine and workspace ownership separately, keeps private engine regression modules by responsibility, and shares benchmark setup across both entrypoints.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/bench-release-vstyle.sh#L1-L6",
+          "version": "repo-lines-v1:sha256:e82db838a5990e4f8a7a0842edcbc51af3d2fc0869ffdabca717dde33db0dfcf:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWQ5NWZjMDRhODBjOTUyZjQ5Y2U0MTg4NjI3YzUzYjBmYmU4YzQ0MDQxYjk1MmQ1OTJhY2QxZGU5OTg2MTQ2NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGZiMDI3YjIxYjQ5MTI0NDY1YmUyZmZkNTBjZDE2NWJjZWRmNTlkYTUxNGVjMWUxN2Y4NTE1Nzc5OTlhMDExZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjIwY2ZlYzUwN2M1NjdkOWIxMjFiZjg4NjIwOGU5MDkzNWRhZDI5ZWFjNzViM2JkZDFkODM2OGY5NGQxZjk0NSJ9"
+        },
+        {
+          "resource": "repo://scripts/bench-semantic-vstyle.sh#L1-L6",
+          "version": "repo-lines-v1:sha256:34ef512eb8fdbeeea4b82927acb0c6321161e122be485c0b6112971d3ac0db63:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWQ5NWZjMDRhODBjOTUyZjQ5Y2U0MTg4NjI3YzUzYjBmYmU4YzQ0MDQxYjk1MmQ1OTJhY2QxZGU5OTg2MTQ2NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODJmMWJjYTc1NmVkYTM1MzkxMWIzZDhkNjc4YjgxNmI5NDU2NDg0NDc5OTE2ZWVhYTQxMzhhYjNjYTkzZWNiYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWNmN2RhZWQ5NWRmM2VkMDk3OThjZWY2MTNhNmYwYmU1NWMxZDhkOTI4YWQwNDYyNDg4ZjE2MGZiMTQ3ZWExMyJ9"
+        },
+        {
+          "resource": "repo://src/style.rs",
+          "version": "repo-file-v1:sha256:f579b1d6cf1ecca0f5be5579e105c2bf57ba2630840dfee0ea8224cbce3766a9"
+        },
+        {
+          "resource": "repo://src/style/engine.rs#L1279-L1312",
+          "version": "repo-lines-v1:sha256:8e981a4cde531394e455015ae88c9c1ea71116f33b1066ad7596c49677264008:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0YzIzOGUzZmYzNWE4MTYxZDE4Y2VmMDhmNzU0MWFmZTIyYjRlMmY4MzFlNTM2YTMyMTA3MTJkOTAyMDNlYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQyYjI1YjhiMjdhNTQzOTBlMDk1ODI1ZGU5MmMwOWQ3MGRiOWI4NWQwODJlZDBkZjdmZDIxNGMzNDc2ZWZlZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

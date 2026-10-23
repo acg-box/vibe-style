@@ -11,6 +11,17 @@ openwiki:
   test_paths: [src/cli.rs, src/main.rs]
   invariants: [curate and tune require --language; tune is non-strict-success by default and strict mode fails when violations remain.]
   validation_commands: [cargo test cli]
+sources:
+  - id: openwiki-source-651d1fb6c9e49916a916ab51
+    resource: repo://Cargo.toml
+  - id: openwiki-source-c38906bbfa9e9c69417b11b5
+    resource: repo://src/cli.rs
+  - id: openwiki-source-b55a21a31ede1b56cd31a6a6
+    resource: repo://src/main.rs
+generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T01:59:51.049Z
 ---
 
 # CLI
@@ -20,10 +31,10 @@ openwiki:
 ## Commands and options
 
 - `curate --language rust|swift` scans and reports violations. It returns failure when any violation exists; `--strict` changes only the message wording for this command.
-- `tune --language rust|swift` runs safe automatic fixes and re-checks. It returns success with remaining violations unless `--strict` is supplied.
+- `tune --language rust` applies supported fixes and re-checks. It returns success with remaining violations unless `--strict` is supplied. Swift can be selected, but all current Swift violations are manual, so no fix rounds run.
 - `coverage` prints every entry in `STYLE_RULE_IDS` as `implemented`.
 - `--workspace` selects all supported workspace roots; `-p/--package` selects packages; `--features`, `--all-features`, and `--no-default-features` are passed into Cargo-aware discovery and semantic checks.
-- Global `--verbose` prints semantic cache statistics and tune progress telemetry.
+- Global `--verbose` includes semantic recovery details. Tune progress is written to stderr even without this flag; it does not report custom compiler-cache counters.
 
 ```mermaid
 sequenceDiagram

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:4105634e65f9bb7d8b1a00d06eaa60a0c4ea85079bf4c3cf268ac32dcfde315a",
+  "claims": [
+    {
+      "id": "claim_4ee838eb17b943afa5d94429d510a0fa",
+      "statement": "The backend catalog covers exactly the 42 registered IDs, comprising 36 Rust IDs and six Swift IDs with no Serde-specific entry.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/shared.rs#L15-L58",
+          "version": "repo-lines-v1:sha256:2cb6eeee727ff2cb52fe8cfb308dd6139aa444115ef8ad19b2b50f6a982f890e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1MzAxNTA2MDZjYWRiNWYwNDA4YzRhYzJiMDllNmRiZWI1NTE1NmJhMjUwMGIwMGY0YjVjMGUxZGQ0YzJhZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwMmQyYzBkNmRjNWU3NGQ5MmZhMTRiOTFkYmVhMjY0MDkwYmViMzVmZGI5MTg4ZDliMzQxMTgxZGNlOWY0Y2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2NGFhM2M0ZTJkNzczNGFlMzk2NzdiNzc5ZjU2ODIxMWM5ZTYxZjVmOWRkZWY1NDFkMTFiNTk5YTE0OTAzYjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1ZjlmNmY5MTQxNTdhN2Y1YzE0ZmE0MGNkYjNmYjBmOTM0YjYwOWFiMDlmNTg1N2Y4ZTNmMDM1NGYwM2U4Y2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_27a1f2f52f1f4227889ffea233411d71",
+      "statement": "Rust numeric-literal checks traverse parser numeric tokens, including macro token trees, in one shared pass.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/quality.rs#L145-L243",
+          "version": "repo-lines-v1:sha256:801f9d8c49323c6a68d11fc17da4c9775af81054672b9518faed09d9266f23ad:eyJzZWxlY3RlZExpbmVDb3VudCI6OTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzNjc4ODJlNzk4NzUzMDY4NjNhY2FlY2FkMDNhZWRlZGY3YzVlNDk0ZjE1NzU1NjdlMjJhNWQ4OTc3YjI4MGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyOTY0MDc5YzNjNWM4MTUyMGVmMzNhMmI5ZDJlMTVhMWI4NGQ3MjgwZGI4NTkwZGNkNjU3NDdlM2UwMTJhNDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhMmI2Y2VhZjQ5OTZjNzBlNzk0ZjFmMWM1OTZlYmY4ZjE3MzdiNTAzZTNhMGFkMmJmNGJlYmI2ZjA5Yzk5OTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e214b0917e1840a988b05f6e4b69e702",
+      "statement": "Semantic validation is isolated behind Cargo JSON output while Swift rules remain source-text checks that emit no automatic edits.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/semantic.rs#L137-L193",
+          "version": "repo-lines-v1:sha256:07df58f15aa769dd925d59237e0b0ab9d0dacb2cbd73979b9261adfe2d252459:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNDQ5OTZhOTZiNzllMjZjM2EyM2U3NGYxNDRlNjUwNzQ2NmRkNzNhMmMyMTY0ZjIwNWNkNjU4Mzk5Njg2OTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkzYzhjODdlNTc4NGY3YmM2ZDRhNTJkNTQ5YTdkZjQ3MGY5MmExNGNiYTdkNzkxNWI5ZWFjZWM5M2Y2NjUxNzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzMDViMDA5YzQ5NWJmOTE4MGQ2YTM5MGI1ZGRhNmE3YzhhZDI4OTVmM2RmY2VjZmJhNDM1YTFmNTcyMjRkOTcifQ"
+        },
+        {
+          "resource": "repo://src/style/swift.rs#L373-L387",
+          "version": "repo-lines-v1:sha256:1a460566ff9388d8cee42c9f492c799426803ae2ab6979d48c5abb1d12e51e3f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY4YjhlMzU0OTQ1YWVjMTg0MjhmZjg1YzFmOGE2ZGFjY2QzZTA4OTg4NTZkMGEwMjgyMmFkZmI0MjU5MTA5YTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjViOTY2MzI1ZjI1ZjU4N2FkMWJlZjRhY2E1MGRkZjE5OTliODk1NzEzZmMxMDVlNDJmOWIzOTAyNGMxMWJkZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
+        },
+        {
+          "resource": "repo://src/style/swift.rs#L61-L204",
+          "version": "repo-lines-v1:sha256:6dab31c1aab54a3adccff3dac1d508e1886e6a1d47a708de59e613ba2c0a32bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQ0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3ZTY2MmI0Zjk2Zjg4MmY3NWUwOTVmYTBkOTQ4OWZkOGU4MmYxYTFiM2I0N2YwMjgwOGM5MDFlYzFiNGRkNGFhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlNjgwNmYxNTVjNWFjMWFlMjcyMmNhMDZmMmFjOWNhZGNiODgxYjkxMjNjYjYyNGEzYzEwNDc1YjQ0NDlkYzJlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmMzRlNDNjZTRmNDEzZWJlYWI5OTQ5MzEzNTU1YmVkOGQxZWYyOWFmZDNhMGQ3OTJjNGNhOGExZTg4ZTE0NTUyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI4MjFkYWQxNGYyYzIxMGMxNThiNjNkYjAyY2Q2ZjM0NjE3MjkyNmFkYjU2NmUwNGE0NGVmZWIwNzhmOGM5YjE3In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_623a5795a7574a7abcd39a9d11528c3a",
+      "statement": "Serde default attributes are preserved in ordinary structs and macro input fixtures.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/tests/rules.rs#L168-L254",
+          "version": "repo-lines-v1:sha256:a33caced475f709ff37c4f4672f1255aff769e8c85c41d42a9b26f0ae65779cc:eyJzZWxlY3RlZExpbmVDb3VudCI6ODcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxNzVjZTFmODhhYTUyODZjMTA2MWFjNDQ1NTY5MWU5MjA2Njg3MzI1MTYxZjJlODQ1ZGIxYWFhYTVhNDYyOWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxZTg3ZmY1ZWY4MjU5MmRiZjFhZWYzNTY0NzQ0ZTZjNzNiMGVlOTgzZjQ2YjljNTBjY2MwNWE0ODcyMjA0ZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRiZDZjNzE5YzU4OWRiNTIzMzNjMTg0YjYzOTZjNjcxYTNhOWRlNDQ4NTUwM2FjMjMzMDE4NzFiODIyZmRiNGMifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

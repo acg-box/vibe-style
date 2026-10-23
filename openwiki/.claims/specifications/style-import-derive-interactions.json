@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:30ed113f733128cd6bfe7b28da568da9a7edd3db92992a1321ba4a7335a7d724",
+  "claims": [
+    {
+      "id": "claim_5d87ff136c3c43598e420b1abe7f8346",
+      "statement": "Derive ordering groups standard-library, third-party, and workspace entries and sorts display text within each group, skipping attributes overlapped by IMPORT-008 or IMPORT-009 edits.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/imports/derives.rs#L222-L234",
+          "version": "repo-lines-v1:sha256:1e4ded6c0056f01685ef5ef0a05537a6853f472738f405182697770b989e41b9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhmYWUzMjdhNGIxM2U0NWFiNjFmMmUyMGYwNTA4YTk2YjkyOWUzY2Y5NTNhZTRkM2U3NTY5ZWYzYjQ3NmQzYzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://src/style/imports/derives.rs#L28-L92",
+          "version": "repo-lines-v1:sha256:ed8e7d7416cb99762b70f3cfe010909f6f0a0d70fe9dd979d23493d85edbe67b:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFhM2QxNGI5MmUzZGJlMWE3NzkwOWU4MjAxNjFkZGYwNTc2MmIwZjZhMTk2NmM4MzY1MDA4NTBmNDdjYjA0YWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVlZTk2NTgyYTE1YzVlNzFmMDMzNjlkMjg3NDRlMWY5MTczOGExNDZmYjA2ZWY1M2Y4NzlkYmJjZDllMmY4YWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzODQwMTFhZWQ0MWIxMzhjZTcwNWVjMGUxMzMwODVmZWJjMmY1M2QwNzM1YmZlZjI4NjhjZTA5MTdmNWJmZDgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c1b70d9ecaaf4cb08af2e5e8c4971ae0",
+      "statement": "The import coordinator plans path qualification and shortening before derive ordering, and the convergence regression verifies a later pass can order the rewritten derive paths.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/imports.rs#L225-L255",
+          "version": "repo-lines-v1:sha256:514a1672964ee8c0c7cd8a7d4efaa99454c7b264a0c68888a0db660088004c8c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMyZDJkODEzMDE5NzE3YTEyMTRiMzZhNTY2YTE5ZWY2YzBkYjdhZDQ4Nzk2MmIyYzI5NzFjMDI1Mjg1Y2NlMjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmODlkYmY1N2FmZDBkOWUzYTcyODMyOTViMjEwYmY5M2FiNDZjMGU2YTgyNTE5YmYzZDQzNDg4NWIwMTJjMGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhY2IyZmQ1OWM1NGNjN2MyYzE1ZDQ5ZGJmYTJlYTA5YmVlODU5NmE0MGExOTU3NzZjMjFmNzc1ODRhZmNhMDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE1NzA2Mjc0ZWI0Yjc5MjhmMTk5MTQ0MzI0YjQwNmEyNDlkYTQzYmYwZmVmM2FiNzZiZGRkMWFjNTI3ODQ3ZmQifQ"
+        },
+        {
+          "resource": "repo://src/style/tests/shortening.rs#L894-L925",
+          "version": "repo-lines-v1:sha256:c2aff20f01d2b92e6b66c44da0c035c744d1f971548f12c36c3499391843c012:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1N2U4NzFhMDAxYWQ1ZGJiNWNlMWRjOTBmOGRkNWExYjQ4Y2RmOTZjNTY2YjNlNTdmY2E2ZDg4NjNhZmNkOGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmNzI0Nzg5ZDMyNzIxYzVkZDA5ZmM2YjFjYjVmZWMzYjY5MDQyY2IxZGY3ZDFiMTg3MmNjNWJiM2Q5MTZlNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdmOWFkNDYzYmU3MWM1ZjQyMDk0NmFmYmYwN2QwZmU5ZjVmMTFkYTgyZjFlOTQ5MDNjYzMzOTVkOGMxYTBiMzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkzYjg3M2MxNTQwMDY2OGViODI3NjhkMzQ3ZWQ2ZmQ1NmFjMzMyNjRiNGY0ZWU5NzQyNDRkZGY5ZmM4YWVhYjAifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

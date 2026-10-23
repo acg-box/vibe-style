@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e689f69dd9529e4c79aaccbb025644d59f6606ceac1a0cf3558005865964b9ba",
+  "claims": [
+    {
+      "id": "claim_53cbf13909de45278a3a27132519374b",
+      "statement": "The active registry contains 42 IDs: 36 Rust rules and six Swift rules; coverage prints this registry and does not register a Serde-specific rule.",
+      "evidence": [
+        {
+          "resource": "repo://src/style.rs#L27-L31",
+          "version": "repo-lines-v1:sha256:0da6ec52c972755349bb68f7254a86278414bfa2281aa2611b05de4d37f56fe4:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGYzZmRiMzYxYmZjODg0NmRhN2ZjOWQyNjFhMDI3NmVhY2VjMDM3YTkyMTAyZTNjZmRkMDg5YTlkZTE5YmUzNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGNhYzAyY2M2Zjc2NzI4MzhlNjJjOGVjNGRmZGVlNzJlMjAxYjIzMjU2NTQyNDdlNzRmOTVhYzI3OWVlMzNjNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://src/style/shared.rs#L15-L58",
+          "version": "repo-lines-v1:sha256:2cb6eeee727ff2cb52fe8cfb308dd6139aa444115ef8ad19b2b50f6a982f890e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1MzAxNTA2MDZjYWRiNWYwNDA4YzRhYzJiMDllNmRiZWI1NTE1NmJhMjUwMGIwMGY0YjVjMGUxZGQ0YzJhZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwMmQyYzBkNmRjNWU3NGQ5MmZhMTRiOTFkYmVhMjY0MDkwYmViMzVmZGI5MTg4ZDliMzQxMTgxZGNlOWY0Y2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2NGFhM2M0ZTJkNzczNGFlMzk2NzdiNzc5ZjU2ODIxMWM5ZTYxZjVmOWRkZWY1NDFkMTFiNTk5YTE0OTAzYjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1ZjlmNmY5MTQxNTdhN2Y1YzE0ZmE0MGNkYjNmYjBmOTM0YjYwOWFiMDlmNTg1N2Y4ZTNmMDM1NGYwM2U4Y2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4cd2f6bd659044e1b4a8dcc843b26bbc",
+      "statement": "Shared violations record file, line, rule, message, and fixability, while edits record a byte range, replacement, and owning rule.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/shared.rs#L64-L91",
+          "version": "repo-lines-v1:sha256:5e34c102156a5e21a09cc8d47a9d3c42e315724e7d48b00fd2ad6b7c5b97f418:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjNjBiOWU5Y2Y4YjI3MmNiMTVmM2EyZDVhN2IwMWM2NDU3NWI1MGEyMjBlN2Q2Nzc1NTVhMmQ5NThkYzhhNWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkwZmVmNTg1OWIzZDUxYjllM2U5NDQ3MGQ3YzJiMWUyN2E0MjkzYTQ2YjUxNjFkM2JjNGQxYTE1NzA1YWFmZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJiYTQ4NTE5YTQzN2E5ZjgwMjBiZjZhMjI4YTYxYjg0YmE1NGE2MjdhNDIzMDU2NTlmOWUzNWMzMTg2NzAzNTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7a3fecb460d341b19bb0024e21857b0f",
+      "statement": "Rust dispatch groups checks by rule owner, with import processing coordinated through shared planning and specialized child modules.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/imports.rs",
+          "version": "repo-file-v1:sha256:9a0434d41e1d9e941805ebe2edc243d30f6d36c53e557cbea70d3117dec7bde7"
+        },
+        {
+          "resource": "repo://src/style/rules.rs",
+          "version": "repo-file-v1:sha256:f635dc2b8fa725eaad433b18598135f4e4df9fc96252e4f5692512961f9b4861"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:59:51.049Z"
+  }
+}

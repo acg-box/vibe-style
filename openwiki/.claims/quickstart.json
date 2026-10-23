@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:1c0fe83d4071ab5c628828481022914ff29b7664a79f8a29f3cba8f70e7fa043",
+  "claims": [
+    {
+      "id": "claim_6d98e67320904e8aadfa54fc96f3a16f",
+      "statement": "The public surface is the vstyle and cargo-vstyle executables with explicit-language curate and tune commands plus coverage; there are 42 registered Rust and Swift rule IDs.",
+      "evidence": [
+        {
+          "resource": "repo://Cargo.toml#L17-L23",
+          "version": "repo-lines-v1:sha256:f162791d757131bf35ff72862cd8412aa85249473d03366bf01d6c56848b694c:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzcyMTFiNzhlMWFkOWJlNzE0MzEyYmQ4OTJlMGJiOWNjYjJkMTI1MzE2NTgxMmZlOTZkMzMwZTk1YWI1MmJmMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWRhYmIyYmE1ZTZmYjkxNDAwZDA1N2U5MzFjZTkxOTk4YjZmNzBmYzU4YjczMzA1MjEzMjZhNGVjNWU1YjZjNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGRmOGZhM2RmZTliZjk1MmU3NzE1NjBhMDU2Yjc0ZDcxOWFlNzdiMjE0MzhlNDljMDdmMTVhMjVkZmY4ZWQyYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzJkYjM0ODJhY2MzYmEzNTIzODUzODcyOGMwNGE1ODZiZGEzMzAwNzllYzFkOTBlZjRkMTA5YTFkNWZkZWQxNyJ9"
+        },
+        {
+          "resource": "repo://src/cli.rs#L81-L151",
+          "version": "repo-lines-v1:sha256:7fafb7fc5c19003fc068f6ad1c15b27876aaed1f558baf9820ec0c6eefcac037:eyJzZWxlY3RlZExpbmVDb3VudCI6NzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlNDBmZjkyYjA0ZmQ1MDBiMDE2NzZkZGRhNTA5NDU1MjRhMzNjMzRiZjFiYmVjY2MxOWYwZTYxMzM3ZjNmNzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyOTY0MDc5YzNjNWM4MTUyMGVmMzNhMmI5ZDJlMTVhMWI4NGQ3MjgwZGI4NTkwZGNkNjU3NDdlM2UwMTJhNDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlmNzNiZWUzNDkzYjY5MTk0NjFhZWQyYzEzNWMyN2I2NTFhMzk5OGUyMjViNDU2OTFhYTk5YmZkYjY4MTYxOTkifQ"
+        },
+        {
+          "resource": "repo://src/style/shared.rs#L15-L58",
+          "version": "repo-lines-v1:sha256:2cb6eeee727ff2cb52fe8cfb308dd6139aa444115ef8ad19b2b50f6a982f890e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1MzAxNTA2MDZjYWRiNWYwNDA4YzRhYzJiMDllNmRiZWI1NTE1NmJhMjUwMGIwMGY0YjVjMGUxZGQ0YzJhZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwMmQyYzBkNmRjNWU3NGQ5MmZhMTRiOTFkYmVhMjY0MDkwYmViMzVmZGI5MTg4ZDliMzQxMTgxZGNlOWY0Y2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2NGFhM2M0ZTJkNzczNGFlMzk2NzdiNzc5ZjU2ODIxMWM5ZTYxZjVmOWRkZWY1NDFkMTFiNTk5YTE0OTAzYjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1ZjlmNmY5MTQxNTdhN2Y1YzE0ZmE0MGNkYjNmYjBmOTM0YjYwOWFiMDlmNTg1N2Y4ZTNmMDM1NGYwM2U4Y2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_fd50e448003f43ddb2dec340dbeebf4d",
+      "statement": "File selection and Git-ignore discovery live in workspace.rs, separate from the engine transaction owner and Rust rule dispatcher.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/engine.rs#L122-L178",
+          "version": "repo-lines-v1:sha256:f868d9166e7c0116087b67a1d69279119a6cc965bba37bfa0acc6a2dff089ca6:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1ZmNiMDBjNTczOWFkOGJmODNmZDlmNGU0NTQ1MzZhZGYzOWVjNzk4OGU4YWRkZGU4OTU3ZTFjYTFhN2NiNmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0MjQ1M2M1ZDBjNDE4MzFkYTdiY2I0YTkxY2E2ZTZlY2U1OTJmMzcwMTJhZDQ4ZDYwYjdjY2YxMGU5NjNjOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBiOTQwYzIxNjAxZGJkZTZlMmQ2ZGIwZmVmNjBlMjQ2ZmY3MWY2MjE5YzkyM2FjYTM4YWQ3ZmE0M2JjMzM2OWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNTM5ZTIxYzcyNzYyOTVmYWZmNjQ5NTI5ODAxOGM5OWUwM2MwZDFhYWI1MTFmNmY3YmUxNDRlNDE5MTZkMjAifQ"
+        },
+        {
+          "resource": "repo://src/style/rules.rs",
+          "version": "repo-file-v1:sha256:f635dc2b8fa725eaad433b18598135f4e4df9fc96252e4f5692512961f9b4861"
+        },
+        {
+          "resource": "repo://src/style/workspace.rs#L271-L388",
+          "version": "repo-lines-v1:sha256:0cb03ed3bc16dededa9fd79e814a378ed45baada2eb8dc36988fe440d76e9ad7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3NjJlOWUxNzRmNzYyMjk2MjViMDI4MTUyOGVhOTI3ZWVlYjgyZjVmN2QyYmRhYWY3ZTgzMzU5YTZlOTI5MGUzIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5MWJlMzVkM2VlOWRhYjNmN2RhYTk5MWNkZDdlYmMzY2JiY2I0M2MyMWExYjUxNGZjNzA0OTQzYmUxYzk2N2VjIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1YmRmZWRmMmJlMGE3NzhkNTY0YTM1OGJjZDk5Nzk5NDE0MjEzMmM2YWIzNTExNTZhYTY5NmI4MmVkNTIzNzVjIn0"
+        },
+        {
+          "resource": "repo://src/style/workspace.rs#L71-L159",
+          "version": "repo-lines-v1:sha256:9ed60d1b48b0b4393f0a61b23518808484eb0fd0f2e63f90a6ee34d35685ab78:eyJzZWxlY3RlZExpbmVDb3VudCI6ODksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1NmE1OTMyN2MxMjdhNjJlNjcwMWJjY2E1ZmI1MGFhNTQyNjU0MjQ0OThmNGI5ODE5MGRlZWY2YzQ4MDA1MjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY0MGVlYmIwMjIwNzc1MDg3ZWYzMzA1M2FhYmIxNGNjMTU0MmVmYzdlOTdmMGU2ZWRkNjY4YTgzNzI5OGYxZjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlYmFjZThjZjM5YmRhNGNiMzBkNWEwYjMyODVjODkyMjYwMTliNzMxNjA3NGVlNjdmZjI5MjM0MGE4ZTJjM2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d00857f7c4bf427b83e8540874eafaae",
+      "statement": "Repository tasks provide a current-source style check and a broad check that combines formatting, strict Clippy, style checks, and all-target nextest execution.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile.toml",
+          "version": "repo-file-v1:sha256:b934fb4ca6830dd01f5bc0c18d2d728cfe87542d0f36b0d0e4c4daaea1749991"
+        }
+      ]
+    },
+    {
+      "id": "claim_6f26a3740c0747549550f8bcbd82254d",
+      "statement": "Release benchmarks use a committed source snapshot while semantic benchmarks exercise cold and warm compiler-backed fixes in a temporary fixture.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/bench-release-vstyle.sh",
+          "version": "repo-file-v1:sha256:a66ae2780e306a009b26adad6205326232a36d1eb90491afdf3d4d632e283747"
+        },
+        {
+          "resource": "repo://scripts/bench-semantic-vstyle.sh",
+          "version": "repo-file-v1:sha256:970b0cf53a54eebd885913894e1af8f77bfe555ac2323b26bbc7090d6ca618b6"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}

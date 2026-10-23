@@ -11,17 +11,38 @@ openwiki:
   test_paths: [tests/swift_curate.rs, tests/let_mut_reorder.rs, tests/type_alias_rename.rs]
   invariants: [The Action performs read-only curate; local lint uses tune --strict; release publishes both vstyle and cargo-vstyle binaries.]
   validation_commands: [cargo test --all-targets --all-features]
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T01:52:10.637Z
+sources:
+  - id: openwiki-source-61a12770dd6258a4227672cd
+    resource: repo://.github/workflows/benchmark.yml
+  - id: openwiki-source-5bf61b313e40e57a0303e0dd
+    resource: repo://.github/workflows/language.yml
+  - id: openwiki-source-6d4b4e707b8d60b6ccfa3425
+    resource: repo://.github/workflows/openwiki-update.yml
+  - id: openwiki-source-4d1d392666be6dfdd7a91a2e
+    resource: repo://.github/workflows/release.yml
+  - id: openwiki-source-96d0addee4aedab20d360121
+    resource: repo://action.yml
+  - id: openwiki-source-c8b1a2a9f2113ec43d4066da
+    resource: repo://Makefile.toml
+generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
 ---
 
 # Testing and Automation
 
 `Makefile.toml` separates formatting, Rust clippy checks, vstyle checks, tests, and two benchmark tasks. `cargo make test-rust` runs nextest across workspace/all targets/all features. The broad `cargo make check` composes formatting, clippy, vstyle, and tests; use it only when a cross-cutting validation is justified.
 
-The language workflow uses the local composite `action.yml` with `version: checkout` for Rust curate, then runs clippy and tests. The Action supports `rust` and `swift`, defaults `workspace: true`, accepts extra whitespace-split `args`, and installs either a release archive or both local binaries via `cargo install --path`.
+The language workflow runs TOML formatting, Rust formatting, Clippy, nextest, and `cargo make check-vstyle`. The style task builds the current source with `cargo run --locked --all-features --bin vstyle`; it does not install an older checker into the CI validation path. The Action supports `rust` and `swift`, defaults `workspace: true`, accepts extra whitespace-split `args`, and installs either a release archive or both local binaries via `cargo install --path`.
 
-Release workflow behavior is owned by `.github/workflows/release.yml`: tag pushes build and publish binary artifacts, run the released composite Action against the exact tag, then publish to crates.io. A manual dispatch accepts an existing signed release tag, verifies it points at the checked-out commit, verifies the released Action, removes downloaded release binaries, requires a clean checkout, and republishes with `cargo publish --locked`; inspect the workflow for the exact target matrix, archive naming, checksums, and permissions before changing release behavior. The benchmark workflow runs independent release and semantic jobs, writes summaries, and uploads artifacts for 14 days; see [benchmark tracking](../runbooks/benchmark-tracking.md).
+Release workflow behavior is owned by `.github/workflows/release.yml`: tag pushes build and publish binary artifacts, run the released composite Action against the exact tag, then publish to crates.io. A manual dispatch accepts an existing release tag, requires an annotated tag that points at the checked-out commit, verifies the released Action, removes downloaded release binaries, requires a clean checkout, and republishes with `cargo publish --locked`; inspect the workflow for the exact target matrix, archive naming and permissions before changing release behavior. The benchmark workflow runs release and semantic steps in one job. Each step retains its own outcome, summary, and artifact lane. A final gate fails if either benchmark failed. Successful run artifacts remain available for 14 days; see [benchmark tracking](../runbooks/benchmark-tracking.md).
 
 The scheduled OpenWiki workflow checks out full history, installs OpenWiki plus Mermaid validation dependencies, runs `openwiki code --update --print`, and opens an update PR containing `openwiki`, agent files, and the workflow. Generated wiki pages remain under `openwiki/`; source and tests remain authoritative.
+
+## Test ownership
+
+`src/style/tests/` groups engine regression cases by responsibility while keeping access to private helpers. The five integration targets invoke the binary and verify source or diagnostic behavior. Their shared `tests/support/fixture.rs` creates unique temporary roots and removes only its owned root on drop.
 
 ## Validation routing
 
@@ -29,4 +50,4 @@ The scheduled OpenWiki workflow checks out full history, installs OpenWiki plus 
 - Swift-only: `cargo test --test swift_curate`.
 - Fix behavior: the relevant fixture test, such as `cargo test --test let_mut_reorder --test type_alias_rename`.
 - Shared registry/orchestration: `cargo test --all-targets --all-features`.
-- Release packaging: `cargo build --profile final-release --bins` plus release workflow review.
+- Release packaging: `cargo build --profile final-release --locked --bins` plus release workflow review.

@@ -6,11 +6,32 @@ tags: [architecture, rust, swift, runtime]
 openwiki:
   roles: [architecture, repository]
   change_kinds: [runtime, public-api]
-  source_paths: [Cargo.toml, src/main.rs, src/style.rs, src/style/shared.rs]
+  source_paths: [Cargo.toml, src/main.rs, src/style.rs, src/style/engine.rs, src/style/workspace.rs, src/style/rules.rs, src/style/shared.rs]
   symbols: [main, Cli, run_check, run_fix, resolve_files, STYLE_RULE_IDS]
   test_paths: [src/main.rs, src/cli.rs]
   invariants: [The vstyle and cargo-vstyle binaries share src/main.rs and normalize the cargo subcommand argument shape.]
   validation_commands: [cargo test --all-targets --all-features]
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T01:52:10.637Z
+sources:
+  - id: openwiki-source-651d1fb6c9e49916a916ab51
+    resource: repo://Cargo.toml
+  - id: openwiki-source-41e559bbb87cd2adb8c59921
+    resource: repo://src/style.rs
+  - id: openwiki-source-5a343b6d360ed17beec1a852
+    resource: repo://src/style/engine.rs
+  - id: openwiki-source-f9df7723e0c608a7d6d83f07
+    resource: repo://src/style/imports.rs
+  - id: openwiki-source-ac49b78710cf5ad65f8667ff
+    resource: repo://src/style/imports/local.rs
+  - id: openwiki-source-c37d2b23d52a989dc6442e19
+    resource: repo://src/style/imports/planning.rs
+  - id: openwiki-source-b7a6ae5f72d1d14fc3a92e74
+    resource: repo://src/style/rules.rs
+  - id: openwiki-source-60fd4a2aff5978a4368f5dd1
+    resource: repo://src/style/workspace.rs
+generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
 ---
 
 # Architecture Overview
@@ -21,24 +42,26 @@ openwiki:
 
 ```mermaid
 flowchart LR
-  CLI["src/main.rs + src/cli.rs"] --> Orchestrator["src/style.rs"]
-  Orchestrator --> Shared["style/shared.rs\nfile discovery + contracts"]
-  Orchestrator --> RustRules["style rule families"]
-  Orchestrator --> Swift["style/swift.rs"]
-  Orchestrator --> Semantic["style/semantic.rs\nCargo compiler validation"]
-  Orchestrator --> Fixes["style/fixes.rs"]
+  CLI["main.rs + cli.rs"] --> Facade["style.rs facade"]
+  Facade --> Engine["style/engine.rs"]
+  Engine --> Workspace["workspace.rs: Cargo + Git discovery"]
+  Engine --> Dispatch["rules.rs: Rust dispatch"]
+  Engine --> Swift["swift.rs: read-only checks"]
+  Engine --> Semantic["semantic.rs: Cargo validation"]
+  Engine --> Fixes["fixes.rs: edit application"]
+  Dispatch --> RustRules["Rust rule families"]
 ```
 
-`src/style.rs` is the orchestration boundary. `run_check` resolves the selected files and collects parallel check outcomes. `run_fix` performs an initial scan, bounded fix rounds, state refreshes, semantic fallbacks where needed, and a final scan. `src/style/shared.rs` defines `CargoOptions`, `StyleLanguage`, `Violation`, `Edit`, `RunSummary`, `FileContext`, `TopItem`, the 43-entry `STYLE_RULE_IDS` registry, workspace discovery, and diagnostic formatting. The complete ID-to-backend classification is canonical in [style rule backends](../specifications/style-rule-backends.md), not enumerated by this architecture overview.
+`src/style.rs` is a small CLI facade. `engine.rs` owns scans, fix rounds, state refresh, and transaction recovery. `workspace.rs` owns Cargo metadata, package selection, Git-ignore discovery, and process-local discovery caches. `shared.rs` owns source contexts, diagnostics, edit records, and the 42-entry rule registry: 36 Rust IDs and six Swift IDs. `syntax.rs` owns common token and path helpers. The complete ID-to-backend classification is canonical in [style rule backends](../specifications/style-rule-backends.md).
 
-Rule families are split by responsibility: `file.rs`, `module.rs`, `imports.rs`, `impls.rs`, `generics.rs`, `types.rs`, `bindings.rs`, `quality.rs`, `spacing.rs`, and `test_modules.rs`; Swift has its separate source-text backend in `swift.rs`. Compiler-backed behavior is isolated in `semantic.rs` rather than treated as ordinary AST detection.
+Rule families are split by responsibility: `file.rs`, `module.rs`, `imports.rs`, `impls.rs`, `generics.rs`, `types.rs`, `bindings.rs`, `quality.rs`, `spacing.rs`, and `test_modules.rs`; Swift has its separate source-text backend in `swift.rs`. `rules.rs` dispatches Rust families. `imports.rs` coordinates policies through child modules: `paths`, `references`, `scopes`, `groups`, and `analysis` own mechanisms; `aliases`, `qualification`, `shortening`, and `derives` own policies; `planning` shares their order with `local` module processing. Private plan records remain in the import coordinator. Compiler-backed validation is isolated in `semantic.rs` and invokes Cargo for each check.
 
 ## Change navigation
 
 - Change command parsing or exits in [CLI](cli.md), then run the focused CLI tests.
 - Change discovery, edit conflict handling, rounds, or convergence in [Engine](engine.md).
 - Change a rule contract or registration in [Rules](rules.md) and the normative [backend specification](../specifications/style-rule-backends.md).
-- Change compiler validation or cache behavior in [Semantic validation](semantic-validation.md).
+- Change compiler validation or recovery in [Semantic validation](semantic-validation.md).
 - Change Swift checks only within [Swift](swift.md) and its [applicability specification](../specifications/swift-style-rule-applicability.md).
 
 The package has no separate public library entrypoint: consumers use the binaries or the Cargo subcommand. Release and Action packaging are documented in [testing and automation](testing-and-automation.md).

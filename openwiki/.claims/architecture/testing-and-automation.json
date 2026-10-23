@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e4afa4b4ea9e08328bbf373643de1393d64915ee728fad535f59ad0feb438ea1",
+  "claims": [
+    {
+      "id": "claim_b56cfd18d8874057ba733ec355371538",
+      "statement": "The broad check task composes formatting, strict Clippy, current-source style checks, and nextest; the language workflow runs the corresponding repository commands.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/language.yml",
+          "version": "repo-file-v1:sha256:e956a2c3e8bc10aca1a2b5ddde755f0b7253374dfdaed78e0b4bf1b200bc280c"
+        },
+        {
+          "resource": "repo://Makefile.toml",
+          "version": "repo-file-v1:sha256:b934fb4ca6830dd01f5bc0c18d2d728cfe87542d0f36b0d0e4c4daaea1749991"
+        }
+      ]
+    },
+    {
+      "id": "claim_9cb81f9a5c0a4720abc82abc7f2f32b8",
+      "statement": "The composite Action performs read-only curate for the selected language and can install release archives or compile the checkout, whereas local lint-vstyle applies strict tune fixes.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile.toml",
+          "version": "repo-file-v1:sha256:b934fb4ca6830dd01f5bc0c18d2d728cfe87542d0f36b0d0e4c4daaea1749991"
+        },
+        {
+          "resource": "repo://action.yml",
+          "version": "repo-file-v1:sha256:aa373307b831e13ae6aff5c6601193f8032300c81d09e6429383338f30549093"
+        }
+      ]
+    },
+    {
+      "id": "claim_ede928ed86e64739a917aea4352c1a2b",
+      "statement": "Release tag pushes build three platform archives, publish a GitHub Release, smoke-test the released Action, then publish the crate; manual recovery requires an annotated tag matching HEAD and a clean checkout before cargo publish --locked.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/release.yml",
+          "version": "repo-file-v1:sha256:a40727c09a4b6210dcf0654a359aa2d5b74cb83a8b7e7c1f87df1a469956b2d2"
+        }
+      ]
+    },
+    {
+      "id": "claim_820008dc45764d9988f04a76df5fe13a",
+      "statement": "Both benchmark steps run in a single job with separate outcomes and artifact lanes, retain successful artifacts for 14 days, and share a final failure gate.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/benchmark.yml",
+          "version": "repo-file-v1:sha256:05757bdec4c8c50bf82ce76bf8564ef19df285e0b2050985f5f1acba96425558"
+        }
+      ]
+    },
+    {
+      "id": "claim_8b05c026d6ce4807b6000e38d98fb5de",
+      "statement": "The OpenWiki workflow updates generated documentation and opens an update PR with the imperative subject Update OpenWiki documentation and the XV author identity.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/openwiki-update.yml#L33-L63",
+          "version": "repo-lines-v1:sha256:cf9d04678caf84babbebcad732e77ad56c97f133c3b0e400df1a83b08a7d4859:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwZThmOWZhNDBlN2JkMDQ5OWQxYzBkODNmZDc1OGFhODViMzA4NDJkYmQ2MWYwZWE2YjdhZTEwZWZlYzc2ZDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY0Nzc5NmQzMTczMmZiY2U4OTk4YTJmN2U3YjFiYjk3NTVjMjNlNTg1MDMyMGI5MDkzN2Q4MmMzZmQwZTYyYTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZkYWUwODNlMWUwMDE4YmUwOTI5NDcwOGEyNmIwYTljNDViMjViY2QyNDRmZDY4ZTI3MWVjZWJkYjdmNTU2ZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-23T01:52:10.637Z"
+  }
+}
