@@ -8,12 +8,9 @@ openwiki:
   change_kinds: [ci, release, documentation]
   source_paths: [Makefile.toml, action.yml, .github/workflows/language.yml, .github/workflows/release.yml, .github/workflows/benchmark.yml, .github/workflows/openwiki-update.yml]
   symbols: [check, lint, test, bench-release-vstyle, bench-semantic-vstyle]
-  test_paths: [tests/swift_curate.rs, tests/let_mut_reorder.rs, tests/type_alias_rename.rs]
+  test_paths: [tests/swift_curate.rs, tests/let_mut_reorder.rs, tests/type_alias_rename.rs, tests/mod007_super_import.rs, src/style/tests/interactions.rs, src/style/tests/layout.rs]
   invariants: [The Action performs read-only curate; local lint uses tune --strict; release publishes both vstyle and cargo-vstyle binaries.]
   validation_commands: [cargo test --all-targets --all-features]
-verified:
-  - by: openwiki/0.7.2
-    at: 2026-10-23T01:52:10.637Z
 sources:
   - id: openwiki-source-61a12770dd6258a4227672cd
     resource: repo://.github/workflows/benchmark.yml
@@ -27,7 +24,18 @@ sources:
     resource: repo://action.yml
   - id: openwiki-source-c8b1a2a9f2113ec43d4066da
     resource: repo://Makefile.toml
-generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
+  - id: openwiki-source-a4b9ffa3de3507d90865fcc9
+    resource: repo://src/style/tests/interactions.rs
+  - id: openwiki-source-05c1e7ac5fb2ebbe04623fb5
+    resource: repo://src/style/tests/layout.rs
+  - id: openwiki-source-c7b7f1d0eae5d93ce0817638
+    resource: repo://tests/mod007_super_import.rs
+  - id: openwiki-source-e645da4f9c4a0035b94904d8
+    resource: repo://tests/type_alias_rename.rs
+generated: { by: "codex", at: "2026-10-23T02:37:02.452Z" }
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T02:37:02.452Z
 ---
 
 # Testing and Automation
@@ -43,6 +51,10 @@ The scheduled OpenWiki workflow checks out full history, installs OpenWiki plus 
 ## Test ownership
 
 `src/style/tests/` groups engine regression cases by responsibility while keeping access to private helpers. The five integration targets invoke the binary and verify source or diagnostic behavior. Their shared `tests/support/fixture.rs` creates unique temporary roots and removes only its owned root on drop.
+
+`tests/type_alias_rename.rs` runs each binding-sensitive fixture before and after `tune` and compares its output. The cases cover enum variants with the same spelling as a type alias, distinct aliases in separate modules, private qualified targets, generic type/value shadows, and import aliases that conflict with generic parameters. These tests catch changes that Cargo can accept while program behavior changes.
+
+`tests/mod007_super_import.rs` checks whole-line inline modules, same-line adjacent test functions, and multiline imports. It runs `cargo test -- --list` after tuning and requires the retained test function to appear. Internal edit regressions cover exact same-line item spans, balanced enclosing braces, complete literal prefixes, Unicode lifetimes, and module documentation with Unicode names or inline block comments.
 
 ## Validation routing
 

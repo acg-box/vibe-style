@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:4105634e65f9bb7d8b1a00d06eaa60a0c4ea85079bf4c3cf268ac32dcfde315a",
+  "pageVersion": "sha256:dc269f56f32cb9ad1872ce70309685aeec160a245fa3b02c465ffa8da29ba88f",
   "claims": [
     {
       "id": "claim_4ee838eb17b943afa5d94429d510a0fa",
@@ -17,7 +17,7 @@
       "statement": "Rust numeric-literal checks traverse parser numeric tokens, including macro token trees, in one shared pass.",
       "evidence": [
         {
-          "resource": "repo://src/style/quality.rs#L145-L243",
+          "resource": "repo://src/style/quality.rs#L146-L244",
           "version": "repo-lines-v1:sha256:801f9d8c49323c6a68d11fc17da4c9775af81054672b9518faed09d9266f23ad:eyJzZWxlY3RlZExpbmVDb3VudCI6OTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzNjc4ODJlNzk4NzUzMDY4NjNhY2FlY2FkMDNhZWRlZGY3YzVlNDk0ZjE1NzU1NjdlMjJhNWQ4OTc3YjI4MGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyOTY0MDc5YzNjNWM4MTUyMGVmMzNhMmI5ZDJlMTVhMWI4NGQ3MjgwZGI4NTkwZGNkNjU3NDdlM2UwMTJhNDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhMmI2Y2VhZjQ5OTZjNzBlNzk0ZjFmMWM1OTZlYmY4ZjE3MzdiNTAzZTNhMGFkMmJmNGJlYmI2ZjA5Yzk5OTAifQ"
         }
       ]
@@ -45,14 +45,40 @@
       "statement": "Serde default attributes are preserved in ordinary structs and macro input fixtures.",
       "evidence": [
         {
-          "resource": "repo://src/style/tests/rules.rs#L168-L254",
+          "resource": "repo://src/style/tests/rules.rs#L167-L253",
           "version": "repo-lines-v1:sha256:a33caced475f709ff37c4f4672f1255aff769e8c85c41d42a9b26f0ae65779cc:eyJzZWxlY3RlZExpbmVDb3VudCI6ODcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxNzVjZTFmODhhYTUyODZjMTA2MWFjNDQ1NTY5MWU5MjA2Njg3MzI1MTYxZjJlODQ1ZGIxYWFhYTVhNDYyOWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxZTg3ZmY1ZWY4MjU5MmRiZjFhZWYzNTY0NzQ0ZTZjNzNiMGVlOTgzZjQ2YjljNTBjY2MwNWE0ODcyMjA0ZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRiZDZjNzE5YzU4OWRiNTIzMzNjMTg0YjYzOTZjNjcxYTNhOWRlNDQ4NTUwM2FjMjMzMDE4NzFiODIyZmRiNGMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2a9f5c772370453b97c051025cfb3114",
+      "statement": "AST remains the primary rule backend while scoped type-alias planning and generic-name reservations constrain binding edits; selected-configuration Cargo checks and executable-output regressions provide distinct validation evidence.",
+      "evidence": [
+        {
+          "resource": "repo://src/style/imports/aliases.rs#L162-L170",
+          "version": "repo-lines-v1:sha256:238f03b56f7def12fe2e68f3f31257d5e3dbf9690130c78f77c2ebeeb4485ef6:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTA1NzJjYjdjOTY4MjI4NWY0MzJjOGQ2NDI5ZjhiZjE5NTA5Mzk5MTZkZDE4ZjIyYjcxYjQxMTI4YzE3Zjc2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTkwZmEwMTQxNGE1Yjk3ZWI4Yjc2YWY0ODVlMDAxYmExYjc5MTlhYjE3ODQ2NDMyNjU4MTE5Y2I3MWM4M2I4NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2YwOTg4M2MxM2EwZWYzZGQ2ODk4ZjE2NjI1NTczNmUyMmI5YmMzOWI3MWY1OTc1NDVhNzZmOTU2NTNjZWNmZCJ9"
+        },
+        {
+          "resource": "repo://src/style/imports/analysis.rs#L110-L127",
+          "version": "repo-lines-v1:sha256:105e357a23697e6653137ba731dae0638c62959dc5a7c511a8341e331ce95794:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwZTZkNzNkNWNiYzAyMzlhMGVjMjJiMDRlMDdmOWI4NmZhNGQyNTQ0YmJhNDcyNjE1NWI0ZDkyM2U3ODYyNDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiZTYzYzIzNzg1ZmVhY2ZkY2EyZTQxM2FhMDRlNDM3NmNlYzhkNmExMjllMjRjNGVlNDdlYTFjZjgzNmY2YWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxMGQyMmVmYzhmMTQyMTRmZTU5YzkwOTEyYjM2OTBiODNhMTgwZjY5NDQ4ZWQxY2I1ZDIwZjkyMDU3ODIwYzUifQ"
+        },
+        {
+          "resource": "repo://src/style/semantic.rs#L127-L184",
+          "version": "repo-lines-v1:sha256:a17669ea0d1b719fff7ee9535a682799b9a6da2b97218e0c76341649a733dfe4:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFhNzc3ZDBlMjU5ZDNmZGM2ZDk1YmJlYmRmZjNhZjgzNjcxYjEyMGE5OWIyMTBiMDEzYjdlNTE2MzYwZTE1OTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3Y2RhODJkYTYwNjIzOGUwNWU2MjM5OTU2OWM1ZWUwMzk5MzQxOTY0OGFlNWQ0M2EyYmY4Y2Q2MzQ3ZjgyNjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5YmZmOWNiZWU5YTMwYmE0NzI3Y2Y4ZGU3YWRlNjdiMzRjMjI3Y2ZhNjQ5OTQ0ZGY2ZTZmNGIxMjYzY2VjYTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA4NDFmNzhmMzM3MWZlM2MwZGQ1Yzg2Mzc0NzhlM2Y1YjI2NmY2OWZlNTJkMDc3ZjQxMzU4Nzg1NzU4NTBjMzkifQ"
+        },
+        {
+          "resource": "repo://src/style/types/renames.rs#L142-L227",
+          "version": "repo-lines-v1:sha256:b513b45dde5a7e3bce9980a44bd76a7aa6e98903e440d590fb68a1fdcf672301:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MjIyMmFkZTUzOGIxN2JmN2IxZDU4NzdmZGY2MWMwZTIxZTg1ZjRlYzE4YjZlMjI2NTc5MTY4ODYzZDhmMjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxMzA4MTkyMzM2MGYxODFiMGFmY2VmYWZlZDc3NmEwMTE3NjhjMjk3MWVkZTE3MjYyNTk1Y2JlM2M3M2M0MzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1MjFlMzJiODg4ZTc0YzkxMzg4OGIxODE2MDI3NGYyZWU1OTIzNWY5NzQ5ODU5YTdiYzMwNmI0NDliOGNmZGUifQ"
+        },
+        {
+          "resource": "repo://tests/type_alias_rename.rs#L88-L223",
+          "version": "repo-lines-v1:sha256:fababb9348f87f190dceeadbf2c72cf4aa810dd05e41dc980e72403b98960b83:eyJzZWxlY3RlZExpbmVDb3VudCI6MTM2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJmZDU1ZmNmNjEzYjAzNTFjNjNiMGY0MDJkZjE5MTJlM2JiMjdhNGNjMDZiZGIyOTNmNDU3Y2I2YWVhMjU1MGRmIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI0YmU5ZWYwZTA4NDNkNjcxNGNiOWVmOTNhN2ZmODcwMWZlNTMwZTk4OGUxYTg0N2Q2MTA3NmM1MGI0ODlhMDRlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.7.2",
-    "at": "2026-10-23T01:52:10.637Z"
+    "at": "2026-10-23T02:37:02.452Z"
   }
 }

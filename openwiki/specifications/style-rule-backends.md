@@ -9,10 +9,11 @@ openwiki:
   source_paths: [src/style/shared.rs, src/style/swift.rs, src/style/semantic.rs]
   symbols: [STYLE_RULE_IDS]
   invariants: [Each registered ID has one documented primary backend classification.]
-verified:
-  - by: openwiki/0.7.2
-    at: 2026-10-23T01:52:10.637Z
 sources:
+  - id: openwiki-source-8aff92b86297b651075f02aa
+    resource: repo://src/style/imports/aliases.rs
+  - id: openwiki-source-1b7a09fff186f87a9f892295
+    resource: repo://src/style/imports/analysis.rs
   - id: openwiki-source-8bafbb1f268d9f7b6c45513e
     resource: repo://src/style/quality.rs
   - id: openwiki-source-adcb383dccd0ff7b6608b41c
@@ -23,7 +24,14 @@ sources:
     resource: repo://src/style/swift.rs
   - id: openwiki-source-ddd1dd2ef043c2cd534ba33e
     resource: repo://src/style/tests/rules.rs
-generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
+  - id: openwiki-source-18ddc34d07fdcb8d65c2689c
+    resource: repo://src/style/types/renames.rs
+  - id: openwiki-source-e645da4f9c4a0035b94904d8
+    resource: repo://tests/type_alias_rename.rs
+generated: { by: "codex", at: "2026-10-23T02:37:02.452Z" }
+verified:
+  - by: openwiki/0.7.2
+    at: 2026-10-23T02:37:02.452Z
 ---
 
 # Style Rule Backend Classification
@@ -59,3 +67,9 @@ generated: { by: "codex", at: "2026-10-23T01:52:10.637Z" }
 Update this list whenever `STYLE_RULE_IDS` or a rule's primary evidence source changes. Validate with the focused family tests and the shared all-target test when registration or dispatch changes.
 
 `rules.rs` owns Rust dispatch. Numeric rules use a single syntax-token pass for ordinary literals and macro token trees. The registry has 36 Rust IDs and six Swift IDs. Serde default attributes are preserved and have no dedicated active rule. Import policy is distributed across `src/style/imports/`, while compiler validation remains in `semantic.rs`.
+
+## Binding and validation scope
+
+The AST classification describes the primary detector and edit source. `TYPE-001` uses module-qualified type bindings, and import policy reserves conflicting generic parameter names. These static checks are not a complete compiler name resolver. Ambiguous or unsupported transformations stay manual or enter compiler-backed recovery.
+
+Cargo validates the selected build configuration after binding changes. Runtime-output regressions cover namespace collisions and generic shadows that can still compile with changed behavior. Additional feature configurations and runtime contracts require their own validation.

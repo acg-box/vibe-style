@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:356b8e39c5ba1e69fed78b447ffc030e6748b12e476d8da6b83ce5a5466d5b1b",
+  "pageVersion": "sha256:98a6669b1f472586306e8aa31e109c3f4d3f3c6973b7fe079298bfe780b9b54e",
   "claims": [
     {
       "id": "claim_98e02a371a2e4f15899fe8ae25c58bcc",
@@ -36,17 +36,39 @@
         },
         {
           "resource": "repo://src/style.rs",
-          "version": "repo-file-v1:sha256:f579b1d6cf1ecca0f5be5579e105c2bf57ba2630840dfee0ea8224cbce3766a9"
+          "version": "repo-file-v1:sha256:74d615190661a3b7248e2e22511bf7274da9c0b294061af7233832d649a2bfe0"
         },
         {
-          "resource": "repo://src/style/engine.rs#L1279-L1312",
+          "resource": "repo://src/style/engine.rs#L1218-L1251",
           "version": "repo-lines-v1:sha256:8e981a4cde531394e455015ae88c9c1ea71116f33b1066ad7596c49677264008:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0YzIzOGUzZmYzNWE4MTYxZDE4Y2VmMDhmNzU0MWFmZTIyYjRlMmY4MzFlNTM2YTMyMTA3MTJkOTAyMDNlYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQyYjI1YjhiMjdhNTQzOTBlMDk1ODI1ZGU5MmMwOWQ3MGRiOWI4NWQwODJlZDBkZjdmZDIxNGMzNDc2ZWZlZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a72725e333534812bc532c4a6b20870f",
+      "statement": "Current code routing includes shared AST import bindings in syntax.rs, declared module identity in module_tree.rs, and scoped type-alias planning in types/renames.rs.",
+      "evidence": [
+        {
+          "resource": "repo://src/style.rs",
+          "version": "repo-file-v1:sha256:74d615190661a3b7248e2e22511bf7274da9c0b294061af7233832d649a2bfe0"
+        },
+        {
+          "resource": "repo://src/style/module_tree.rs#L14-L45",
+          "version": "repo-lines-v1:sha256:90f36fb42d2e035e7865f86b4e97d9674028d7500f73edc70048caf1ae6ed717:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE4ZDFmNzhlZjZjN2FjMDhkMTRkYzIwNzE5NjEyY2QwYTdjNGE0MTJkYmE0M2Y0YjhhZTdmNzM0ZGZkMjM5OTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhYTAyZjZiZWEyNWFjYTgxYjE0MjQwZDU2ZmIwYzExZTVlYmUyYWQ4MmI5ZDc0MWM2NWUyNzc1OTc5YjIxNmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhhZTJkODZlY2E2NzhmYzMxZDMzODJjZTMzZTFmY2U0NzY2MDVhZDcwNWQyNzU1Y2ZjOWM4ZTRiYWYwNDhhODgifQ"
+        },
+        {
+          "resource": "repo://src/style/syntax.rs#L6-L62",
+          "version": "repo-lines-v1:sha256:c94ad5118fc61241c0a7d8000ca416f0394890582747ac9e8094774ffbe25f87:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMwMWNiOWE1OWRhNDg2ZTc4YjIzYjJhODg4NGVjZWRkOTMzN2U3MjFhZDRkOWZkODE4OGYyZTk3ZTlmY2NiOWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIyYTUwNmE5NzMyNjlmOTNhZTIzOTdhOWQ3ZmIxMGYzMzI2MGM1ODAwNWViOTYzNmRkNWZjZWQwN2Y2ZjMzYmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjZjY2M2E5OGRkNTIzODRiM2MyY2JiZDQyNGM5ZTlmZDEzY2Y0MGYzNDYyZTRjZDI4OThlYWNhNjY0OWM3YjIifQ"
+        },
+        {
+          "resource": "repo://src/style/types/renames.rs#L26-L100",
+          "version": "repo-lines-v1:sha256:620be85cb46b0dd188fb01773feb367d5c96d5c5e267fc2f7c5d74c7939abb96:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg2YjQyMjdkMjNhYzQ0ZWNjNGI2ODg2YzIzNWI4OTFkNTliMGUwYjUzOTMyNTI4YTlmYWE2ZmEyYjlmZjRhYTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2ODIxYTgzZTQ5MTVjMWNmNGZhZGRjMTAwMWUwMGJmODM0NzVkNWM4OGEwNDg2ZDdmNzU0NDA5YzVmZDY1YWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFjZTQzZDkxNTc3ZGEwOTJiMmYxNzg0MmIyMTQ5ZjIzMjZmMTZjMjc0YjcwMzhmMTU5MzIwYTBmYzRkMmVkZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVlZDcyOTI4ODczZGI1MWE2YjA4MDJjODE1YzA4OWZmZjY5NjkxNjk5NGU4MDhlZjFmY2FhYTZlMWUwZmE3M2IifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.7.2",
-    "at": "2026-10-23T01:52:10.637Z"
+    "at": "2026-10-23T02:37:02.452Z"
   }
 }
