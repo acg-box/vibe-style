@@ -4,7 +4,7 @@ use std::{
 };
 
 use ra_ap_syntax::{
-	AstNode,
+	AstNode, SyntaxKind,
 	ast::{BinExpr, IfExpr, MatchArm},
 };
 use regex::Regex;
@@ -127,6 +127,7 @@ impl StatementPair {
 }
 
 struct VerticalSpacingTraversal {
+	code_lines: Vec<String>,
 	visited_blocks: HashSet<(usize, usize)>,
 	continuation_boundaries: HashSet<(usize, usize)>,
 }
@@ -183,7 +184,11 @@ impl VerticalSpacingTraversal {
 			))
 			.collect();
 
-		Self { visited_blocks: HashSet::new(), continuation_boundaries }
+		Self {
+			code_lines: masked_code_lines(ctx),
+			visited_blocks: HashSet::new(),
+			continuation_boundaries,
+		}
 	}
 }
 
@@ -208,6 +213,32 @@ pub(crate) fn check_vertical_spacing(
 	}
 }
 
+fn masked_code_lines(ctx: &FileContext) -> Vec<String> {
+	let mut masked = ctx.text.as_bytes().to_vec();
+
+	for token in
+		ctx.source_file.syntax().descendants_with_tokens().filter_map(|part| part.into_token())
+	{
+		if !shared::is_literal_text_kind(token.kind()) && token.kind() != SyntaxKind::COMMENT {
+			continue;
+		}
+
+		let range = token.text_range();
+
+		for byte in &mut masked[usize::from(range.start())..usize::from(range.end())] {
+			if !matches!(*byte, b'\n' | b'\r') {
+				*byte = b' ';
+			}
+		}
+	}
+
+	String::from_utf8(masked)
+		.expect("Decode masked Rust source with complete UTF-8 token ranges.")
+		.lines()
+		.map(str::to_owned)
+		.collect()
+}
+
 fn check_vertical_spacing_block(
 	ctx: &FileContext,
 	violations: &mut Vec<Violation>,
@@ -221,8 +252,13 @@ fn check_vertical_spacing_block(
 		return;
 	}
 
-	let statements =
-		extract_top_level_statements(&ctx.lines, &traversal.continuation_boundaries, start, end);
+	let statements = extract_top_level_statements(
+		&ctx.lines,
+		&traversal.code_lines,
+		&traversal.continuation_boundaries,
+		start,
+		end,
+	);
 
 	if statements.is_empty() {
 		return;
@@ -520,12 +556,12 @@ fn recurse_spacing_child_blocks(
 ) {
 	for (stmt_start, stmt_end, _) in statements {
 		for (child_start, child_end) in
-			extract_top_level_brace_blocks_in_span(&ctx.lines, *stmt_start, *stmt_end)
+			extract_top_level_brace_blocks_in_span(&traversal.code_lines, *stmt_start, *stmt_end)
 		{
 			if child_start == start && child_end == end {
 				continue;
 			}
-			if is_data_like_brace_block(&ctx.lines, child_start, child_end) {
+			if is_data_like_brace_block(&traversal.code_lines, child_start, child_end) {
 				continue;
 			}
 
@@ -1055,19 +1091,18 @@ fn classify_statement_type(statement_lines: &[String]) -> String {
 
 fn extract_top_level_statements(
 	lines: &[String],
+	code_lines: &[String],
 	continuation_boundaries: &HashSet<(usize, usize)>,
 	fn_start: usize,
 	fn_end: usize,
 ) -> Vec<(usize, usize, String)> {
 	fn next_significant_line(
-		lines: &[String],
-		mut mask_state: CodeMaskState,
+		code_lines: &[String],
 		from_idx: usize,
 		fn_end: usize,
 	) -> Option<(usize, String)> {
-		for (idx, line) in lines.iter().enumerate().take(fn_end).skip(from_idx + 1) {
-			let code = mask_code_line(line, &mut mask_state);
-			let stripped = code.trim();
+		for (idx, line) in code_lines.iter().enumerate().take(fn_end).skip(from_idx + 1) {
+			let stripped = line.trim();
 
 			if stripped.is_empty() {
 				continue;
@@ -1084,11 +1119,9 @@ fn extract_top_level_statements(
 	let mut paren_depth = 0_i32;
 	let mut bracket_depth = 0_i32;
 	let mut current_start: Option<usize> = None;
-	let mut mask_state = CodeMaskState::default();
 
 	for idx in (fn_start + 1)..fn_end {
-		let raw_line = &lines[idx];
-		let code = mask_code_line(raw_line, &mut mask_state);
+		let code = &code_lines[idx];
 		let stripped = code.trim();
 
 		if current_start.is_none()
@@ -1117,7 +1150,7 @@ fn extract_top_level_statements(
 			continue;
 		};
 		let stripped_code = code.trim();
-		let next_significant = next_significant_line(lines, mask_state, idx, fn_end);
+		let next_significant = next_significant_line(code_lines, idx, fn_end);
 		let continues_method_chain =
 			next_significant.as_ref().is_some_and(|(_, stripped)| stripped.starts_with('.'));
 		let continues_syntax_boundary = next_significant
@@ -1225,12 +1258,9 @@ fn extract_top_level_brace_blocks_in_span(
 	let mut blocks = Vec::new();
 	let mut depth = 0_i32;
 	let mut current_start: Option<usize> = None;
-	let mut mask_state = CodeMaskState::default();
 
 	for (idx, line) in lines.iter().enumerate().take(span_end + 1).skip(span_start) {
-		let code = mask_code_line(line, &mut mask_state);
-
-		for ch in code.chars() {
+		for ch in line.chars() {
 			if ch == '{' {
 				depth += 1;
 
@@ -1256,11 +1286,9 @@ fn extract_top_level_brace_blocks_in_span(
 
 fn is_data_like_brace_block(lines: &[String], block_start: usize, block_end: usize) -> bool {
 	let mut content = Vec::new();
-	let mut mask_state = CodeMaskState::default();
 
 	for line in lines.iter().take(block_end).skip(block_start + 1) {
-		let code = mask_code_line(line, &mut mask_state);
-		let code = code.trim().to_owned();
+		let code = line.trim().to_owned();
 
 		if code.is_empty() || code.starts_with('#') {
 			continue;

@@ -1,9 +1,9 @@
 use std::{borrow::Cow, collections::HashSet};
 
 use color_eyre::{Result, eyre};
-use ra_ap_syntax::{AstNode, Edition, SourceFile, SyntaxKind, ast::Use};
+use ra_ap_syntax::{AstNode, Edition, SourceFile, ast::Use};
 
-use crate::style::shared::Edit;
+use crate::style::shared::{self, Edit};
 
 pub(crate) fn apply_edits(text: &mut String, mut edits: Vec<Edit>) -> Result<usize> {
 	if edits.is_empty() {
@@ -163,16 +163,7 @@ fn literal_ranges(text: &str) -> Vec<(usize, usize)> {
 		.syntax()
 		.descendants_with_tokens()
 		.filter_map(|part| part.into_token())
-		.filter(|token| {
-			matches!(
-				token.kind(),
-				SyntaxKind::STRING
-					| SyntaxKind::BYTE_STRING
-					| SyntaxKind::C_STRING
-					| SyntaxKind::CHAR
-					| SyntaxKind::BYTE
-			)
-		})
+		.filter(|token| shared::is_literal_text_kind(token.kind()))
 		.map(|token| {
 			let range = token.text_range();
 

@@ -1,6 +1,63 @@
 use std::path::Path;
 
-use crate::style::{engine, fixes, rules, shared};
+use crate::style::{engine, fixes, rules, shared, spacing};
+
+#[test]
+fn spacing_keeps_macro_literal_contents_and_checks_surrounding_rust() {
+	for literal in [
+		"r\"\nif (true) {}\nconst value = 1;\n\"",
+		"r#\"\nif (true) {}\nconst value = \"雪\";\n\"#",
+		"r##\"\nif (true) {}\nconst value = \"#;\n\"##",
+		"br#\"\nif (true) {}\nconst value = 1;\n\"#",
+		"cr#\"\nif (true) {}\nconst value = 1;\n\"#",
+		"\"\nif (true) {}\nconst value = 1;\n\"",
+		"b\"\nif (true) {}\nconst value = 1;\n\"",
+		"c\"\nif (true) {}\nconst value = 1;\n\"",
+	] {
+		let text = format!(
+			"fn sample() {{\n\tlet _value = envelope!({{\"input\": {literal}}});\n\tif ready() {{}}\n\n\tfinish();\n}}\n"
+		);
+		let ctx = shared::read_file_context_from_text(Path::new("macro_literal.rs"), text.clone())
+			.expect("Read the macro literal fixture.")
+			.expect("Get the macro literal fixture context.");
+		let expected_line = text.lines().position(|line| line.contains("if ready()")).unwrap() + 1;
+		let mut violations = Vec::new();
+		let mut edits = Vec::new();
+
+		spacing::check_vertical_spacing(&ctx, &mut violations, &mut edits, true);
+
+		assert_eq!(violations.len(), 1, "{literal}: {violations:?}");
+		assert_eq!(violations[0].rule, "RUST-STYLE-SPACE-003");
+		assert_eq!(violations[0].line, expected_line);
+
+		let mut rewritten = text.clone();
+
+		assert_eq!(
+			fixes::apply_edits(&mut rewritten, edits).expect("Apply the outer Rust spacing edit."),
+			1
+		);
+		assert_eq!(rewritten, text.replace("\n\tif ready()", "\n\n\tif ready()"), "{literal}");
+	}
+}
+
+#[test]
+fn spacing_checks_real_rust_inside_macro_braces() {
+	let text = "fn sample() {\n\trun!({\n\t\tlet value = 1;\n\t\tif value > 0 {}\n\t\tfinish();\n\t});\n}\n";
+	let ctx = shared::read_file_context_from_text(Path::new("macro_code.rs"), text.to_owned())
+		.expect("Read the Rust macro fixture.")
+		.expect("Get the Rust macro fixture context.");
+	let mut violations = Vec::new();
+	let mut edits = Vec::new();
+
+	spacing::check_vertical_spacing(&ctx, &mut violations, &mut edits, true);
+
+	assert!(
+		violations
+			.iter()
+			.any(|violation| violation.rule == "RUST-STYLE-SPACE-003" && violation.line == 4)
+	);
+	assert!(edits.iter().any(|edit| edit.rule == "RUST-STYLE-SPACE-003"));
+}
 
 #[test]
 fn space003_fix_removes_blank_lines_within_same_statement_type() {

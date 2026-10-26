@@ -7,7 +7,7 @@ use std::{
 
 use color_eyre::Result;
 use ra_ap_syntax::{
-	AstNode, Edition, SourceFile, TextRange,
+	AstNode, Edition, SourceFile, SyntaxKind, TextRange,
 	ast::{self, HasAttrs, HasModuleItem, HasName, HasVisibility},
 };
 use regex::Regex;
@@ -173,6 +173,17 @@ pub(crate) enum TopKind {
 	Impl,
 	Fn,
 	Other,
+}
+
+pub(crate) fn is_literal_text_kind(kind: SyntaxKind) -> bool {
+	matches!(
+		kind,
+		SyntaxKind::STRING
+			| SyntaxKind::BYTE_STRING
+			| SyntaxKind::C_STRING
+			| SyntaxKind::CHAR
+			| SyntaxKind::BYTE
+	)
 }
 
 pub(crate) fn push_violation(

@@ -324,17 +324,15 @@ fn emit_run_fix(
 		return;
 	};
 
-	if !run_is_reorderable_without_binding_errors(run) {
-		// The project convention is to only enforce this rule when the `let` bindings can be
-		// reordered without changing binding dependencies. Otherwise, treat the run as compliant.
+	// A compiler check cannot prove evaluation, failure, drop order, or shadowing equivalence.
+	// Require the same initializer-order proof for diagnostics and edits.
+	if !run_is_reorderable_without_binding_errors(run)
+		|| !run_preserves_initializer_order_semantics(run)
+	{
 		return;
 	}
 
-	// Compiler validation cannot prove evaluation, failure, drop order, or shadowing equivalence.
-	// Report these runs, but only offer an edit when unique bindings with literal initializer pairs
-	// may cross.
-	let preserves_initializer_order = run_preserves_initializer_order_semantics(run);
-	let can_edit = preserves_initializer_order && can_rewrite_run(ctx, run);
+	let can_edit = can_rewrite_run(ctx, run);
 
 	shared::push_violation(violations, ctx, offending_line, RULE_ID, MESSAGE, can_edit);
 
@@ -475,7 +473,7 @@ fn demo(scored: Vec<u8>) -> usize {
 	}
 
 	#[test]
-	fn side_effecting_initializers_are_not_reordered() {
+	fn side_effecting_initializers_are_not_reported_or_reordered() {
 		let text = r#"
 fn record(events: &mut Vec<&'static str>, event: &'static str) -> usize {
 	events.push(event);
@@ -501,17 +499,12 @@ fn demo(events: &mut Vec<&'static str>) {
 
 		bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, true);
 
-		let violation = violations
-			.iter()
-			.find(|violation| violation.rule == super::RULE_ID)
-			.expect("report unsafe initializer order");
-
-		assert!(!violation.fixable);
+		assert!(violations.iter().all(|violation| violation.rule != super::RULE_ID));
 		assert!(edits.iter().all(|edit| edit.rule != super::RULE_ID));
 	}
 
 	#[test]
-	fn fallible_initializers_are_not_reordered() {
+	fn fallible_initializers_are_not_reported_or_reordered() {
 		let text = r#"
 fn demo() -> Result<(), String> {
 	let mut scratch = create_scratch()?;
@@ -533,17 +526,12 @@ fn demo() -> Result<(), String> {
 
 		bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, true);
 
-		let violation = violations
-			.iter()
-			.find(|violation| violation.rule == super::RULE_ID)
-			.expect("report unsafe initializer order");
-
-		assert!(!violation.fixable);
+		assert!(violations.iter().all(|violation| violation.rule != super::RULE_ID));
 		assert!(edits.iter().all(|edit| edit.rule != super::RULE_ID));
 	}
 
 	#[test]
-	fn shadowed_literal_bindings_are_not_reordered() {
+	fn shadowed_literal_bindings_are_not_reported_or_reordered() {
 		let text = r#"
 fn demo() -> usize {
 	let mut value = 1;
@@ -563,12 +551,34 @@ fn demo() -> usize {
 
 		bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, true);
 
-		let violation = violations
-			.iter()
-			.find(|violation| violation.rule == super::RULE_ID)
-			.expect("report shadowing-sensitive reorder");
-
-		assert!(!violation.fixable);
+		assert!(violations.iter().all(|violation| violation.rule != super::RULE_ID));
 		assert!(edits.iter().all(|edit| edit.rule != super::RULE_ID));
+	}
+
+	#[test]
+	fn service_start_and_poll_deadlines_preserve_initializer_order_without_diagnostics() {
+		for body in [
+			"let mut server = bind().await;\nlet client = DoctorClient::new(profile);\nlet before = client.query().await;\nserver.shutdown().await;",
+			"let mut status = client.start().await;\nlet deadline = Instant::now() + Duration::from_secs(30);\nstatus.poll(deadline).await;",
+			"let mut stopped = client.stop().await;\nlet deadline = Instant::now() + Duration::from_secs(10);\nstopped.poll(deadline).await;",
+		] {
+			let text = format!("async fn sample() {{\n{body}\n}}\n");
+			let ctx = shared::read_file_context_from_text(Path::new("ordered_requests.rs"), text)
+				.expect("Read the request-order fixture.")
+				.expect("Get the request-order fixture context.");
+
+			for emit_edits in [false, true] {
+				let mut violations = Vec::new();
+				let mut edits = Vec::new();
+
+				bindings::check_let_mut_reorder(&ctx, &mut violations, &mut edits, emit_edits);
+
+				assert!(
+					violations.iter().all(|violation| violation.rule != super::RULE_ID),
+					"{body}"
+				);
+				assert!(edits.iter().all(|edit| edit.rule != super::RULE_ID), "{body}");
+			}
+		}
 	}
 }
