@@ -226,7 +226,7 @@ Use the GitHub Action to install a release and run a read-only check:
 
 ```yaml
 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-- uses: acg-box/vibe-style@582e6587e4a2c5a9282de0277c7badf8a44f723b # v0.2.8
+- uses: acg-box/vibe-style@dea96c3de39354f1b42da1a52a37812e525c6f52 # v0.2.9
   with:
     language: rust
     workspace: true
