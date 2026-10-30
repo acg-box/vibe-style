@@ -40,7 +40,7 @@ clap           = { version = "~4.6", features = ["derive"] }
 color-eyre     = { version = "~0.6" }
 # rust-analyzer releases can break APIs in each 0.0.x release.
 # Keep unicode-ident at 1.0.24 in Cargo.lock while this lexer uses Unicode 17.
-ra_ap_syntax = { version = "=0.0.359" }
+ra_ap_syntax = { version = "=0.0.360" }
 rayon        = { version = "~1.12" }
 regex        = { version = "~1.13" }
 serde_json   = { version = "~1.0" }
